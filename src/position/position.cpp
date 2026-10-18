@@ -18,6 +18,9 @@ Position::Position(const VariantSpec& v)
     cellFields_[i].assign(v.dims.cellCount(), v.cellFields[i].defaultValue);
   }
   side_ = v.startSideToMove;
+  // Room for the marks a move or two leaves, so playing never allocates for them.
+  marks_.reserve(16);
+  markScratch_.reserve(16);
   hash_ = computeHash();
 }
 
@@ -236,7 +239,8 @@ std::uint64_t Position::computeHash() const {
 
 void Position::make(const Move& m, Undo& u) {
   u.captured = Piece{};
-  u.marksBefore.clear();
+  u.marksInlineCount = 0;
+  u.marksSpilled = false;
   u.castleRightsBefore = castleRights_;
   u.halfmoveBefore = halfmove_;
   u.hashBefore = hash_;
@@ -304,10 +308,10 @@ void Position::make(const Move& m, Undo& u) {
       has(m.flags, MoveFlag::LeavesEnPassant) ||
       (m.atomIndex != 0xFF && !v_->pieces[mover.type].atoms[m.atomIndex].marks.empty());
   if (!marks_.empty() || leavesMarks) {
-    u.marksBefore = marks_;
+    u.saveMarks(marks_);
     hashMarks(marks_);
-    std::vector<Mark> kept;
-    kept.reserve(marks_.size() + 2);
+    std::vector<Mark>& kept = markScratch_;
+    kept.clear();
     for (Mark mk : marks_) {
       if (mk.ttl != 0) {
         --mk.ttl;
@@ -349,7 +353,7 @@ void Position::make(const Move& m, Undo& u) {
         }
       }
     }
-    marks_ = std::move(kept);
+    marks_.swap(kept);
     hashMarks(marks_);
     rebuildBlocked();
   }
@@ -404,8 +408,8 @@ void Position::unmake(const Move& m, const Undo& u) {
 
   // Restoring these directly (rather than re-deriving) is what makes unmake
   // exact: the hash is restored, not recomputed, so a mismatch is detectable.
-  if (!u.marksBefore.empty() || !marks_.empty()) {
-    marks_ = u.marksBefore;
+  if (u.hadMarks() || !marks_.empty()) {
+    u.loadMarks(marks_);
     rebuildBlocked();
   }
   castleRights_ = u.castleRightsBefore;

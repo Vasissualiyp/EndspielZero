@@ -112,6 +112,7 @@ class Position {
   BitWords occAll_;
   Color side_{Color::White};
   std::vector<Mark> marks_;
+  std::vector<Mark> markScratch_;  ///< the next marks, built here so make() does not allocate
   BitWords blocked_;
   bool anyBlocked_{false};
   void rebuildBlocked();

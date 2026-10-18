@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -108,8 +109,33 @@ struct Mark {
 
 struct Undo {
   Piece captured{};
-  /// The marks before the move, restored exactly by unmake.
-  std::vector<Mark> marksBefore;
+  /// The marks before the move, restored exactly by unmake. A handful (an en-passant target)
+  /// live inline so the hot loop allocates nothing; a variant that leaves many marks spills
+  /// to the heap.
+  static constexpr std::size_t kInlineMarks = 4;
+  std::array<Mark, kInlineMarks> marksInline{};
+  std::uint8_t marksInlineCount{0};
+  bool marksSpilled{false};
+  std::vector<Mark> marksSpill;
+  void saveMarks(const std::vector<Mark>& marks) {
+    marksSpill.clear();
+    marksSpilled = marks.size() > kInlineMarks;
+    if (marksSpilled) {
+      marksSpill = marks;
+      marksInlineCount = 0;
+    } else {
+      marksInlineCount = static_cast<std::uint8_t>(marks.size());
+      for (std::size_t i = 0; i < marks.size(); ++i) marksInline[i] = marks[i];
+    }
+  }
+  [[nodiscard]] bool hadMarks() const { return marksSpilled || marksInlineCount != 0; }
+  void loadMarks(std::vector<Mark>& marks) const {
+    if (marksSpilled) {
+      marks = marksSpill;
+    } else {
+      marks.assign(marksInline.begin(), marksInline.begin() + marksInlineCount);
+    }
+  }
   std::uint8_t castleRightsBefore{0};
   std::int32_t halfmoveBefore{0};
   std::uint64_t hashBefore{0};

@@ -246,13 +246,18 @@ void MoveGen::generateCompounds(const Position& p, Color side, MoveList& out) co
 
       // Walk the mover's line, collecting the cells, until the first piece. That piece is
       // the partner: found, never named, so no coordinate is written into the rule.
-      std::vector<CellId> cells;
+      // The line the mover walks, on the stack: generation allocates nothing. A line longer
+      // than this holds no compound move (castling is a few cells).
+      constexpr std::size_t kLine = 128;
+      CellId cells[kLine];
+      std::size_t nCells = 0;
       Walker w = geom.start(from, dir);
       CellId partnerCell = kInvalidCell;
       for (std::uint32_t k = 1; k <= rayCap_; ++k) {
         if (!geom.step(w)) break;
         if (rayClosed(w, from, dir)) break;
-        cells.push_back(w.cell);
+        if (nCells == kLine) break;
+        cells[nCells++] = w.cell;
         if (!p.isEmpty(w.cell)) {
           partnerCell = w.cell;
           break;
@@ -260,7 +265,7 @@ void MoveGen::generateCompounds(const Position& p, Color side, MoveList& out) co
       }
       // The partner must lie beyond where the mover lands, so every cell it crosses and the
       // one it lands on is empty.
-      if (partnerCell == kInvalidCell || cells.size() <= cm.steps) return;
+      if (partnerCell == kInvalidCell || nCells <= cm.steps) return;
       const Piece partner = p.at(partnerCell);
       if (partner.colorOf() != side) return;
       if (std::find(cm.partners.begin(), cm.partners.end(), partner.type) == cm.partners.end()) return;
@@ -331,9 +336,7 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
   // A hopper's threat depends on a hurdle between it and the target, and a glued
   // board can make the backward walk a non-inverse of the forward one; either way
   // the scan is the only correct answer.
-  if (hasHoppers_ || !v_->geom.isBox() || v_->hasOffsetCaptures) {
-    return isAttackedByForwardScan(p, target, by);
-  }
+  if (hasHoppers_ || !v_->geom.isBox()) return isAttackedByForwardScan(p, target, by);
 
   const Geometry& geom = v_->geom;
 
@@ -342,6 +345,21 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
     for (const MoveAtom& atom : def.atoms) {
       if (atom.capture == CapturePolicy::Cannot) continue;  // cannot threaten anything
       const std::size_t ci = static_cast<std::size_t>(by);
+      // A move that captures at an offset does not threaten the cell it lands on but the
+      // one beside it: to threaten `target` it must land on the cell that offset away,
+      // which must be empty (and carry the opponent's mark, for en passant). The backward
+      // search then starts from there.
+      CellId anchor = target;
+      if (!atom.captureAt.empty()) {
+        Walker lw = geom.start(target, v_->dirTable[atom.captureDir[ci]].negated());
+        if (!geom.step(lw)) continue;
+        anchor = lw.cell;
+        if (!p.isEmpty(anchor)) continue;
+        if (atom.needsMark >= 0) {
+          const Mark* mk = p.markAt(anchor, static_cast<std::uint16_t>(atom.needsMark));
+          if (mk == nullptr || mk->owner == static_cast<std::uint8_t>(by)) continue;
+        }
+      }
       // Walk the threat span, not the move span: on a seam that reverses
       // orientation a forward direction is carried out of the move span, so
       // restricting the search to it would miss the threat (MoveAtom::threatBegin).
@@ -349,11 +367,11 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
         // Walk away from the target along the reverse of the attacking direction;
         // a piece found there attacks the target along it.
         const Direction startDir = v_->dirTable[di].negated();
-        Walker w = geom.start(target, startDir);
+        Walker w = geom.start(anchor, startDir);
         const std::uint32_t steps = atom.maxK == kUnlimited ? rayCap_ : atom.maxK;
         for (std::uint32_t k = 1; k <= steps; ++k) {
           if (!geom.step(w)) break;
-          if (rayClosed(w, target, startDir)) break;
+          if (rayClosed(w, anchor, startDir)) break;
           const Piece cand = p.at(w.cell);
           if (cand.empty()) continue;
           bool matches = cand.type == static_cast<PieceTypeId>(ti) &&
