@@ -181,7 +181,7 @@ std::vector<MoveAtom> Editor::bundleAtoms(std::string_view bundle, std::size_t b
     out.push_back(atom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true));
     MoveAtom twice = atom({1}, 2, MoveMode::Slide, CapturePolicy::Cannot, true);
     twice.minK = 2;
-    twice.fromRegion[static_cast<std::size_t>(Color::White)] = Region{orientAxis, 1};
+    twice.unmoved = true;
     twice.leavesEnPassant = true;
     out.push_back(twice);
     out.push_back(atom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true));

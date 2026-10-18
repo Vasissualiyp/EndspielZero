@@ -64,8 +64,7 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   dbl.oriented = true;
   dbl.capture = CapturePolicy::Cannot;
   dbl.leavesEnPassant = true;
-  dbl.fromRegion[static_cast<std::size_t>(Color::White)] = Region{kRankAxis, 1};
-  dbl.fromRegion[static_cast<std::size_t>(Color::Black)] = Region{kRankAxis, 6};
+  dbl.unmoved = true;
 
   MoveAtom pawnCapture = atom({1, 1}, 1, MoveMode::Leap);
   pawnCapture.oriented = true;

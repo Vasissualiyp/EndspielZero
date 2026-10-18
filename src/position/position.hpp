@@ -50,6 +50,9 @@ class Position {
   void setEpTarget(CellId target, CellId victim = kInvalidCell);
   void setCastleRights(std::uint8_t mask);
   void setClocks(std::int32_t halfmove, std::int32_t fullmove);
+  /// Set or clear the moved bit of the piece on a cell (setup, e.g. reading FEN-N). The hash
+  /// follows. A cell with no piece, or a type nothing asks "has it moved?" about, is left alone.
+  void setMoved(CellId c, bool moved);
 
   // ---- custom fields -------------------------------------------------------
   [[nodiscard]] std::int32_t pieceField(int index, CellId c) const {

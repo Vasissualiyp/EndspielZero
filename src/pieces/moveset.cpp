@@ -582,12 +582,14 @@ class Evaluator {
         if (ctx_.orientAxis < 0) fail_at(f, "'fromrank' needs the variant to declare an orientation axis");
         atom.fromRegion[static_cast<std::size_t>(Color::White)] =
             Region{ctx_.orientAxis, static_cast<std::int16_t>(rank)};
+      } else if (f.text == "unmoved") {
+        atom.unmoved = true;
       } else if (f.text == "epmark") {
         atom.leavesEnPassant = true;
       } else {
         fail_at(f, "unknown word '" + f.text +
                        "' after a move (known: slide leap hop may must cannot flip noflip "
-                       "forward positive negative both)");
+                       "forward unmoved positive negative both)");
       }
     }
 
@@ -689,6 +691,7 @@ std::string printMoveset(const std::vector<MoveAtom>& atoms,
     if (a.fromRegion[static_cast<std::size_t>(Color::White)].active()) {
       out += " fromrank " + std::to_string(a.fromRegion[static_cast<std::size_t>(Color::White)].value);
     }
+    if (a.unmoved) out += " unmoved";
     if (a.leavesEnPassant) out += " epmark";
   }
   return out;

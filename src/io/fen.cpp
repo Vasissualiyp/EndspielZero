@@ -9,6 +9,23 @@
 #include "io/notation.hpp"
 
 namespace cb {
+namespace {
+
+/// Whether a piece of this kind stands where the variant's start position put one. That is
+/// FEN-N's default for "has it moved": a pawn on its home square is unmoved without anyone
+/// saying so, which is exactly what a standard FEN assumes.
+bool startsHere(const VariantSpec& v, CellId cell, PieceTypeId type, std::uint8_t color) {
+  for (const StartPiece& sp : v.start) {
+    if (v.dims.toCell(sp.at) == cell && sp.type == type &&
+        static_cast<std::uint8_t>(sp.color) == color) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 std::string toFen(const Position& p) {
   const VariantSpec& v = p.variant();
   const DimSpec& d = v.dims;
@@ -51,6 +68,22 @@ std::string toFen(const Position& p) {
   out << board << ' ' << (p.sideToMove() == Color::White ? 'w' : 'b') << ' ' << castling
       << ' ' << cellName(d, p.epTarget()) << ' ' << p.halfmoveClock() << ' '
       << p.fullmoveNumber();
+
+  // The unmoved pieces, only when they are not what the start position implies: a game
+  // that has gone the usual way writes the usual FEN, so nothing existing changes.
+  bool unusual = false;
+  std::string unmoved;
+  for (CellId c = 0; c < d.cellCount(); ++c) {
+    const Piece piece = p.at(c);
+    if (piece.empty() || !v.pieces[piece.type].tracksMoved) continue;
+    const bool isUnmoved = !piece.hasMoved();
+    if (isUnmoved != startsHere(v, c, piece.type, piece.color)) unusual = true;
+    if (isUnmoved) {
+      if (!unmoved.empty()) unmoved += ',';
+      unmoved += cellName(d, c);
+    }
+  }
+  if (unusual) out << ' ' << (unmoved.empty() ? "-" : unmoved);
   return out.str();
 }
 
@@ -174,6 +207,29 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
   if (fields.size() > 5)
     std::from_chars(fields[5].data(), fields[5].data() + fields[5].size(), fullmove);
   p.setClocks(halfmove, fullmove);
+
+  // ---- which pieces have moved ------------------------------------------------
+  // Default: a piece has moved unless it stands where the start position put one. An
+  // explicit field (cells, or "-") overrides that - it is how a position says exactly.
+  for (CellId c = 0; c < d.cellCount(); ++c) {
+    const Piece piece = p.at(c);
+    if (piece.empty() || !v.pieces[piece.type].tracksMoved) continue;
+    p.setMoved(c, !startsHere(v, c, piece.type, piece.color));
+  }
+  if (fields.size() > 6) {
+    for (CellId c = 0; c < d.cellCount(); ++c) p.setMoved(c, true);
+    if (fields[6] != "-") {
+      std::string cells = fields[6];
+      std::size_t at = 0;
+      while (at <= cells.size()) {
+        const std::size_t comma = std::min(cells.find(',', at), cells.size());
+        const auto cell = parseCell(d, cells.substr(at, comma - at));
+        if (!cell.has_value()) return fail(cell.error().code, cell.error().message);
+        p.setMoved(*cell, false);
+        at = comma + 1;
+      }
+    }
+  }
 
   return p;
 }

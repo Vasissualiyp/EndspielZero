@@ -155,6 +155,7 @@ Result<void> VariantSpec::finalize() {
         atom.minK = r.lo;
         atom.maxK = r.hi;
       }
+      if (atom.unmoved) p.tracksMoved = true;
       // A move whose direction is its own (oriented, pinned, exact, expanded) differs by
       // colour; a plain one is symmetric and both colours share a span.
       const bool sided = atom.oriented || atom.flip || atom.kind != MoveKind::Extrapolated ||

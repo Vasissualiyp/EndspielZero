@@ -118,6 +118,11 @@ struct MoveAtom {
   /// pawn's double step is expressed in a way that round-trips FEN: the
   /// condition is *where the pawn is*, not a hidden "has moved" bit.
   Region fromRegion[kNumColors]{};
+  /// Available only while the piece has never moved. The piece carries one built-in bit,
+  /// cleared where the start position puts it and set by the engine on its first move, so
+  /// "has this moved?" is a fact about the piece (stored, hashed, undone, shown in FEN-N)
+  /// and not about the rank it stands on. A pawn's double step, a castle.
+  bool unmoved{false};
   /// Passing over cells must leave an en-passant target behind (a double step).
   bool leavesEnPassant{false};
 

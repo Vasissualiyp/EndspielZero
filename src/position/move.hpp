@@ -88,6 +88,8 @@ struct Undo {
   std::uint8_t castleRightsBefore{0};
   std::int32_t halfmoveBefore{0};
   std::uint64_t hashBefore{0};
+  /// The mover's flags before the move (its moved bit), which unmake puts back.
+  std::uint8_t moverFlags{0};
   /// Cells a rule effect changed, with what stood there before.
   std::vector<std::pair<CellId, Piece>> cellRestores;
   std::vector<FieldChange> fieldChanges;

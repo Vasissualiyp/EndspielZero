@@ -432,6 +432,7 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                     lineOf(mnode));
       }
       atom.leavesEnPassant = (*mt)["leaves_en_passant"].value_or(false);
+      atom.unmoved = (*mt)["unmoved"].value_or(false);
       if (const auto home = (*mt)["from_rank"].value<std::int64_t>()) {
         if (v.orientationAxis < 0) {
           return fail(

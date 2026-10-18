@@ -54,6 +54,9 @@ struct PieceTypeDef {
   /// deterministic core and may not contain floating point.
   std::string shape;
   int heightPermille{0};
+  /// Computed by finalize(): some move of this piece needs `unmoved`, so the engine keeps
+  /// its moved bit. A piece nothing asks about is never tracked.
+  bool tracksMoved{false};
   /// An authored body and flat icon (M7.3), when the variant gives the piece them. Both
   /// are cosmetic and outside the variant's identity: changing how a bishop looks must
   /// not make a saved game unreplayable. Integer permille, like everything here.

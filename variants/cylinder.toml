@@ -56,7 +56,7 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "slide"
   capture = "cannot"
   forward = true
-  from_rank = 1
+  unmoved = true
   leaves_en_passant = true
 
   [[piece.move]]

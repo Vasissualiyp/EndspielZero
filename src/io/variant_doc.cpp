@@ -166,6 +166,7 @@ Result<std::vector<MoveAtom>> VariantDoc::pieceAtoms(std::string_view piece) con
                                   : CapturePolicy::May;
     a.oriented = (*mt)["forward"].value_or(false);
     a.leavesEnPassant = (*mt)["leaves_en_passant"].value_or(false);
+    a.unmoved = (*mt)["unmoved"].value_or(false);
 
     if (const auto home = (*mt)["from_rank"].value<std::int64_t>()) {
       if (orientAxis >= 0) {
@@ -210,6 +211,7 @@ Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
                    a.fromRegion[static_cast<std::size_t>(Color::White)].value));
     }
     if (a.leavesEnPassant) m.insert("leaves_en_passant", true);
+    if (a.unmoved) m.insert("unmoved", true);
     moves.push_back(std::move(m));
   }
   pt->insert_or_assign("move", std::move(moves));

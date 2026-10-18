@@ -155,6 +155,7 @@ std::string MoveAtom::toString() const {
   if (capture == CapturePolicy::Cannot) out += " no-capture";
   if (oriented) out += " forward";
   if (fromRegion[0].active()) out += " from-home";
+  if (unmoved) out += " unmoved";
   return out;
 }
 
@@ -164,7 +165,7 @@ bool operator==(const MoveAtom& a, const MoveAtom& b) {
          a.capture == b.capture && a.oriented == b.oriented &&
          a.fromRegion[0].axis == b.fromRegion[0].axis &&
          a.fromRegion[0].value == b.fromRegion[0].value &&
-         a.leavesEnPassant == b.leavesEnPassant;
+         a.leavesEnPassant == b.leavesEnPassant && a.unmoved == b.unmoved;
 }
 
 std::vector<Direction> expandAtom(const SmallVec<std::int16_t, kMaxDims>& mags,

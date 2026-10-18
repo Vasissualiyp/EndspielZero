@@ -53,6 +53,7 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
   const std::size_t ci = static_cast<std::size_t>(side);
   const Region& gate = atom.fromRegion[ci];
   if (gate.active() && !gate.contains(fromCoord)) return;
+  if (atom.unmoved && p.at(from).hasMoved()) return;
 
   const Geometry& geom = v_->geom;
   const std::uint32_t begin = atom.dirBegin[ci];
@@ -270,7 +271,8 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
           }
           if (matches) {
             const Region& gate = atom.fromRegion[ci];
-            if (!gate.active() || gate.contains(w.coord)) {
+            if ((!gate.active() || gate.contains(w.coord)) &&
+                !(atom.unmoved && cand.hasMoved())) {
               CB_COUNT(LegalityChecks);
               return true;
             }

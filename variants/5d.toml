@@ -82,7 +82,7 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "slide"
   capture = "cannot"
   forward = true
-  from_rank = 1
+  unmoved = true
 
   [[piece.move]]
   vector = [1, 1]

@@ -652,25 +652,7 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
     }
     // A double step is `min = max = 2` from the home rank, and it leaves a square behind
     // it that can be taken en passant: all three are properties of the one move.
-    const int orient = editor->orientationAxis();
-    if (orient >= 0) {
-      bool home = a.fromRegion[static_cast<std::size_t>(Color::White)].active();
-      if (ImGui::Checkbox("only from the home rank", &home)) {
-        a.fromRegion[static_cast<std::size_t>(Color::White)] =
-            home ? Region{orient, 1} : Region{};
-        a.fromRegion[static_cast<std::size_t>(Color::Black)] = Region{};
-        changed = true;
-      }
-      if (home) {
-        ImGui::SameLine();
-        int rank = a.fromRegion[static_cast<std::size_t>(Color::White)].value + 1;
-        if (stepper("rank", rank, 1, 9, t, scale_, px(26.0f))) {
-          a.fromRegion[static_cast<std::size_t>(Color::White)].value =
-              static_cast<std::int16_t>(rank - 1);
-          changed = true;
-        }
-      }
-    }
+    if (ImGui::Checkbox("only while the piece has never moved", &a.unmoved)) changed = true;
     if (ImGui::Checkbox("leaves an en passant square behind", &a.leavesEnPassant)) {
       changed = true;
     }

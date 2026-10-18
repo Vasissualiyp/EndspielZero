@@ -97,11 +97,13 @@ void Position::addPiece(CellId c, Piece p) {
   occ_[p.color].set(c);
   occAll_.set(c);
   hash_ ^= v_->zob.piece(c, pieceCode(p.type, p.colorOf()));
+  if (p.hasMoved()) hash_ ^= v_->zob.moved(c);
 }
 
 void Position::removePiece(CellId c) {
   const Piece p = cells_[c];
   hash_ ^= v_->zob.piece(c, pieceCode(p.type, p.colorOf()));
+  if (p.hasMoved()) hash_ ^= v_->zob.moved(c);
   cells_[c] = Piece{};
   occ_[p.color].clearBit(c);
   occAll_.clearBit(c);
@@ -136,6 +138,16 @@ void Position::setCastleRights(std::uint8_t mask) {
   hash_ ^= v_->zob.castleRights(castleRights_);
 }
 
+void Position::setMoved(CellId c, bool moved) {
+  const Piece p = cells_[c];
+  if (p.empty() || !v_->pieces[p.type].tracksMoved) return;
+  if (p.hasMoved() == moved) return;
+  removePiece(c);
+  addPiece(c, Piece{p.type, p.color,
+                    moved ? static_cast<std::uint8_t>(p.flags | kPieceMoved)
+                          : static_cast<std::uint8_t>(p.flags & ~kPieceMoved)});
+}
+
 void Position::setClocks(std::int32_t halfmove, std::int32_t fullmove) {
   halfmove_ = halfmove;
   fullmove_ = fullmove;
@@ -163,6 +175,7 @@ std::uint64_t Position::computeHash() const {
   for (CellId c = 0; c < cells_.size(); ++c) {
     const Piece p = cells_[c];
     if (!p.empty()) h ^= v_->zob.piece(c, pieceCode(p.type, p.colorOf()));
+    if (!p.empty() && p.hasMoved()) h ^= v_->zob.moved(c);
   }
   if (side_ == Color::Black) h ^= v_->zob.side();
   h ^= v_->zob.epTarget(ep_ == kInvalidCell ? cellCount() : ep_);
@@ -203,7 +216,13 @@ void Position::make(const Move& m, Undo& u) {
   removePiece(m.from);
   const PieceTypeId landing =
       has(m.flags, MoveFlag::Promotion) ? m.promoteTo : mover.type;
-  addPiece(m.to, Piece{landing, mover.color, mover.flags});
+  // The mover has now moved, if anything about its type cares.
+  u.moverFlags = mover.flags;
+  const std::uint8_t landedFlags =
+      v_->pieces[landing].tracksMoved
+          ? static_cast<std::uint8_t>(mover.flags | kPieceMoved)
+          : static_cast<std::uint8_t>(mover.flags & ~kPieceMoved);
+  addPiece(m.to, Piece{landing, mover.color, landedFlags});
 
   if (has(m.flags, MoveFlag::Castle)) {
     const CastleTemplate& ct = v_->castles[m.castleIndex];
@@ -276,7 +295,7 @@ void Position::unmake(const Move& m, const Undo& u) {
     return landed.type;
   }()
                                                                  : landed.type;
-  addPiece(m.from, Piece{original, landed.color, landed.flags});
+  addPiece(m.from, Piece{original, landed.color, u.moverFlags});
 
   if (m.captureCell != kInvalidCell) addPiece(m.captureCell, u.captured);
 
