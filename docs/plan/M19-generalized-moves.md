@@ -1,6 +1,6 @@
 # M19 - Generalized moves: one data model for every piece, including the irregulars
 
-**Status: step 1 of section 10 is built (the three kinds, pins, flip, expansion, loader and editor round trip); everything else is spec.** Written 2026-10-18 at the project owner's direction ("we want a
+**Status: built (2026-10-18) - all six steps of section 10; section 12 says what shipped and what differs from this spec.** Written 2026-10-18 at the project owner's direction ("we want a
 very generalizable engine"). It changes the move model, the position state and the editor, so
 it is written down first, with the tests that will prove it, before any of it is implemented.
 
@@ -284,3 +284,47 @@ removed templates' directions; a fuzz of malformed text never crashes or loops.
   and the variant keeps its id.
 - Not yet: the move table's own columns for the new kinds (a literal move is read out as text
   for now), the moveset language, `unmoved`, marks, `attacked`, compound moves.
+
+## 12. What shipped, and where it differs from the spec above
+
+All of it is in the game: the shipped variants castle, en-passant and double-step through the
+new mechanisms, and every shipped perft is unchanged (the independent oracle was extended to
+cover each new feature and agrees).
+
+- **Move kinds, pins, flip** (section 1) - as specified. `exact`, `expanded`, extrapolated with
+  pinned components; `flip` on by default wherever a move names the orientation axis.
+- **The moveset language** (section 9) - `src/pieces/moveset.*`: lexer, evaluator, printer,
+  typed errors with line and column, bounded unions (`U r in 1..D : [1 x r]^k`), `\`
+  difference, names resolved from the variant's `[movesets]` table and the shared library
+  (`movesets/*.moveset`; `~/.config/chessbox/movesets` first). Pieces take `moves = "..."`;
+  the shipped queens and kings are `moves = "queen"` / `"king"` and their variant ids did not
+  change. Differences: `^n` means *up to n* (the project's existing notation), not "exactly n";
+  difference removes atoms that are equal, and says so when it removes nothing; a printed
+  moveset is `evalMoveset`'s inverse as a set (it spells unions out rather than restoring the
+  comprehension the author typed - the text the author typed is what the file keeps).
+- **`unmoved`** (section 2) - a bit in `Piece::flags`, set by the engine for the piece types
+  some move needs it for (`PieceTypeDef::tracksMoved`, computed by finalize), so a knight that
+  goes out and back is still the same position. Hashed, undone, in FEN-N (a seventh field,
+  written only when the pieces are not what reading the FEN without it would give). Shipped
+  pawns use it; `from_rank` still reads for old files.
+- **Marks** (section 3, 8) - `MarkTag`s (`[[mark]]`, `blocks`), "ep" is tag 0; a move leaves
+  `MarkSpec`s on the passed cell, the landing cell or the cells around it for N plies or
+  forever; blocking tags stop sliders and refuse landings. Marks are hashed, aged each ply,
+  undone, and written in FEN-N (an eighth field). `captures_at` + `needs_mark` make en passant
+  (and a checkers jump) a property of a move; the shipped pawns use them and `en_passant = true`
+  is no longer written. Legacy `leaves_en_passant` / `en_passant` still work (riding on tag 0).
+  A move that captures at an offset takes *only* that piece, never the one it lands on.
+- **Compound moves** (section 4) - `[[compound]]`: mover piece, exact step, partners found
+  along the line (the first partner-kind piece beyond the landing cell), `safe` cells
+  (`from`, `path`, `to`), FEN letter. The shipped variants castle through two of them; the
+  legacy `[[castle]]` templates still work and are the thing the compound form is tested
+  against (perft-equal on ten castling positions). FEN's castling field is derived from the
+  pieces being unmoved; a letter left out revokes the right. Two pieces only, as decided.
+- **Rule expressions** - `(attacked cell)` and `(marked tag cell)`.
+- **Editor** - MOVES (text view, per-move type/vector/flip/sign/unmoved, offset capture and the
+  mark it needs, marks left, step ranges), CASTLING (compound moves, "+ standard castling"),
+  MARKS (tags), plus the existing tabs. `Editor::addCastling` on the standard board gives
+  the shipped game's variant id.
+- **Not done** - mark durations are in plies only; "around" is a Chebyshev ball that ignores
+  wrapping; `partner_to` is always the crossed cell; the moveset text view prints unions rather
+  than comprehensions; there is no `marks` radius > 9 or duration > 99 in the editor.
