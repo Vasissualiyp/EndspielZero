@@ -71,6 +71,10 @@ class Editor {
   /// Returns how many were new.
   Result<std::size_t> addAtoms(std::string_view piece, const std::vector<MoveAtom>& atoms);
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;
+  /// The moveset text (M19) - the symbolic spelling of the piece's moves, e.g.
+  /// `U r in 1..D : [1 x r]^k` - and the setter that checks it against this board.
+  [[nodiscard]] Result<std::string> pieceMovesText(std::string_view piece) const;
+  Result<void> setPieceMovesText(std::string_view piece, std::string_view text);
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,
                                            const std::vector<MoveAtom>& atoms);
 

@@ -51,6 +51,13 @@ class VariantDoc {
   /// A piece's atoms as they are authored. Fails when no piece has that name.
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;
 
+  /// A piece's moves as moveset text (M19): the text it was written as, if it has one, else
+  /// the moves it has, spelled out. `setPieceMovesText` checks the text against this
+  /// variant's board and stores it as written - `U r in 1..D : [1 x r]^k` stays symbolic -
+  /// replacing the piece's move list; a failed parse changes nothing and says where.
+  [[nodiscard]] Result<std::string> pieceMovesText(std::string_view piece) const;
+  [[nodiscard]] Result<void> setPieceMovesText(std::string_view piece, std::string_view text);
+
   /// Replace a piece's atoms, writing the `[[piece.move]]` list back. Fails when no
   /// piece has that name.
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,

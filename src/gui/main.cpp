@@ -29,6 +29,7 @@
 #include "app/shell.hpp"
 #include "audio/audio.hpp"
 #include "io/game_file.hpp"
+#include "io/moveset_library.hpp"
 #include "io/variant_toml.hpp"
 #include "render/board_renderer.hpp"
 #include "render/image_io.hpp"
@@ -1346,6 +1347,12 @@ int main(int argc, char** argv) {
       (gUseUserSettings ||
        (targetPath.empty() && benchFrames == 0 && gTrailerClipDir.empty()))) {
     gUserVariantDir = app::Settings::defaultPath().parent_path() / "variants";
+  }
+  // The shared movesets: the player's own first, then the ones that ship.
+  if (!gUserVariantDir.empty()) {
+    auto dirs = movesetDirs();
+    dirs.insert(dirs.begin(), gUserVariantDir.parent_path() / "movesets");
+    setMovesetDirs(std::move(dirs));
   }
   if (!targetPath.empty() || benchFrames > 0 || !gTrailerClipDir.empty()) {
     return captureFrame(

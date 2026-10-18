@@ -439,3 +439,61 @@ board = "k4/5/5/5/KRL1S"
   CHECK(again->variantId() == v.variantId());
   CHECK(again->pieces[again->findPiece("soldier")].atoms[0].flip);
 }
+
+TEST_CASE("a piece's moves are edited as moveset text", "[unit][app]") {
+  auto editor = app::Editor::open(readFile(test::variantPath("standard")), "standard");
+  REQUIRE(editor.has_value());
+
+  // Shipped queen: written as a library name, read back as the moves it denotes.
+  const auto queenText = editor->pieceMovesText("queen");
+  REQUIRE(queenText.has_value());
+  CHECK(*queenText == "queen");  // as written: a name in the library
+  const auto expanded = editor->pieceAtoms("queen");
+  REQUIRE(expanded.has_value());
+  CHECK(expanded->size() == 2);
+
+  // A rook, spelled symbolically; the file keeps the symbolic form.
+  REQUIRE(editor->setPieceMovesText("rook", "[1]^k U [1,2]^1").has_value());
+  CHECK(*editor->pieceMovesText("rook") == "[1]^k U [1,2]^1");
+  const auto atoms = editor->pieceAtoms("rook");
+  REQUIRE(atoms.has_value());
+  CHECK(atoms->size() == 2);
+  CHECK(editor->serialize().find("[1]^k U [1,2]^1") != std::string::npos);
+  CHECK(editor->validate().has_value());
+
+  // A mistake is reported with its place and changes nothing.
+  const auto before = editor->serialize();
+  const auto bad = editor->setPieceMovesText("rook", "[1]^k U [1,");
+  REQUIRE_FALSE(bad.has_value());
+  CHECK(bad.error().message.find("column") != std::string::npos);
+  CHECK(editor->serialize() == before);
+
+  // Editing the table afterwards replaces the text with the moves it denotes.
+  REQUIRE(editor->setPieceAtoms("rook", *atoms).has_value());
+  CHECK(editor->serialize().find("[1]^k U [1,2]^1") == std::string::npos);
+
+  // A 4-D queen is one symbolic line, and loads as the four atoms.
+  const auto q = loadVariantToml(R"(
+name = "q4"
+[[axis]]
+name = "a"
+extent = 3
+[[axis]]
+name = "b"
+extent = 3
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+moves = "king"
+[[piece]]
+name = "queen"
+symbol = "Q"
+moves = "U r in 1..D : [1 x r]^k"
+[start]
+board = "k2/3/KQ1"
+)", "q4");
+  if (!q.has_value()) WARN(q.error().format());
+  REQUIRE(q.has_value());
+  CHECK(q->pieces[q->findPiece("queen")].atoms.size() == 2);
+}

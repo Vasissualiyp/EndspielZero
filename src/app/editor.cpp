@@ -208,6 +208,14 @@ Result<std::size_t> Editor::addAtoms(std::string_view piece,
   return added;
 }
 
+Result<std::string> Editor::pieceMovesText(std::string_view piece) const {
+  return doc_.pieceMovesText(piece);
+}
+
+Result<void> Editor::setPieceMovesText(std::string_view piece, std::string_view text) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.setPieceMovesText(piece, text); });
+}
+
 Result<void> Editor::setPieceAtoms(std::string_view piece,
                                    const std::vector<MoveAtom>& atoms) {
   return edit(

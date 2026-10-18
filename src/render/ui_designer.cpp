@@ -161,7 +161,7 @@ bool editText(const char* id, std::string& value, float width) {
   const ImGuiID gid = ImGui::GetID(id);
   std::string& buf = typing[gid];
   if (!active[gid]) buf = value;
-  char raw[256];
+  char raw[1024];
   std::snprintf(raw, sizeof(raw), "%s", buf.c_str());
   if (width > 0.0f) ImGui::SetNextItemWidth(width);
   ImGui::InputText(id, raw, sizeof(raw));
@@ -411,6 +411,28 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
     ImGui::PopStyleColor(4);
     return hit;
   };
+
+  // ---- the same moves as text: the symbolic notation, which can be one line where the
+  // table is a dozen rows. `U r in 1..D : [1 x r]^k` is the queen on any board.
+  sectionHead("AS TEXT", t, fontSmall_, scale_);
+  {
+    ImGui::PushFont(small);
+    auto have = editor->pieceMovesText(piece);
+    std::string text = have.has_value() ? *have : std::string{};
+    ImGui::PushID("moves-text");
+    if (editText("##moves", text, px(560.0f))) {
+      const Result<void> ok = editor->setPieceMovesText(piece, text);
+      moveNote_ = ok.has_value() ? std::string{} : ok.error().message;
+    }
+    ImGui::PopID();
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextWrapped(
+        "[1,2]^1 is a knight, [1]^k a rook, exact [rank:+1] one step forward, "
+        "expanded [rank:+1]^5 up to five. U joins, \\ removes, names such as queen are in the "
+        "library. Editing the rows below turns this back into the moves it denotes.");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  }
 
   // Columns at fixed offsets rather than an ImGui table: the point of a table here is
   // that like sits under like - every kind in one column, every capture rule in another -

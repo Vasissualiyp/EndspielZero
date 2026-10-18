@@ -10,6 +10,7 @@
 
 #include "io/atom_toml.hpp"
 #include "io/model_toml.hpp"
+#include "io/moveset_library.hpp"
 
 namespace cb {
 namespace {
@@ -130,6 +131,12 @@ Result<std::vector<MoveAtom>> VariantDoc::pieceAtoms(std::string_view piece) con
   }
   const auto [orientAxis, orientExtent] = orientationAxisOf(impl_->table);
   std::vector<MoveAtom> out;
+  // Moveset text first, as the loader reads it, then any explicit moves.
+  if (const auto text = (*pt)["moves"].value<std::string>()) {
+    auto atoms = evalMoveset(*text, movesetContextFor(impl_->table));
+    if (!atoms.has_value()) return fail(atoms.error().code, atoms.error().message, atoms.error().line);
+    out = std::move(*atoms);
+  }
   const auto* moves = (*pt)["move"].as_array();
   if (moves == nullptr) return out;
   for (const auto& node : *moves) {
@@ -206,6 +213,36 @@ Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
     moves.push_back(std::move(m));
   }
   pt->insert_or_assign("move", std::move(moves));
+  pt->erase("moves");  // the list is now the whole truth
+  return {};
+}
+
+Result<std::string> VariantDoc::pieceMovesText(std::string_view piece) const {
+  const toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  if (const auto text = (*pt)["moves"].value<std::string>(); text && !(*pt)["move"].is_array()) {
+    return *text;
+  }
+  auto atoms = pieceAtoms(piece);
+  if (!atoms.has_value()) return fail(atoms.error().code, atoms.error().message);
+  const MovesetContext ctx = movesetContextFor(impl_->table);
+  return printMoveset(*atoms, ctx.axisNames, ctx.orientAxis);
+}
+
+Result<void> VariantDoc::setPieceMovesText(std::string_view piece, std::string_view text) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  auto atoms = evalMoveset(text, movesetContextFor(impl_->table));
+  if (!atoms.has_value()) return fail(atoms.error().code, atoms.error().message, atoms.error().line);
+  if (atoms->empty()) return fail(ErrorCode::ValidationError, "a piece needs at least one move");
+  pt->insert_or_assign("moves", std::string(text));
+  pt->erase("move");
   return {};
 }
 
