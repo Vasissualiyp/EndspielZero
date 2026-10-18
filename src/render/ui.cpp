@@ -1183,6 +1183,55 @@ void Ui::drawGhost(app::Shell& shell) {
   ghosting_ = false;
 }
 
+void Ui::drawDebugConsole(app::Shell& shell) {
+  if (ImGui::IsKeyPressed(ImGuiKey_F12, false) ||
+      (!ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false))) {
+    consoleOpen_ = !consoleOpen_;
+    consoleFocus_ = consoleOpen_;
+  }
+  if (!consoleOpen_) return;
+  ImGui::SetNextWindowSize(ImVec2(640, 360), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
+  if (ImGui::Begin("Debug console (F12)", &consoleOpen_)) {
+    const float footer = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("scrollback", ImVec2(0, -footer), true, ImGuiWindowFlags_HorizontalScrollbar);
+    for (const std::string& l : console_.log()) ImGui::TextUnformatted(l.c_str());
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f || consoleFocus_)
+      ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
+    if (consoleFocus_) {
+      ImGui::SetKeyboardFocusHere();
+      consoleFocus_ = false;
+    }
+    ImGui::SetNextItemWidth(-1);
+    const auto recall = [](ImGuiInputTextCallbackData* d) -> int {
+      auto* self = static_cast<Ui*>(d->UserData);
+      const auto& h = self->console_.history();
+      if (h.empty()) return 0;
+      if (d->EventKey == ImGuiKey_UpArrow)
+        self->consoleHistoryPos_ = self->consoleHistoryPos_ < 0
+                                       ? static_cast<int>(h.size()) - 1
+                                       : std::max(0, self->consoleHistoryPos_ - 1);
+      else if (d->EventKey == ImGuiKey_DownArrow)
+        self->consoleHistoryPos_ = self->consoleHistoryPos_ < 0 ? -1 : self->consoleHistoryPos_ + 1;
+      if (self->consoleHistoryPos_ >= static_cast<int>(h.size())) self->consoleHistoryPos_ = -1;
+      d->DeleteChars(0, d->BufTextLen);
+      if (self->consoleHistoryPos_ >= 0)
+        d->InsertChars(0, h[static_cast<std::size_t>(self->consoleHistoryPos_)].c_str());
+      return 0;
+    };
+    if (ImGui::InputText("##cmd", consoleInput_.data(), consoleInput_.size(),
+                         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory,
+                         recall, this)) {
+      console_.run(shell, consoleInput_.data());
+      consoleInput_[0] = '\0';
+      consoleHistoryPos_ = -1;
+      consoleFocus_ = true;
+    }
+  }
+  ImGui::End();
+}
+
 UiRequest Ui::build(app::Shell& shell, float fps) {
   // Start the frame with an empty field list. Only the board screen fills it; every other
   // screen, and cinema, leaves it empty so `recordBackground` submits nothing.
@@ -1196,6 +1245,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   }
   // A screen change starts the camera moving and shoves the field towards the viewer -
   // or away from it, on the way back out.
+  drawDebugConsole(shell);
   const int screen = static_cast<int>(shell.screen());
   currentScreen_ = screen;
   if (screen != lastScreen_) {

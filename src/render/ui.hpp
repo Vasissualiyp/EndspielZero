@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "app/debug_console.hpp"
 #include "app/session.hpp"
 #include "app/shell.hpp"
 #include "assets/piece_model.hpp"
@@ -198,6 +199,14 @@ class Ui {
   /// Wrap a standalone draw list in a minimal ImDrawData and submit it with the field's
   /// multisample-matched pipeline.
   void recordDrawList(VkCommandBuffer cmd, ImDrawList* list);
+
+  /// The debug window (F12 or backtick): scrollback and a command line, nothing pretty.
+  void drawDebugConsole(app::Shell& shell);
+  app::DebugConsole console_;
+  bool consoleOpen_{false};
+  bool consoleFocus_{false};
+  std::array<char, 512> consoleInput_{};
+  int consoleHistoryPos_{-1};
 
   UiRequest buildGameHud(app::Shell& shell, float fps);
   /// The two-pane frame every menu screen sits in: the drifting field, the screen's

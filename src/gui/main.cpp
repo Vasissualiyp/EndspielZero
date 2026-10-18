@@ -1056,8 +1056,10 @@ int captureFrame(const std::string& variantName, const std::string& path,
         }
         (*ui)->injectMouse(x2, y2, false, button);
         if (!renderFrame(0.0f).has_value()) return 1;
-      } else if (one == "key:delete" || one == "key:escape" || one == "key:enter") {
+      } else if (one == "key:delete" || one == "key:escape" || one == "key:enter" ||
+                 one == "key:f12") {
         const int key = one == "key:delete" ? ImGuiKey_Delete
+                        : one == "key:f12" ? ImGuiKey_F12
                         : one == "key:escape" ? ImGuiKey_Escape
                                               : ImGuiKey_Enter;
         for (const bool down : {true, false}) {
