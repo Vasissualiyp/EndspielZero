@@ -157,7 +157,7 @@ range** (`min`, `max`, infinite), **flip**, **mode**, **capture**, and the condi
    perft (20, 400, 8902, ...).
 7. Every rejection the validator can produce is reachable from the editor and shown as-is.
 
-## 7. Order of work
+## 7. Order of work (superseded by section 10)
 
 1. Templates and expansion, with the loader aliases and the equivalence test (no behaviour
    change; this is the part that can ship alone).
@@ -171,10 +171,96 @@ Steps 2-4 change position state and must each land with the golden suite green; 
 `castleRights_` and `from_rank` as the storage and expose `unmoved` as a derived condition
 in the editor - recorded as a deviation, not hidden.
 
-## 8. Open questions for the owner
+## 8. Decisions (owner, 2026-10-18)
 
-- Should `unmoved` replace `from_rank` everywhere in the shipped variants, or only in the
-  editor's defaults? (Replacing changes the behaviour of custom start positions.)
-- Is a **mark** one turn only (en passant), or may a template choose how long it lasts?
-- Should a compound move be allowed to move **more than two** pieces (a castle that also
-  moves a third)? The data model allows a list of partners at no extra cost.
+- **`unmoved` replaces `from_rank`** everywhere, shipped variants included. A shipped
+  variant's pawns start on their home squares, so every shipped perft is unchanged; what
+  changes is the meaning for a custom position, where "unmoved" is now a fact about the
+  piece (stored, listed in FEN-N) and not about the rank it stands on. `from_rank` remains
+  readable and desugars to `unmoved` plus a region expression only for files that still use it.
+- **Marks are configurable.** A mark is no longer "the en passant target". It is a named
+  **tag** on a cell with a **duration**: `N` plies, or forever. A move may leave marks on any
+  set of cells - the cells it passed over, or the surroundings of where it landed - so
+  "when a piece lands it marks the cells around it destroyed, for 3 moves" and "a double step
+  marks the passed cell for 1 ply" are the same mechanism. Tags are declared by the variant
+  (`[[mark]]` with `name` and `blocks = true|false`; a blocking tag makes the cell
+  impassable and un-enterable to movegen), and read by `marked(cell, tag)` in expressions.
+  Marks are hashed, counted down by the engine each ply, and restored by undo. En passant is
+  the tag `ep` with duration 1; section 3 is the special case of this.
+- **Compound moves move two pieces for now.** The data shape is a list of partners, so more
+  can be added later without a format change; the validator rejects a list longer than one
+  until the engine supports it.
+
+## 9. The moveset language (symbolic move definitions)
+
+Typing every queen move on every axis is the problem this solves. A moveset is **text**: a
+small, typed, mathematical notation for sets of moves, so a piece's movement is one line and
+a file of them can be shared. It is a *data* language in the sense of ADR-0005 - declarative,
+no loops, no recursion, structural termination, no I/O beyond importing another moveset file
+by name - so a downloaded moveset is as safe to load as a variant.
+
+```
+rook      = [1]^k                        -- k is the free step count, 1..inf by default
+bishop    = [1,1]^k
+knight    = [1,2]^1                      -- ^1 is exactly one step
+nightrider = [1,2]^k
+queen     = U r in 1..D : [1 x r]^k      -- the union over r of "r ones", D = board dimension
+king      = U r in 1..2 : [1 x r]^1
+unicorn   = [1,1,1]^k
+queen4    = [1]^k U [1,1]^k U [1,1,1]^k U [1,1,1,1]^k      -- the same, written out
+lance     = expanded [rank:+1]^1..inf    -- k from 1 to inf, one direction only
+step5     = expanded [rank:+1]^1..5      -- at most five cells forward
+pawnPush  = exact [rank:+1] flip cannot
+pawnTwo   = exact [rank:+2] flip cannot slide unmoved marks ep(path, 1)
+pawnTake  = [rank:+1, 1]^1 flip must     -- pinned forward, one free axis: the capture
+dragon    = rook \ [1]^1                 -- a rook that cannot make the one-step move
+```
+
+**Terms.** `[ ... ]` is a vector: a comma list of **components**, a bare magnitude (free) or
+`axis:signed` (pinned). `x n` repeats a component `n` times (`1 x r`). `^` gives the step
+range: `^k` (all `k >= 1`), `^n` (exactly `n`), `^a..b`, `^a..inf`. A leading `exact` or
+`expanded` selects the other two move types; the default is extrapolated. Trailing words
+set the rest of the template: `slide | leap | hop`, `may | must | cannot`, `flip`, `unmoved`,
+`marks tag(where, N)` with `N` a count or `forever`, `captures at [vector]`, `needs mark tag`.
+
+**Operators.** `U` (union), `\` (difference), parentheses, and `U v in a..b : body` for a
+union over a bounded integer (the only repetition in the language; its bounds must be
+constants or `D`, so it always terminates). Names are bound with `=` and may refer to
+earlier names, giving every move set a readable definition made of other move sets.
+
+**Types.** The checker runs at load and says what is wrong in the author's own words:
+
+| Type | Is | Examples |
+|---|---|---|
+| `Int`, `Range` | a number; a step range | `3`, `1..5`, `1..inf` |
+| `Component` | a free magnitude or a pinned axis with a sign | `2`, `rank:+1` |
+| `Vector` | a list of components | `[1,2]`, `[rank:+1, 1]` |
+| `Template` | a vector with a range, a type and the flags | `exact [rank:+1] flip` |
+| `MoveSet` | a set of templates | everything above |
+
+Errors it must give, with the position in the text: a pinned axis that does not exist; a
+vector with more free components than the board has axes left (reported as "needs N axes",
+never silently empty - the engine's deliberate rule); an empty range; `exact` with a `^`;
+`flip` with no orientation axis; a union variable used outside its range; an unbound name.
+
+**Relationship to the model.** A moveset *denotes* the section 1 templates and nothing else:
+parsing and printing are inverse (`print(parse(t)) == canonical(t)`), so the editor can show
+any piece's moves as this text and accept this text back, and the editor's table and the
+text are two views of one thing. The text of a moveset is canonical (sorted, normalized
+whitespace) so two authors' files for the same piece are byte-identical. Shared files are
+plain text (`*.moveset`), referenced from a variant as `moves = "queen"` or inline.
+
+**Tests.** Round trip over every shipped piece in every variant; `D` in {2,3,4,8} for
+`queen`, with direction counts from `expectedDirectionCount`; every error above with its
+position; the union is order-independent and idempotent; difference removes exactly the
+removed templates' directions; a fuzz of malformed text never crashes or loops.
+
+## 10. Order of work (replaces section 7's list)
+
+1. Templates and expansion, loader aliases, equivalence test (no behaviour change).
+2. The moveset language: parser, printer, type checker, `*.moveset` files; the editor gains a
+   text view of the move table. This needs only step 1, so it ships before any state change.
+3. `moved` state, `unmoved`, and the retarget of `from_rank`.
+4. Marks as tagged, timed cell state; blocking marks in movegen; en passant on top of them.
+5. `attacked(cell)`, `capture_offset`, compound moves; `[[castle]]` desugars to one.
+6. Editor: the table's new columns, the compound editor, marks, the palette.
