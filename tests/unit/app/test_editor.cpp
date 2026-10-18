@@ -319,3 +319,37 @@ TEST_CASE("fields and rules are edited as the loader reads them", "[unit][app]")
   REQUIRE(described.has_value());
   CHECK(described->find("moving charges a piece") != std::string::npos);
 }
+
+TEST_CASE("every piece in every shipped variant can be built from the palette", "[unit][app]") {
+  // The question "can the move editor define every piece we use?", answered by building
+  // each one from the bundles on that variant's own board and comparing with the file.
+  for (const char* name : {"standard", "atomic", "atomic_torus", "charged", "cube5", "cylinder",
+                           "hyper4", "hyper4_8x8", "klein", "mirrorbox", "mobius", "mustcapture",
+                           "t6", "torus", "torus3d", "torus3d_8x8", "torus3d_twist", "5d"}) {
+    const VariantSpec shipped = test::loadVariant(name);
+    auto editor = app::Editor::open(readFile(test::variantPath(name)), name);
+    REQUIRE(editor.has_value());
+    const std::size_t axes = editor->axes().size();
+    const int orient = editor->orientationAxis();
+    for (const std::string& piece : editor->pieceNames()) {
+      INFO(name << " / " << piece);
+      const PieceTypeDef& want = shipped.pieces[shipped.findPiece(piece)];
+      auto bundle = app::Editor::bundleAtoms(piece, axes, orient);
+      // A pawn with no double step (cube5, the 4-D boards, t6) is the push and the capture.
+      if (piece == "pawn" && want.atoms.size() == 2) {
+        bundle = app::Editor::bundleAtoms("forward step", axes, orient);
+        for (const MoveAtom& a : app::Editor::bundleAtoms("forward capture", axes, orient)) {
+          bundle.push_back(a);
+        }
+      }
+      REQUIRE_FALSE(bundle.empty());
+      // The queen's bundle runs to the board's dimension; compare what actually expands.
+      std::vector<std::string> got, wanted;
+      for (const MoveAtom& a : bundle) {
+        if (a.mags.size() <= axes) got.push_back(a.toString());
+      }
+      for (const MoveAtom& a : want.atoms) wanted.push_back(a.toString());
+      CHECK(got == wanted);
+    }
+  }
+}
