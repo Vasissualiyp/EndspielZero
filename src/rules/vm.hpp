@@ -19,6 +19,8 @@ struct RuleEnv {
   Color mover{Color::White};
   CellId cellArg{kInvalidCell};
   std::function<bool(CellId)> hasCaptureFrom;
+  /// Is the cell attacked by this side? Answered by the orchestrating layer, which owns movegen.
+  std::function<bool(CellId, Color)> isAttacked;
 };
 
 struct RuleOutcome {

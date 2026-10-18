@@ -39,6 +39,10 @@ std::string_view toString(ExprOp op) noexcept {
       return "coord";
     case ExprOp::HasCaptureFrom:
       return "has_capture_from";
+    case ExprOp::Attacked:
+      return "attacked";
+    case ExprOp::Marked:
+      return "marked";
     case ExprOp::AnyCapture:
       return "any_capture";
     case ExprOp::Not:
@@ -84,6 +88,8 @@ int arity(ExprOp op) noexcept {
     case ExprOp::CellField:
     case ExprOp::CoordOf:
     case ExprOp::HasCaptureFrom:
+    case ExprOp::Attacked:
+    case ExprOp::Marked:
     case ExprOp::Not:
       return 1;
     case ExprOp::Eq:

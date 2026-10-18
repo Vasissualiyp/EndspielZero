@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 
+#include "game/game.hpp"
 #include "io/fen.hpp"
 #include "io/variant_toml.hpp"
 #include "movegen/movegen.hpp"
@@ -277,4 +278,62 @@ TEST_CASE("marks are written in FEN-N and read back", "[unit][position][marks]")
   CHECK(back->marks().size() == p.marks().size());
   CHECK(back->hash() == p.hash());
   CHECK(toFen(*back) == fen);
+}
+
+TEST_CASE("rules can ask whether a cell is attacked or marked", "[unit][position][marks]") {
+  const std::string base = R"toml(
+name = "careful"
+orientation_axis = "rank"
+side_to_move = "white"
+[[axis]]
+name = "file"
+extent = 5
+[[axis]]
+name = "rank"
+extent = 5
+[[mark]]
+name = "scar"
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+moves = "king"
+[[piece]]
+name = "rook"
+symbol = "R"
+moves = "[1]^k marks scar(landed, forever)"
+[start]
+board = "k4/5/5/5/KR1r1"
+)toml";
+  const auto count = [&](const std::string& text, const char* name) {
+    const auto loaded = loadVariantToml(text, name);
+    if (!loaded.has_value()) WARN(loaded.error().format());
+    REQUIRE(loaded.has_value());
+    const Game game(*loaded);  // the game applies the rules; bare movegen does not
+    return game.legalMoves().size();
+  };
+  const std::size_t plain = count(base, "plain");
+
+  // "Never move onto a cell the other side attacks": the black rook on d1 attacks along rank 1
+  // and file 3, so some of the white rook's moves go away.
+  const std::string careful = base + R"toml(
+[[rule]]
+name = "careful"
+when = "on_move_filter"
+if = "(attacked move.to)"
+  [[rule.effect]]
+  op = "forbid_move"
+)toml";
+  CHECK(count(careful, "careful") < plain);
+
+  // "Never move onto a scarred cell": nothing is scarred yet, so nothing changes.
+  const std::string scarred = base + R"toml(
+[[rule]]
+name = "no scars"
+when = "on_move_filter"
+if = "(marked scar move.to)"
+  [[rule.effect]]
+  op = "forbid_move"
+)toml";
+  CHECK(count(scarred, "scarred") == plain);
 }

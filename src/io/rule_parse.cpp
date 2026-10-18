@@ -87,6 +87,7 @@ const std::map<std::string, ExprOp>& opNames() {
       {"color_at", ExprOp::ColorAt},
       {"is_empty", ExprOp::IsEmpty},
       {"has_capture_from", ExprOp::HasCaptureFrom},
+      {"attacked", ExprOp::Attacked},
   };
   return m;
 }
@@ -127,7 +128,7 @@ class Parser {
     Expr e;
     // Three operators take a *name* first - a field or an axis - which becomes an
     // immediate rather than an argument.
-    if (op == "piece_field" || op == "cell_field" || op == "coord") {
+    if (op == "piece_field" || op == "cell_field" || op == "coord" || op == "marked") {
       if (i_ >= t_.size() || t_[i_].kind != Token::Kind::Word) {
         return fail(ErrorCode::ParseError,
                     "'" + op + "' needs a name first, e.g. (" + op + " charge move.to)");
@@ -140,6 +141,9 @@ class Parser {
       } else if (op == "cell_field") {
         index = v_.findCellField(name);
         e.op = ExprOp::CellField;
+      } else if (op == "marked") {
+        index = v_.findMarkTag(name);
+        e.op = ExprOp::Marked;
       } else {
         index = v_.dims.axisIndex(name);
         e.op = ExprOp::CoordOf;
