@@ -978,9 +978,9 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     // Three jobs on one piece - how it moves, what its body is, what its flat outline
     // is - so three tabs rather than three screens. Moving between them must not feel
     // like leaving the piece behind.
-    designTab_ = std::clamp(designTab_, 0, 3);
-    tabRow({"MOVES", "BODY", "FLAT ICON", "IDENTITY"}, designTab_, t, fontDisplay_,
-           scale_);
+    designTab_ = std::clamp(designTab_, 0, 5);
+    tabRow({"MOVES", "BODY", "FLAT ICON", "IDENTITY", "FIELDS", "RULES"}, designTab_, t,
+           fontDisplay_, scale_);
 
     const std::string piece = names[static_cast<std::size_t>(editorPiece_)];
     // The header stays put and the tab scrolls under it: a designer this long would
@@ -995,8 +995,12 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       drawBodyTab(shell);
     } else if (designTab_ == 2) {
       drawIconTab(shell);
-    } else {
+    } else if (designTab_ == 3) {
       drawIdentityTab(shell, piece);
+    } else if (designTab_ == 4) {
+      drawFieldsTab(shell);
+    } else {
+      drawRulesTab(shell);
     }
     ImGui::EndChild();
   }

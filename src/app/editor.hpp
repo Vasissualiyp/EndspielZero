@@ -59,6 +59,17 @@ class Editor {
   Result<void> removeAxis(std::size_t index);
 
   [[nodiscard]] std::vector<std::string> pieceNames() const;
+  /// The named bundles of moves the move palette offers - rook, bishop, knight, queen,
+  /// king, unicorn, step, forward step, forward capture and pawn - as the atoms they
+  /// stand for on a board of `boardAxes` axes whose forward axis is `orientAxis` (-1
+  /// for none, which leaves the forward bundles empty). One definition, so the palette
+  /// and the tests that build the shipped pieces from it cannot disagree.
+  [[nodiscard]] static std::vector<MoveAtom> bundleAtoms(std::string_view bundle,
+                                                         std::size_t boardAxes,
+                                                         int orientAxis);
+  /// Union atoms into a piece: one already there (by canonical form) is not added again.
+  /// Returns how many were new.
+  Result<std::size_t> addAtoms(std::string_view piece, const std::vector<MoveAtom>& atoms);
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,
                                            const std::vector<MoveAtom>& atoms);
@@ -80,6 +91,19 @@ class Editor {
       std::string_view piece) const;
   Result<void> setPieceIcon(std::string_view piece,
                             const std::optional<assets::IconModel>& icon);
+
+  /// Custom fields and the ordered rule list (M7.2). Whole-list setters: order is meaning,
+  /// so the screen edits a list and writes it back, one undo entry per gesture.
+  using FieldInfo = VariantDoc::FieldInfo;
+  using RuleInfo = VariantDoc::RuleInfo;
+  using EffectInfo = VariantDoc::EffectInfo;
+  [[nodiscard]] std::vector<FieldInfo> fields(bool pieceFields) const;
+  Result<void> setFields(bool pieceFields, const std::vector<FieldInfo>& list);
+  [[nodiscard]] std::vector<RuleInfo> rules() const;
+  Result<void> setRules(const std::vector<RuleInfo>& list);
+  /// What the engine reads the rules as - the loader's own rule set described one per
+  /// line - or the loader's message when the document does not load.
+  [[nodiscard]] Result<std::string> describeRules() const;
 
   /// Does the document, as it stands, load? The editor is a front end to the loader and
   /// grows no second set of rules: this runs the real one on the serialized text and

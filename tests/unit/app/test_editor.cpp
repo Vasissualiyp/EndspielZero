@@ -224,3 +224,98 @@ TEST_CASE("a body that cannot be built is dropped by the loader, not fatal",
   REQUIRE(loaded.has_value());
   CHECK_FALSE(loaded->pieces[loaded->findPiece("pawn")].body.has_value());
 }
+
+TEST_CASE("the shipped pieces are built from the palette's bundles", "[unit][app]") {
+  // M7.1.5: an authored standard. Start every piece empty of moves (one placeholder
+  // step), drop in the bundle that names it, and the atoms must be the shipped ones.
+  const VariantSpec shipped = test::loadVariant("standard");
+  auto editor = app::Editor::open(readFile(test::variantPath("standard")), "standard");
+  REQUIRE(editor.has_value());
+  const std::size_t axes = editor->axes().size();
+  const int orient = editor->orientationAxis();
+  REQUIRE(orient >= 0);
+
+  for (const char* piece : {"pawn", "knight", "bishop", "rook", "queen", "king"}) {
+    INFO(piece);
+    REQUIRE(editor->setPieceAtoms(piece, {}).has_value());
+    const std::string bundle = piece;
+    const auto added = editor->addAtoms(piece, app::Editor::bundleAtoms(bundle, axes, orient));
+    REQUIRE(added.has_value());
+    CHECK(*added > 0);
+    const auto got = editor->pieceAtoms(piece);
+    REQUIRE(got.has_value());
+    const PieceTypeDef& want = shipped.pieces[shipped.findPiece(piece)];
+    REQUIRE(got->size() == want.atoms.size());
+    for (std::size_t i = 0; i < got->size(); ++i) {
+      CHECK((*got)[i].toString() == want.atoms[i].toString());
+    }
+    // Dropping the same bundle again is a no-op.
+    const auto again = editor->addAtoms(piece, app::Editor::bundleAtoms(bundle, axes, orient));
+    REQUIRE(again.has_value());
+    CHECK(*again == 0);
+  }
+  CHECK(editor->validate().has_value());
+}
+
+TEST_CASE("rook plus bishop is the queen on a plane and not above it", "[unit][app]") {
+  // The teaching claim of the palette, pinned: the union of rook and bishop is a queen
+  // in two dimensions, and in three it lacks the cube diagonals the queen has.
+  const auto direction = [](const std::vector<MoveAtom>& atoms, std::uint8_t dims) {
+    std::size_t n = 0;
+    for (const MoveAtom& a : atoms) n += expandAtom(a.mags, dims).size();
+    return n;
+  };
+  std::vector<MoveAtom> rookPlusBishop = app::Editor::bundleAtoms("rook", 2, -1);
+  for (const MoveAtom& a : app::Editor::bundleAtoms("bishop", 2, -1)) rookPlusBishop.push_back(a);
+  CHECK(direction(rookPlusBishop, 2) == direction(app::Editor::bundleAtoms("queen", 2, -1), 2));
+  CHECK(direction(rookPlusBishop, 3) + 8 == direction(app::Editor::bundleAtoms("queen", 3, -1), 3));
+}
+
+TEST_CASE("fields and rules are edited as the loader reads them", "[unit][app]") {
+  auto editor = app::Editor::open(readFile(test::variantPath("charged")), "charged");
+  REQUIRE(editor.has_value());
+
+  const auto fields = editor->fields(true);
+  REQUIRE(fields.size() == 1);
+  CHECK(fields[0].name == "charge");
+  CHECK(fields[0].maxValue == 8);
+  CHECK(editor->fields(false).empty());
+
+  const auto rules = editor->rules();
+  REQUIRE(rules.size() == 2);
+  CHECK(rules[0].when == "on_move_end");
+  REQUIRE(rules[0].effects.size() == 1);
+  CHECK(rules[0].effects[0].op == "set_piece_field");
+  CHECK(rules[1].condition.find("charge") != std::string::npos);
+
+  // Writing the list back unchanged is a no-op to the loader: same game.
+  const auto before = loadVariantToml(editor->serialize(), "charged");
+  REQUIRE(before.has_value());
+  REQUIRE(editor->setRules(rules).has_value());
+  REQUIRE(editor->setFields(true, fields).has_value());
+  const auto after = loadVariantToml(editor->serialize(), "charged");
+  REQUIRE(after.has_value());
+  CHECK(after->variantId() == before->variantId());
+
+  // Order is meaning: swapping the two rules changes the game.
+  auto swapped = rules;
+  std::swap(swapped[0], swapped[1]);
+  REQUIRE(editor->setRules(swapped).has_value());
+  const auto reordered = loadVariantToml(editor->serialize(), "charged");
+  REQUIRE(reordered.has_value());
+  CHECK(reordered->variantId() != before->variantId());
+  editor->undo();
+
+  // A rule that names a field that does not exist is the loader's own complaint.
+  auto broken = rules;
+  broken[0].effects[0].args = {{"at", "move.to"}, {"field", "nonesuch"}, {"value", "(add 1 1)"}};
+  REQUIRE(editor->setRules(broken).has_value());
+  const auto bad = editor->validate();
+  REQUIRE_FALSE(bad.has_value());
+  CHECK(bad.error().message.find("nonesuch") != std::string::npos);
+  editor->undo();
+
+  const auto described = editor->describeRules();
+  REQUIRE(described.has_value());
+  CHECK(described->find("moving charges a piece") != std::string::npos);
+}

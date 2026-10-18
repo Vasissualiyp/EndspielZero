@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <string>
 
 #include "render/piece_mesh.hpp"
@@ -148,6 +149,29 @@ Archetype seedArchetype(const VariantSpec* spec, const std::string& piece) {
 /// The seed body for a piece: what its moves would have drawn it as.
 assets::PieceModel seedBody(const VariantSpec* spec, const std::string& piece) {
   return assets::archetypeModel(modelNameFor(seedArchetype(spec, piece)));
+}
+
+/// A text box that keeps what is being typed while it is being typed and writes it back
+/// only when the author is done (focus leaves, or Enter): the document is edited once per
+/// edit, not once per keystroke, and a half-typed expression is never judged. Returns true
+/// on the frame the edit is committed.
+bool editText(const char* id, std::string& value, float width) {
+  static std::map<ImGuiID, std::string> typing;
+  static std::map<ImGuiID, bool> active;  // was this box being edited last frame
+  const ImGuiID gid = ImGui::GetID(id);
+  std::string& buf = typing[gid];
+  if (!active[gid]) buf = value;
+  char raw[256];
+  std::snprintf(raw, sizeof(raw), "%s", buf.c_str());
+  if (width > 0.0f) ImGui::SetNextItemWidth(width);
+  ImGui::InputText(id, raw, sizeof(raw));
+  buf = raw;
+  active[gid] = ImGui::IsItemActive();
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    value = buf;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -637,16 +661,10 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
     changed = true;
     return true;
   };
-  const auto atom = [](std::initializer_list<std::int16_t> mags, std::uint32_t maxK,
-                       MoveMode m, CapturePolicy c, bool fwd) {
-    MoveAtom a;
-    for (const std::int16_t v : mags) a.mags.push(v);
-    a.maxK = maxK;
-    a.minK = 1;
-    a.mode = m;
-    a.capture = c;
-    a.oriented = fwd;
-    return a;
+  const std::size_t boardAxes = editor->axes().size();
+  const int orientAxis = editor->orientationAxis();
+  const auto addBundle = [&](const char* name) {
+    for (const MoveAtom& a : app::Editor::bundleAtoms(name, boardAxes, orientAxis)) addOne(a);
   };
   ImGui::PushFont(small);
   ImGui::PushID("add-a-move");
@@ -673,46 +691,15 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
   };
   // Bundles, not colours. Dropping one in unions its atoms, which is how rook + bishop
   // becomes a queen in two dimensions and something else entirely above them.
-  if (add("rook", px(72)))
-    addOne(atom({1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false));
-  if (add("bishop", px(78))) {
-    addOne(atom({1, 1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false));
-  }
-  if (add("knight", px(78))) {
-    addOne(atom({1, 2}, 1, MoveMode::Leap, CapturePolicy::May, false));
-  }
-  if (add("queen", px(72))) {
-    // Every straight line the board has: one axis, two, three... up to its dimension.
-    for (const MoveAtom& a : straightLineAtoms(
-             kUnlimited, std::max<std::size_t>(2, editor->axes().size()))) {
-      addOne(a);
+  const bool oriented = orientAxis >= 0;
+  for (const char* name :
+       {"rook", "bishop", "knight", "queen", "king", "unicorn", "step", "forward step",
+        "forward capture", "pawn"}) {
+    const std::string n = name;
+    const bool needsForward = n == "forward step" || n == "forward capture" || n == "pawn";
+    if (add(name, px(8.0f * static_cast<float>(n.size()) + 24.0f), !needsForward || oriented)) {
+      addBundle(name);
     }
-  }
-  if (add("king", px(66))) {
-    for (const MoveAtom& a : straightLineAtoms(1)) addOne(a);
-  }
-  if (add("unicorn", px(84))) {
-    addOne(atom({1, 1, 1}, kUnlimited, MoveMode::Slide, CapturePolicy::May, false));
-  }
-  if (add("step", px(66))) addOne(atom({1}, 1, MoveMode::Leap, CapturePolicy::May, false));
-  const bool oriented = editor->orientationAxis() >= 0;
-  if (add("forward step", px(112), oriented)) {
-    addOne(atom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true));
-  }
-  if (add("forward capture", px(130), oriented)) {
-    addOne(atom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true));
-  }
-  if (add("pawn", px(66), oriented)) {
-    // The three canonical rows: the push, the double step from the home rank (which
-    // leaves an en passant square), and the diagonal capture. This *is* the shipped pawn.
-    addOne(atom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true));
-    MoveAtom twice = atom({1}, 2, MoveMode::Slide, CapturePolicy::Cannot, true);
-    twice.minK = 2;
-    twice.fromRegion[static_cast<std::size_t>(Color::White)] =
-        Region{editor->orientationAxis(), 1};
-    twice.leavesEnPassant = true;
-    addOne(twice);
-    addOne(atom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true));
   }
   ImGui::PopID();
   if (!oriented) {
@@ -1526,6 +1513,302 @@ void Ui::drawIdentityTab(app::Shell& shell, const std::string& piece) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
   }
+}
+
+void Ui::drawFieldsTab(app::Shell& shell) {
+  app::Editor* editor = shell.editor();
+  if (editor == nullptr) return;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextWrapped(
+      "A field is a named number every piece (or every cell) carries. It travels with the "
+      "piece, is part of the position's hash, and is put back exactly by undo. Rules read "
+      "and write it - see the RULES tab.");
+  ImGui::TextWrapped(
+      "Two ways to say \"has this piece moved?\": a move's 'only from the home rank' "
+      "(position-derived, nothing to store - the pawn's double step) or a field set by a "
+      "rule (state that survives - 'charge' in the charged variant). Prefer the first "
+      "when the board already says the answer.");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+
+  for (const bool pieceFields : {true, false}) {
+    sectionHead(pieceFields ? "PIECE FIELDS" : "CELL FIELDS", t, fontSmall_, scale_);
+    std::vector<app::Editor::FieldInfo> list = editor->fields(pieceFields);
+    bool changed = false;
+    std::size_t removeAt = list.size();
+    ImGui::PushID(pieceFields ? "piece-fields" : "cell-fields");
+    ImGui::PushFont(small);
+    for (std::size_t i = 0; i < list.size(); ++i) {
+      ImGui::PushID(static_cast<int>(i));
+      app::Editor::FieldInfo& f = list[i];
+      if (editText("##name", f.name, px(150.0f))) changed = true;
+      ImGui::SameLine();
+      ImGui::TextUnformatted("start");
+      ImGui::SameLine();
+      if (stepper("default", f.defaultValue, -999, 999, t, scale_, px(40.0f))) changed = true;
+      ImGui::SameLine();
+      ImGui::TextUnformatted("from");
+      ImGui::SameLine();
+      if (stepper("min", f.minValue, -999, 999, t, scale_, px(40.0f))) changed = true;
+      ImGui::SameLine();
+      ImGui::TextUnformatted("to");
+      ImGui::SameLine();
+      if (stepper("max", f.maxValue, -999, 999, t, scale_, px(40.0f))) changed = true;
+      ImGui::SameLine();
+      if (ImGui::Checkbox("in the position hash", &f.hashed)) changed = true;
+      ImGui::SameLine();
+      if (ImGui::SmallButton("remove")) removeAt = i;
+      ImGui::PopID();
+    }
+    ImGui::PopFont();
+    if (removeAt < list.size()) {
+      list.erase(list.begin() + static_cast<std::ptrdiff_t>(removeAt));
+      changed = true;
+    }
+    if (button(pieceFields ? "+ PIECE FIELD" : "+ CELL FIELD", t, px(160), false, true,
+               true, display)) {
+      app::Editor::FieldInfo f;
+      f.name = pieceFields ? "charge" : "heat";
+      for (int n = 2; std::any_of(list.begin(), list.end(),
+                                   [&](const auto& o) { return o.name == f.name; });
+           ++n) {
+        f.name = (pieceFields ? "charge" : "heat") + std::to_string(n);
+      }
+      f.minValue = 0;
+      f.maxValue = 8;
+      list.push_back(std::move(f));
+      changed = true;
+    }
+    ImGui::PopID();
+    if (changed) {
+      const Result<void> ok = editor->setFields(pieceFields, list);
+      moveNote_ = ok.has_value() ? std::string{} : ok.error().message;
+    }
+  }
+  if (!moveNote_.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("%s", moveNote_.c_str());
+    ImGui::PopStyleColor();
+  }
+}
+
+void Ui::drawRulesTab(app::Shell& shell) {
+  app::Editor* editor = shell.editor();
+  if (editor == nullptr) return;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextWrapped(
+      "Rules run in the order listed, and the order is meaning: a rule that adds one to a "
+      "counter must come before the rule that tests the counter. Each has a moment it runs "
+      "at, an optional condition, and effects that run in order. Conditions and values "
+      "are expressions such as (gt (piece_field charge move.to) 2) or (is_capture); "
+      "move.from and move.to name the cells of the move.");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+
+  static const char* kTriggers[]{"on_move_filter", "on_capture", "on_move_end",
+                                 "on_turn_end", "on_result_query"};
+  static const char* kTriggerWords[]{"before a move is allowed", "when a piece is taken",
+                                     "after a move", "after the turn passes",
+                                     "when the result is asked"};
+  struct OpArgs {
+    const char* op;
+    std::vector<const char*> args;
+  };
+  static const OpArgs kOps[]{
+      {"destroy", {"at"}},
+      {"destroy_region", {"at", "radius", "affects"}},
+      {"transform", {"at", "piece"}},
+      {"spawn", {"at", "piece", "color"}},
+      {"set_piece_field", {"at", "field", "value"}},
+      {"set_cell_field", {"at", "field", "value"}},
+      {"forbid_move", {}},
+      {"repeat_turn", {}},
+      {"end_game", {"outcome"}},
+  };
+  const auto opIndex = [&](const std::string& op) {
+    for (std::size_t i = 0; i < std::size(kOps); ++i) {
+      if (op == kOps[i].op) return i;
+    }
+    return std::size_t{0};
+  };
+
+  std::vector<app::Editor::RuleInfo> list = editor->rules();
+  bool changed = false;
+  const std::vector<std::string> pieceNames = editor->pieceNames();
+  const auto pieceFields = editor->fields(true);
+
+  const auto argText = [](app::Editor::EffectInfo& e, const char* key) -> std::string& {
+    for (auto& [k, v] : e.args) {
+      if (k == key) return v;
+    }
+    e.args.emplace_back(key, std::string{});
+    return e.args.back().second;
+  };
+  // A new effect starts with the arguments an author would most often type.
+  const auto freshEffect = [&](const char* op) {
+    app::Editor::EffectInfo e;
+    e.op = op;
+    const std::string o = op;
+    if (o != "forbid_move" && o != "repeat_turn" && o != "end_game") {
+      e.args.emplace_back("at", "move.to");
+    }
+    if (o == "destroy_region") e.args.emplace_back("radius", "1");
+    if ((o == "transform" || o == "spawn") && !pieceNames.empty()) {
+      e.args.emplace_back("piece", pieceNames.back());
+    }
+    if ((o == "set_piece_field" || o == "set_cell_field")) {
+      const auto fields = editor->fields(o == "set_piece_field");
+      e.args.emplace_back("field", fields.empty() ? std::string{} : fields.front().name);
+      e.args.emplace_back("value", "0");
+    }
+    if (o == "end_game") e.args.emplace_back("outcome", "draw");
+    return e;
+  };
+
+  std::size_t removeRule = list.size();
+  int moveRule = 0;
+  std::size_t moveRuleAt = 0;
+  for (std::size_t r = 0; r < list.size(); ++r) {
+    app::Editor::RuleInfo& rule = list[r];
+    ImGui::PushID(static_cast<int>(r));
+    char head[48];
+    std::snprintf(head, sizeof(head), "RULE %zu", r + 1);
+    sectionHead(head, t, fontSmall_, scale_);
+    ImGui::PushFont(small);
+    if (editText("##rname", rule.name, px(260.0f))) changed = true;
+    ImGui::SameLine();
+    std::size_t when = 2;
+    for (std::size_t i = 0; i < std::size(kTriggers); ++i) {
+      if (rule.when == kTriggers[i]) when = i;
+    }
+    if (ImGui::Button(kTriggerWords[when])) {
+      rule.when = kTriggers[(when + 1) % std::size(kTriggers)];
+      changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("up") && r > 0) { moveRule = -1; moveRuleAt = r; }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("down") && r + 1 < list.size()) { moveRule = 1; moveRuleAt = r; }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("remove rule")) removeRule = r;
+
+    ImGui::TextUnformatted("only when");
+    ImGui::SameLine(px(80.0f));
+    if (editText("##cond", rule.condition, px(480.0f))) changed = true;
+    if (rule.condition.empty()) {
+      ImGui::SameLine();
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+      ImGui::TextUnformatted("(always)");
+      ImGui::PopStyleColor();
+    }
+
+    std::size_t removeEffect = rule.effects.size();
+    int moveEffect = 0;
+    std::size_t moveEffectAt = 0;
+    for (std::size_t e = 0; e < rule.effects.size(); ++e) {
+      app::Editor::EffectInfo& eff = rule.effects[e];
+      ImGui::PushID(static_cast<int>(e));
+      char label[48];
+      std::snprintf(label, sizeof(label), "%zu  %s", e + 1, eff.op.c_str());
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
+      if (ImGui::Button(label, ImVec2(px(170.0f), 0.0f))) {
+        // Pressing the name steps to the next effect kind, with that kind's arguments.
+        eff = freshEffect(kOps[(opIndex(eff.op) + 1) % std::size(kOps)].op);
+        changed = true;
+      }
+      ImGui::PopStyleColor();
+      for (const char* arg : kOps[opIndex(eff.op)].args) {
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+        ImGui::TextUnformatted(arg);
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::PushID(arg);
+        if (editText("##a", argText(eff, arg), std::string(arg) == "value" || std::string(arg) == "affects" ? px(200.0f) : px(110.0f))) {
+          changed = true;
+        }
+        ImGui::PopID();
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("up") && e > 0) { moveEffect = -1; moveEffectAt = e; }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("down") && e + 1 < rule.effects.size()) { moveEffect = 1; moveEffectAt = e; }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("x")) removeEffect = e;
+      ImGui::PopID();
+    }
+    if (removeEffect < rule.effects.size()) {
+      rule.effects.erase(rule.effects.begin() + static_cast<std::ptrdiff_t>(removeEffect));
+      changed = true;
+    }
+    if (moveEffect != 0) {
+      std::swap(rule.effects[moveEffectAt],
+                rule.effects[static_cast<std::size_t>(static_cast<int>(moveEffectAt) + moveEffect)]);
+      changed = true;
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextUnformatted("add an effect:");
+    ImGui::PopStyleColor();
+    ImGui::PushID("add-effect");
+    for (const OpArgs& op : kOps) {
+      ImGui::SameLine();
+      if (ImGui::SmallButton(op.op)) {
+        rule.effects.push_back(freshEffect(op.op));
+        changed = true;
+      }
+    }
+    ImGui::PopID();
+    ImGui::PopFont();
+    ImGui::PopID();
+  }
+  if (removeRule < list.size()) {
+    list.erase(list.begin() + static_cast<std::ptrdiff_t>(removeRule));
+    changed = true;
+  }
+  if (moveRule != 0) {
+    std::swap(list[moveRuleAt],
+              list[static_cast<std::size_t>(static_cast<int>(moveRuleAt) + moveRule)]);
+    changed = true;
+  }
+
+  sectionHead("ADD A RULE", t, fontSmall_, scale_);
+  if (button("+ RULE", t, px(110), false, true, true, display)) {
+    app::Editor::RuleInfo rule;
+    rule.name = "new rule";
+    rule.effects.push_back(freshEffect("forbid_move"));
+    rule.when = "on_move_filter";
+    list.push_back(std::move(rule));
+    changed = true;
+  }
+  (void)pieceFields;
+  if (changed) {
+    const Result<void> ok = editor->setRules(list);
+    moveNote_ = ok.has_value() ? std::string{} : ok.error().message;
+  }
+
+  // What the engine reads: the loader's own description, or its own complaint.
+  sectionHead("THE ENGINE READS THIS AS", t, fontSmall_, scale_);
+  const Result<std::string> described = editor->describeRules();
+  ImGui::PushFont(small);
+  if (described.has_value()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.moss));
+    ImGui::TextWrapped("%s", described->empty() ? "no rules" : described->c_str());
+  } else {
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("%s", described.error().format().c_str());
+  }
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
 }
 
 }  // namespace cb::render

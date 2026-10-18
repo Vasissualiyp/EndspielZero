@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <optional>
@@ -89,6 +90,38 @@ class VariantDoc {
       std::string_view piece) const;
   [[nodiscard]] Result<void> setPieceIcon(std::string_view piece,
                                           const std::optional<assets::IconModel>& icon);
+
+  /// A custom data field: a named integer column carried by every piece (or every cell).
+  /// Part of the variant's identity, and of the position hash when `hashed`.
+  struct FieldInfo {
+    std::string name;
+    int defaultValue{0};
+    int minValue{-32768};
+    int maxValue{32767};
+    bool hashed{true};
+    friend bool operator==(const FieldInfo&, const FieldInfo&) = default;
+  };
+  [[nodiscard]] std::vector<FieldInfo> fields(bool pieceFields) const;
+  [[nodiscard]] Result<void> setFields(bool pieceFields, const std::vector<FieldInfo>& list);
+
+  /// A rule, spelled the way the file spells it: a trigger, an optional S-expression
+  /// condition, and ordered effects whose arguments are the file's own strings (`at`,
+  /// `value`, `piece`, `field`, `radius`, `affects`, `color`, `outcome`). The editor keeps
+  /// them as text so that the one parser that reads the file is the one that judges them.
+  struct EffectInfo {
+    std::string op;
+    std::vector<std::pair<std::string, std::string>> args;
+    friend bool operator==(const EffectInfo&, const EffectInfo&) = default;
+  };
+  struct RuleInfo {
+    std::string name;
+    std::string when{"on_move_end"};
+    std::string condition;
+    std::vector<EffectInfo> effects;
+    friend bool operator==(const RuleInfo&, const RuleInfo&) = default;
+  };
+  [[nodiscard]] std::vector<RuleInfo> rules() const;
+  [[nodiscard]] Result<void> setRules(const std::vector<RuleInfo>& list);
 
   /// The author's one-line pitch. Cosmetic: not part of `VariantId`.
   [[nodiscard]] std::string description() const;

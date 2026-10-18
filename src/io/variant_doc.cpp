@@ -604,4 +604,115 @@ Result<void> VariantDoc::setPieceIcon(std::string_view piece,
   return {};
 }
 
+
+// ---------------------------------------------------------------------------
+// Custom fields and rules.
+// ---------------------------------------------------------------------------
+
+std::vector<VariantDoc::FieldInfo> VariantDoc::fields(bool pieceFields) const {
+  std::vector<FieldInfo> out;
+  const auto* arr = impl_->table[pieceFields ? "piece_field" : "cell_field"].as_array();
+  if (arr == nullptr) return out;
+  for (const auto& node : *arr) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    FieldInfo f;
+    f.name = (*t)["name"].value_or(std::string{});
+    f.defaultValue = static_cast<int>((*t)["default"].value_or<std::int64_t>(0));
+    f.minValue = static_cast<int>((*t)["min"].value_or<std::int64_t>(-32768));
+    f.maxValue = static_cast<int>((*t)["max"].value_or<std::int64_t>(32767));
+    f.hashed = (*t)["hashed"].value_or(true);
+    out.push_back(std::move(f));
+  }
+  return out;
+}
+
+Result<void> VariantDoc::setFields(bool pieceFields, const std::vector<FieldInfo>& list) {
+  const char* key = pieceFields ? "piece_field" : "cell_field";
+  if (list.empty()) {
+    impl_->table.erase(key);
+    return {};
+  }
+  toml::array arr;
+  for (const FieldInfo& f : list) {
+    toml::table t;
+    t.insert("name", f.name);
+    t.insert("default", static_cast<std::int64_t>(f.defaultValue));
+    t.insert("min", static_cast<std::int64_t>(f.minValue));
+    t.insert("max", static_cast<std::int64_t>(f.maxValue));
+    if (!f.hashed) t.insert("hashed", false);
+    arr.push_back(std::move(t));
+  }
+  impl_->table.insert_or_assign(key, std::move(arr));
+  return {};
+}
+
+std::vector<VariantDoc::RuleInfo> VariantDoc::rules() const {
+  std::vector<RuleInfo> out;
+  const auto* arr = impl_->table["rule"].as_array();
+  if (arr == nullptr) return out;
+  for (const auto& node : *arr) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    RuleInfo r;
+    r.name = (*t)["name"].value_or(std::string{});
+    r.when = (*t)["when"].value_or(std::string{"on_move_end"});
+    r.condition = (*t)["if"].value_or(std::string{});
+    if (const auto* effects = (*t)["effect"].as_array()) {
+      for (const auto& enode : *effects) {
+        const auto* et = enode.as_table();
+        if (et == nullptr) continue;
+        EffectInfo e;
+        e.op = (*et)["op"].value_or(std::string{});
+        for (const auto& [key, value] : *et) {
+          const std::string k(key.str());
+          if (k == "op") continue;
+          if (const auto* str = value.as_string()) {
+            e.args.emplace_back(k, str->get());
+          } else if (const auto* num = value.as_integer()) {
+            e.args.emplace_back(k, std::to_string(num->get()));
+          }
+        }
+        r.effects.push_back(std::move(e));
+      }
+    }
+    out.push_back(std::move(r));
+  }
+  return out;
+}
+
+Result<void> VariantDoc::setRules(const std::vector<RuleInfo>& list) {
+  if (list.empty()) {
+    impl_->table.erase("rule");
+    return {};
+  }
+  toml::array arr;
+  for (const RuleInfo& r : list) {
+    toml::table t;
+    t.insert("name", r.name);
+    t.insert("when", r.when);
+    if (!r.condition.empty()) t.insert("if", r.condition);
+    toml::array effects;
+    for (const EffectInfo& e : r.effects) {
+      toml::table et;
+      et.insert("op", e.op);
+      for (const auto& [key, value] : e.args) {
+        // The one numeric argument is written as a number; everything else is the file's
+        // own text (an expression, a piece or field name, an outcome).
+        if (key == "radius" && !value.empty() &&
+            value.find_first_not_of("0123456789") == std::string::npos) {
+          et.insert(key, static_cast<std::int64_t>(std::stoll(value)));
+        } else if (!value.empty()) {
+          et.insert(key, value);
+        }
+      }
+      effects.push_back(std::move(et));
+    }
+    t.insert("effect", std::move(effects));
+    arr.push_back(std::move(t));
+  }
+  impl_->table.insert_or_assign("rule", std::move(arr));
+  return {};
+}
+
 }  // namespace cb

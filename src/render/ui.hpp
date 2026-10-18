@@ -277,6 +277,8 @@ class Ui {
   /// The flat outline the board draws when it is drawn flat (M7.3.5).
   void drawIconTab(app::Shell& shell);
   void drawIdentityTab(app::Shell& shell, const std::string& piece);
+  void drawFieldsTab(app::Shell& shell);
+  void drawRulesTab(app::Shell& shell);
   /// Write the author's finished edit to the document. Held back while the pointer is
   /// down, so a drag is one undo entry, and refused while the shape is invalid.
   void commitDesign(app::Shell& shell, const std::string& piece);

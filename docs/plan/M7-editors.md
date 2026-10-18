@@ -488,3 +488,65 @@ Wave 2.
   shows its message in red; the add-a-move row has a "queen" bundle.
 - Still open: bodies and icons are not yet written into the variant file or used by the
   renderer (M7.3.4 onward), and there is no element-placement tool.
+
+
+## Revision 2026-10-18 (b) - the piece designer, implemented
+
+Built, in the order the spec asks for them. Everything below is reachable from the piece
+designer's six tabs (MOVES, BODY, FLAT ICON, IDENTITY, FIELDS, RULES) and is tested
+headlessly through `app::Editor` unless it says otherwise.
+
+- **The test board (M7.1.4).** Left-click places the chosen piece (ENEMY is captured, FRIEND
+  blocks, ERASE; pressing the same piece again takes it off) on the cell under the pointer
+  in **any** dimension - the hit test runs on the drawn quads, nearest first - and right or
+  middle drag turns the board. There is no window over the board, so neither gesture can be
+  eaten. Hops are modelled (one hurdle). Each row of the move table says what it amounts to:
+  "N dirs" on this board, or "needs N axes" when the atom has more axes than the board.
+- **Moves (M7.1.1-3).** Every `MoveAtom` field is editable: steps per axis, kind, capture,
+  repeats, forward, and - in the selected move's detail - min/max/to-the-edge, home rank,
+  leaves-en-passant. The palette (`Editor::bundleAtoms`) is rook, bishop, knight, queen
+  (`straightLineAtoms(kUnlimited, axes)`: every straight line), king, unicorn, step,
+  forward step, forward capture and **pawn** (the three canonical rows). Dropping a bundle
+  twice is a no-op, "add everything" unions another piece's moves, and the tests build the
+  shipped pawn, knight, bishop, rook, queen and king from the bundles and compare their atoms.
+  Rook + bishop is the queen on a plane and lacks the cube diagonals above it: pinned.
+- **Bodies (M7.3).** `assets::PieceModel` gains per-element `lateral`, `thickness` and
+  `tangent`. An element is an outline in a vertical plane through the axis (`x` radial, or
+  round the rim when `tangent`), extruded `thickness`, anchored at `(radius, height)` and
+  placed by the symmetry: `k-fold` repeats it k times round the axis (a crown's points, a
+  rook's merlons), `mirror` places it once on the front and, when `lateral != 0`, its
+  reflection (a knight's ears). `render::assembleModel` builds the real mesh - the revolve
+  and the elements - which the designer's preview shades and the game draws. Every shipped
+  body is a "start from" generator, as is every piece already in the variant. Elements are
+  placed by dragging their anchor on the profile and shaped in their own outline editor.
+- **Icons (M7.3.5).** Fills and cut-outs are edited separately; every shipped faceted icon
+  is a generator.
+- **Storage.** `[piece.body]` and `[piece.icon]` tables of integer permille inside the
+  `[[piece]]` they belong to (`io/model_toml.*` writes and reads them). The loader puts a
+  body that validates on `PieceTypeDef::body`/`icon` and drops one that does not - a
+  cosmetic never makes a variant unloadable - and neither is in `VariantId` (tested).
+- **In the game.** `BoardRenderer::syncBodies` gives a variant's authored bodies the custom
+  shape slots after the archetypes (`kCustomShapes` = 12, `customShape(slot)`); the shipped
+  ranges are untouched (tested). Pieces with an authored icon draw it on the flat board;
+  a body with no icon of its own keeps its archetype's.
+- **Identity (M7.4).** Name (renames the piece and every promotion that names it), symbol,
+  royal, resets-draw-clock, height (or from-the-moves), fallback shape, promotes-to, and the
+  piece list: new from this one (a copy: moves, body and icon), delete.
+- **Fields and rules (M7.2).** Piece and cell fields (name, start, min, max, hashed) and the
+  ordered rule list: trigger, condition, effects with each effect's own arguments, reordering,
+  and "the engine reads this as", the loader's own description or its own complaint. The
+  fields and expressions are the file's text, so the loader is the only validator.
+- **One validator (M7.0.3).** After every edit the screen runs the real loader on the
+  document (cached per `Editor::revision`); SAVE is disabled and the first error shown while
+  it fails, and `Shell::saveEditor` refuses too. Undo/redo reload the designer from the
+  document, which is the store.
+- **Where it saves.** The player's own variants directory
+  (`~/.config/chessbox/variants`, `--variants-dir DIR`): the designer never overwrites a
+  shipped file, and a variant saved under a shipped name takes its place in the library.
+- **Review tooling.** `chessbox_gui --shot --screen designer|body|flat --piece NAME
+  --ui-click "x,y;x,y,button;drag:x1,y1,x2,y2,button"` drives the real UI headlessly.
+
+Still open: the dry run of a rule on a scratch position (M7.2.2), the package directory with
+`model/` and `icon/` files and the storage seam (M7.0.4), "revert to base" beyond RESET, the
+game editor (M7.5, Wave 2), and bodies in the overture/menu scenes (they draw the shipped
+archetype for a piece's symbol, not the variant's own).

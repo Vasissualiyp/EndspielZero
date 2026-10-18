@@ -481,6 +481,36 @@ TEST_CASE("the editor opens the current variant and saves it back", "[unit][app]
   std::filesystem::remove(out, ec);
 }
 
+TEST_CASE("the editor will not save a document the loader would refuse", "[unit][app]") {
+  auto shell = makeShell(tempSettings("editor-invalid.conf"));
+  shell->setVariantSourceLoader([](const std::string& name) -> Result<std::string> {
+    std::ifstream in(test::variantPath(name));
+    if (!in) return fail(ErrorCode::ParseError, "cannot open '" + name + "'");
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+  });
+  const auto out = std::filesystem::temp_directory_path() / "chessbox-shell-invalid.toml";
+  std::error_code ec;
+  std::filesystem::remove(out, ec);
+  shell->setVariantPathResolver([&](const std::string&) { return out; });
+  shell->go(Screen::Editor);
+  REQUIRE(shell->editor() != nullptr);
+
+  // Removing the knight leaves the starting position naming a piece that is gone: the
+  // loader's complaint, which is also the save's - there is no "save anyway".
+  REQUIRE(shell->editor()->removePiece("knight").has_value());
+  CHECK_FALSE(shell->editor()->validate().has_value());
+  CHECK_FALSE(shell->saveEditor().has_value());
+  CHECK_FALSE(std::filesystem::exists(out));
+  CHECK(shell->editor()->dirty());
+
+  shell->editor()->undo();
+  CHECK(shell->saveEditor().has_value());
+  CHECK(std::filesystem::exists(out));
+  std::filesystem::remove(out, ec);
+}
+
 TEST_CASE("every exotic term the curated path shows is defined", "[unit][app]") {
   const auto& g = glossary();
   REQUIRE_FALSE(g.empty());
