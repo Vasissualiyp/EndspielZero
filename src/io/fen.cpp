@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "io/fen.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <sstream>
 #include <vector>
@@ -22,6 +23,38 @@ bool startsHere(const VariantSpec& v, CellId cell, PieceTypeId type, std::uint8_
     }
   }
   return false;
+}
+
+/// The partner that holds a compound move's *right*: walking the mover's line, the first
+/// piece of the side that is of a partner kind (and unmoved, when required), whatever stands
+/// between - a queen on d1 does not take away the right to castle, only the move for now.
+/// FEN's castling field is exactly this, per letter.
+CellId compoundPartner(const Position& p, const CompoundMove& cm, Color side, CellId from) {
+  const VariantSpec& v = p.variant();
+  const Piece piece = p.at(from);
+  if (piece.empty() || piece.type != cm.mover || piece.colorOf() != side) return kInvalidCell;
+  if (cm.moverUnmoved && piece.hasMoved()) return kInvalidCell;
+  const Direction dir = v.dirTable[cm.unitDir[static_cast<std::size_t>(side)]];
+  Walker w = v.geom.start(from, dir);
+  std::uint32_t k = 0;
+  while (k++ < v.dims.cellCount() && v.geom.step(w)) {
+    if (w.cell == from) return kInvalidCell;
+    const Piece other = p.at(w.cell);
+    if (other.empty() || other.colorOf() != side) continue;
+    if (std::find(cm.partners.begin(), cm.partners.end(), other.type) == cm.partners.end()) continue;
+    if (k <= cm.steps) continue;
+    if (cm.partnerUnmoved && other.hasMoved()) continue;
+    return w.cell;
+  }
+  return kInvalidCell;
+}
+
+/// Does some piece of `side` hold this compound move's right?
+CellId compoundRight(const Position& p, const CompoundMove& cm, Color side) {
+  for (CellId c = 0; c < p.cellCount(); ++c) {
+    if (const CellId partner = compoundPartner(p, cm, side, c); partner != kInvalidCell) return partner;
+  }
+  return kInvalidCell;
 }
 
 }  // namespace
@@ -62,6 +95,14 @@ std::string toFen(const Position& p) {
   for (const CastleTemplate& ct : v.castles) {
     if ((p.castleRights() & (1u << ct.rightsBit)) != 0) castling += ct.name;
   }
+  // The compound moves' letters, White's then Black's, in declaration order: KQkq.
+  for (const Color side : {Color::White, Color::Black}) {
+    for (const CompoundMove& cm : v.compounds) {
+      if (cm.fenLetter == 0 || compoundRight(p, cm, side) == kInvalidCell) continue;
+      castling += side == Color::White ? static_cast<char>(std::toupper(cm.fenLetter))
+                                       : static_cast<char>(std::tolower(cm.fenLetter));
+    }
+  }
   if (castling.empty()) castling = "-";
 
   std::ostringstream out;
@@ -69,18 +110,22 @@ std::string toFen(const Position& p) {
       << ' ' << cellName(d, p.epTarget()) << ' ' << p.halfmoveClock() << ' '
       << p.fullmoveNumber();
 
-  // The unmoved pieces, only when they are not what the start position implies: a game
-  // that has gone the usual way writes the usual FEN, so nothing existing changes.
-  bool unusual = false;
+  // The unmoved pieces, only when reading this FEN *without* the field would not give them
+  // back: a game that has gone the usual way writes the usual FEN, so nothing existing
+  // changes. The reader's own default is the yardstick, so the two cannot disagree.
   std::string unmoved;
   for (CellId c = 0; c < d.cellCount(); ++c) {
     const Piece piece = p.at(c);
-    if (piece.empty() || !v.pieces[piece.type].tracksMoved) continue;
-    const bool isUnmoved = !piece.hasMoved();
-    if (isUnmoved != startsHere(v, c, piece.type, piece.color)) unusual = true;
-    if (isUnmoved) {
-      if (!unmoved.empty()) unmoved += ',';
-      unmoved += cellName(d, c);
+    if (piece.empty() || !v.pieces[piece.type].tracksMoved || piece.hasMoved()) continue;
+    if (!unmoved.empty()) unmoved += ',';
+    unmoved += cellName(d, c);
+  }
+  bool unusual = false;
+  if (const auto base = fromFen(v, out.str()); base.has_value()) {
+    for (CellId c = 0; c < d.cellCount() && !unusual; ++c) {
+      const Piece piece = p.at(c);
+      if (piece.empty() || !v.pieces[piece.type].tracksMoved) continue;
+      unusual = base->at(c).hasMoved() != piece.hasMoved();
     }
   }
   // Marks other than the en-passant target (which has its own field): `tag:cell:plies:side`,
@@ -178,6 +223,9 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
           break;
         }
       }
+      for (const CompoundMove& cm : v.compounds) {
+        if (cm.fenLetter != 0 && std::toupper(cm.fenLetter) == std::toupper(ch)) found = true;
+      }
       if (!found) {
         return fail(ErrorCode::ParseError, std::string("castling field mentions '") + ch +
                                                "', which this variant does not declare");
@@ -237,6 +285,26 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
         if (!cell.has_value()) return fail(cell.error().code, cell.error().message);
         p.setMoved(*cell, false);
         at = comma + 1;
+      }
+    }
+  }
+
+  // ---- compound moves' rights --------------------------------------------------
+  // A letter the castling field leaves out is a right given up: the partner has moved, even
+  // if it still stands where it began. (A letter present asks nothing more: the pieces being
+  // unmoved is what holds the right.)
+  if (!v.compounds.empty() && fields.size() > 2) {
+    for (const Color side : {Color::White, Color::Black}) {
+      for (const CompoundMove& cm : v.compounds) {
+        if (cm.fenLetter == 0) continue;
+        const char letter = side == Color::White ? static_cast<char>(std::toupper(cm.fenLetter))
+                                                  : static_cast<char>(std::tolower(cm.fenLetter));
+        if (fields[2].find(letter) != std::string::npos) continue;
+        for (CellId c = 0; c < d.cellCount(); ++c) {
+          if (const CellId partner = compoundPartner(p, cm, side, c); partner != kInvalidCell) {
+            p.setMoved(partner, true);
+          }
+        }
       }
     }
   }

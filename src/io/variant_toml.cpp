@@ -589,6 +589,68 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     }
   }
 
+  // ---- compound moves ----------------------------------------------------------
+  if (const auto* comps = tbl["compound"].as_array()) {
+    std::vector<std::string> axisNames;
+    for (std::size_t i = 0; i < v.dims.dims(); ++i) axisNames.push_back(v.dims.name(i));
+    for (const auto& node : *comps) {
+      const auto* t = node.as_table();
+      if (t == nullptr) {
+        return fail(ErrorCode::ValidationError, "[[compound]] must be a table", lineOf(node));
+      }
+      CompoundMove cm;
+      cm.name = (*t)["name"].value_or(std::string{});
+      const std::string letter = (*t)["fen"].value_or(std::string{});
+      if (!letter.empty()) cm.fenLetter = letter[0];
+      const std::string mover = (*t)["piece"].value_or(std::string{});
+      cm.mover = v.findPiece(mover);
+      if (cm.mover == kNoPiece) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "': no piece is called '" + mover + "'",
+                    lineOf(node));
+      }
+      // The mover's step is an exact move, spelled like any other.
+      toml::table asMove = *t;
+      asMove.insert_or_assign("type", std::string("exact"));
+      std::string why;
+      if (!readAtomKind(asMove, axisNames, v.orientationAxis, markTagNames, cm.step, why)) {
+        return fail(ErrorCode::ValidationError, "compound move '" + cm.name + "': " + why,
+                    lineOf(node));
+      }
+      cm.moverUnmoved = (*t)["unmoved"].value_or(true);
+      cm.partnerUnmoved = (*t)["partner_unmoved"].value_or(true);
+      if (const auto* partners = (*t)["partner"].as_array()) {
+        for (const auto& x : *partners) {
+          const std::string pn = x.value_or(std::string{});
+          const PieceTypeId id = v.findPiece(pn);
+          if (id == kNoPiece) {
+            return fail(ErrorCode::ValidationError,
+                        "compound move '" + cm.name + "': no partner piece is called '" + pn + "'",
+                        lineOf(node));
+          }
+          cm.partners.push_back(id);
+        }
+      }
+      if (const auto* safe = (*t)["safe"].as_array()) {
+        for (const auto& x : *safe) {
+          const std::string sc = x.value_or(std::string{});
+          if (sc == "from") {
+            cm.safe.push_back(CompoundMove::SafeCell::From);
+          } else if (sc == "path") {
+            cm.safe.push_back(CompoundMove::SafeCell::Path);
+          } else if (sc == "to") {
+            cm.safe.push_back(CompoundMove::SafeCell::To);
+          } else {
+            return fail(ErrorCode::ValidationError,
+                        "compound move '" + cm.name + "': 'safe' lists from, path and to - not '" + sc + "'",
+                        lineOf(node));
+          }
+        }
+      }
+      v.compounds.push_back(std::move(cm));
+    }
+  }
+
   // ---- rules ----------------------------------------------------------------
   // Parsed after pieces and fields, because an expression resolves names against them.
   if (const auto* rulesNode = tbl["rule"].as_array()) {

@@ -1374,7 +1374,7 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   heading("RULES", t, small);
   ImGui::PushFont(small);
   keyValue("en passant", v.enPassant ? "yes" : "no", t);
-  keyValue("castling", v.castles.empty() ? "no" : "yes", t);
+  keyValue("castling", (v.castles.empty() && v.compounds.empty()) ? "no" : "yes", t);
   const auto& promo = v.promotion[static_cast<std::size_t>(Color::White)];
   keyValue("promotion", promo.active() ? "on the far rank" : "none on this board", t);
   keyValue("stalemate",

@@ -274,11 +274,15 @@ void Position::make(const Move& m, Undo& u) {
           : static_cast<std::uint8_t>(mover.flags & ~kPieceMoved);
   addPiece(m.to, Piece{landing, mover.color, landedFlags});
 
-  if (has(m.flags, MoveFlag::Castle)) {
-    const CastleTemplate& ct = v_->castles[m.castleIndex];
-    const Piece rook = cells_[ct.rookFrom];
-    removePiece(ct.rookFrom);
-    addPiece(ct.rookTo, rook);
+  // A two-piece move (castling, any compound move): the partner is carried too, and has moved.
+  if (m.partnerFrom != kInvalidCell) {
+    const Piece partner = cells_[m.partnerFrom];
+    u.partnerFlags = partner.flags;
+    removePiece(m.partnerFrom);
+    addPiece(m.partnerTo, Piece{partner.type, partner.color,
+                                v_->pieces[partner.type].tracksMoved
+                                    ? static_cast<std::uint8_t>(partner.flags | kPieceMoved)
+                                    : partner.flags});
   }
 
   if (v_->pieces[mover.type].resetsDrawClock) resetClock = true;
@@ -375,11 +379,10 @@ void Position::unmake(const Move& m, const Undo& u) {
   setSideToMove(opponent(side_));
   if (side_ == Color::Black) --fullmove_;
 
-  if (has(m.flags, MoveFlag::Castle)) {
-    const CastleTemplate& ct = v_->castles[m.castleIndex];
-    const Piece rook = cells_[ct.rookTo];
-    removePiece(ct.rookTo);
-    addPiece(ct.rookFrom, rook);
+  if (m.partnerFrom != kInvalidCell) {
+    const Piece partner = cells_[m.partnerTo];
+    removePiece(m.partnerTo);
+    addPiece(m.partnerFrom, Piece{partner.type, partner.color, u.partnerFlags});
   }
 
   const Piece landed = cells_[m.to];

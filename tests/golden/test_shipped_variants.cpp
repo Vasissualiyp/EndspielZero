@@ -151,7 +151,7 @@ TEST_CASE("the geometry of each shipped board is what its file claims",
     // Because the rank axis is untouched, pawns and promotion survive.
     REQUIRE(v.orientationAxis >= 0);
     REQUIRE(v.promotion[static_cast<std::size_t>(Color::White)].active());
-    REQUIRE_FALSE(v.castles.empty());
+    REQUIRE_FALSE((v.castles.empty() && v.compounds.empty()));
   }
 
   SECTION("torus has no edges and therefore no promotion rank") {

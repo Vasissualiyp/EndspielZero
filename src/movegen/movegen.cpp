@@ -226,7 +226,70 @@ void MoveGen::generateCastles(const Position& p, Color side, MoveList& out) cons
     out.push(Move{.from = ct.kingFrom,
                   .to = ct.kingTo,
                   .flags = static_cast<std::uint8_t>(MoveFlag::Castle),
-                  .castleIndex = static_cast<std::uint8_t>(i)});
+                  .castleIndex = static_cast<std::uint8_t>(i),
+                  .partnerFrom = ct.rookFrom,
+                  .partnerTo = ct.rookTo});
+  }
+}
+
+void MoveGen::generateCompounds(const Position& p, Color side, MoveList& out) const {
+  const Geometry& geom = v_->geom;
+  const std::size_t ci = static_cast<std::size_t>(side);
+  for (std::size_t i = 0; i < v_->compounds.size(); ++i) {
+    const CompoundMove& cm = v_->compounds[i];
+    const Direction dir = v_->dirTable[cm.unitDir[ci]];
+    p.occupancy(side).forEach([&](std::size_t idx) {
+      const auto from = static_cast<CellId>(idx);
+      const Piece piece = p.at(from);
+      if (piece.type != cm.mover) return;
+      if (cm.moverUnmoved && piece.hasMoved()) return;
+
+      // Walk the mover's line, collecting the cells, until the first piece. That piece is
+      // the partner: found, never named, so no coordinate is written into the rule.
+      std::vector<CellId> cells;
+      Walker w = geom.start(from, dir);
+      CellId partnerCell = kInvalidCell;
+      for (std::uint32_t k = 1; k <= rayCap_; ++k) {
+        if (!geom.step(w)) break;
+        if (rayClosed(w, from, dir)) break;
+        cells.push_back(w.cell);
+        if (!p.isEmpty(w.cell)) {
+          partnerCell = w.cell;
+          break;
+        }
+      }
+      // The partner must lie beyond where the mover lands, so every cell it crosses and the
+      // one it lands on is empty.
+      if (partnerCell == kInvalidCell || cells.size() <= cm.steps) return;
+      const Piece partner = p.at(partnerCell);
+      if (partner.colorOf() != side) return;
+      if (std::find(cm.partners.begin(), cm.partners.end(), partner.type) == cm.partners.end()) return;
+      if (cm.partnerUnmoved && partner.hasMoved()) return;
+
+      const CellId dest = cells[cm.steps - 1];
+      const CellId crossed = cm.steps >= 2 ? cells[cm.steps - 2] : from;
+      for (const CompoundMove::SafeCell sc : cm.safe) {
+        switch (sc) {
+          case CompoundMove::SafeCell::From:
+            if (isAttacked(p, from, opponent(side))) return;
+            break;
+          case CompoundMove::SafeCell::Path:
+            for (std::uint32_t k = 0; k + 1 < cm.steps; ++k) {
+              if (isAttacked(p, cells[k], opponent(side))) return;
+            }
+            break;
+          case CompoundMove::SafeCell::To:
+            if (isAttacked(p, dest, opponent(side))) return;
+            break;
+        }
+      }
+      out.push(Move{.from = from,
+                    .to = dest,
+                    .flags = static_cast<std::uint8_t>(MoveFlag::Castle),
+                    .castleIndex = static_cast<std::uint8_t>(kCompoundBit | i),
+                    .partnerFrom = partnerCell,
+                    .partnerTo = crossed});
+    });
   }
 }
 
@@ -238,7 +301,10 @@ void MoveGen::generatePseudoLegalFor(const Position& p, Color side, bool include
                                      MoveList& out) const {
   p.occupancy(side).forEach(
       [&](std::size_t cell) { generateForPiece(p, static_cast<CellId>(cell), out); });
-  if (includeCastles) generateCastles(p, side, out);
+  if (includeCastles) {
+    generateCastles(p, side, out);
+    generateCompounds(p, side, out);
+  }
   // On a box board a move can only be discovered once, so this costs nothing
   // there and is skipped entirely.
   if (!v_->geom.isBox()) out.sortAndUnique();

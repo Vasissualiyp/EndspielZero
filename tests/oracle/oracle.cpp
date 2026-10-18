@@ -263,6 +263,57 @@ std::vector<Move> pseudoLegal(const Position& p) {
                        .flags = static_cast<std::uint8_t>(MoveFlag::Castle),
                        .castleIndex = static_cast<std::uint8_t>(i)});
   }
+  // Compound moves (castling and kin), done the long way: for every piece that could be the
+  // mover, walk its line cell by cell, find the partner, and test each condition by name.
+  for (std::size_t i = 0; i < v.compounds.size(); ++i) {
+    const CompoundMove& cm = v.compounds[i];
+    auto unit = expandAtomFor(cm.step, v.dims.dims(), v.orientationAxis, side);
+    if (unit.empty()) continue;
+    std::array<std::int16_t, kMaxDims> scaled{};
+    for (std::uint8_t a = 0; a < unit[0].n; ++a) {
+      scaled[a] = static_cast<std::int16_t>(unit[0].v[a] * v.dims.pitch(a));
+    }
+    const Direction dir = Direction::make(scaled, unit[0].n);
+    const std::uint32_t steps = exactSteps(cm.step);
+    for (CellId from = 0; from < v.dims.cellCount(); ++from) {
+      const Piece mover = p.at(from);
+      if (mover.empty() || mover.colorOf() != side || mover.type != cm.mover) continue;
+      if (cm.moverUnmoved && mover.hasMoved()) continue;
+      const auto cells = ray(v, from, dir, v.dims.cellCount());
+      CellId partner = kInvalidCell;
+      std::size_t at = 0;
+      for (; at < cells.size(); ++at) {
+        if (!p.at(cells[at].cell).empty()) {
+          partner = cells[at].cell;
+          break;
+        }
+      }
+      if (partner == kInvalidCell || at < steps) continue;  // partner beyond the landing cell
+      const Piece q = p.at(partner);
+      if (q.colorOf() != side) continue;
+      if (std::find(cm.partners.begin(), cm.partners.end(), q.type) == cm.partners.end()) continue;
+      if (cm.partnerUnmoved && q.hasMoved()) continue;
+      const CellId dest = cells[steps - 1].cell;
+      const CellId crossed = steps >= 2 ? cells[steps - 2].cell : from;
+      bool ok = true;
+      for (const CompoundMove::SafeCell sc : cm.safe) {
+        if (sc == CompoundMove::SafeCell::From) ok = ok && !isAttacked(p, from, opponent(side));
+        if (sc == CompoundMove::SafeCell::To) ok = ok && !isAttacked(p, dest, opponent(side));
+        if (sc == CompoundMove::SafeCell::Path) {
+          for (std::uint32_t k = 0; k + 1 < steps; ++k) {
+            ok = ok && !isAttacked(p, cells[k].cell, opponent(side));
+          }
+        }
+      }
+      if (!ok) continue;
+      out.push_back(Move{.from = from,
+                         .to = dest,
+                         .flags = static_cast<std::uint8_t>(MoveFlag::Castle),
+                         .castleIndex = static_cast<std::uint8_t>(kCompoundBit | i),
+                         .partnerFrom = partner,
+                         .partnerTo = crossed});
+    }
+  }
   return out;
 }
 

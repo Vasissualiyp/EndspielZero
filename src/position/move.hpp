@@ -10,6 +10,9 @@
 
 namespace cb {
 
+/// Set in `Move::castleIndex` when the move is a compound move rather than a castle template.
+inline constexpr std::uint8_t kCompoundBit = 0x80;
+
 enum class MoveFlag : std::uint8_t {
   None = 0,
   Capture = 1 << 0,
@@ -43,10 +46,15 @@ struct Move {
   CellId epVictim{kInvalidCell};
   PieceTypeId promoteTo{kNoPiece};
   std::uint8_t flags{0};
+  /// A legacy castle template's index, or `kCompoundBit | i` for the variant's i-th compound
+  /// move; 0xFF for neither.
   std::uint8_t castleIndex{0xFF};
   /// Which of the mover's atoms made this move (0xFF for none): `make` reads the marks it
   /// leaves from there. Not part of a move's identity.
   std::uint8_t atomIndex{0xFF};
+  /// A two-piece move (castling): where the partner starts and where it is carried.
+  CellId partnerFrom{kInvalidCell};
+  CellId partnerTo{kInvalidCell};
 
   [[nodiscard]] bool isCapture() const noexcept { return has(flags, MoveFlag::Capture); }
   [[nodiscard]] bool isCastle() const noexcept { return has(flags, MoveFlag::Castle); }
@@ -107,6 +115,8 @@ struct Undo {
   std::uint64_t hashBefore{0};
   /// The mover's flags before the move (its moved bit), which unmake puts back.
   std::uint8_t moverFlags{0};
+  /// The partner's flags before a two-piece move (its moved bit).
+  std::uint8_t partnerFlags{0};
   /// Cells a rule effect changed, with what stood there before.
   std::vector<std::pair<CellId, Piece>> cellRestores;
   std::vector<FieldChange> fieldChanges;

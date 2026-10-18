@@ -343,6 +343,57 @@ Result<void> VariantSpec::finalize() {
     usedBits.push_back(ct.rightsBit);
   }
 
+  // ---- compound moves ---------------------------------------------------------
+  for (CompoundMove& cm : compounds) {
+    if (cm.name.empty()) return fail(ErrorCode::ValidationError, "a compound move needs a name");
+    if (cm.mover == kNoPiece || cm.mover >= pieces.size()) {
+      return fail(ErrorCode::ValidationError,
+                  "compound move '" + cm.name + "' names a piece that does not exist");
+    }
+    if (cm.partners.empty()) {
+      return fail(ErrorCode::ValidationError,
+                  "compound move '" + cm.name + "' needs at least one partner piece");
+    }
+    for (PieceTypeId pt : cm.partners) {
+      if (pt == kNoPiece || pt >= pieces.size()) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "' names a partner that does not exist");
+      }
+    }
+    cm.step.kind = MoveKind::Exact;
+    cm.step.mode = MoveMode::Slide;  // the cells crossed are what the partner and the checks use
+    const auto canon = MoveAtom::canonicalize(cm.step);
+    if (!canon.has_value()) {
+      return fail(canon.error().code,
+                  "compound move '" + cm.name + "': " + canon.error().message);
+    }
+    cm.step = *canon;
+    if (cm.step.flip && orientationAxis < 0) {
+      return fail(ErrorCode::ValidationError,
+                  "compound move '" + cm.name + "' flips but the variant declares no orientation axis");
+    }
+    for (const Pin& pin : cm.step.pins) {
+      if (pin.axis >= nd) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "' steps along an axis the board does not have");
+      }
+    }
+    cm.steps = exactSteps(cm.step);
+    for (int ci = 0; ci < kNumColors; ++ci) {
+      const auto dirs = expandAtomFor(cm.step, nd, orientationAxis, static_cast<Color>(ci));
+      if (dirs.empty()) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "' has a step the board cannot take");
+      }
+      cm.unitDir[ci] = static_cast<std::uint32_t>(dirTable.size());
+      dirTable.push_back(scaleByPitch(dims, dirs[0]));
+    }
+    if (cm.moverUnmoved) pieces[cm.mover].tracksMoved = true;
+    if (cm.partnerUnmoved) {
+      for (PieceTypeId pt : cm.partners) pieces[pt].tracksMoved = true;
+    }
+  }
+
   if (enPassant && orientationAxis < 0) {
     return fail(ErrorCode::ValidationError,
                 "en passant needs an orientation axis to know what 'passing' means");
@@ -421,6 +472,16 @@ Result<void> VariantSpec::finalize() {
         h.add(static_cast<std::uint64_t>(a.fromRegion[ci].value));
       }
     }
+  }
+  for (const CompoundMove& cm : compounds) {
+    h.add(cm.name);
+    h.add(static_cast<std::uint64_t>(cm.fenLetter));
+    h.add(cm.mover);
+    h.add(cm.step.toString());
+    h.add(cm.moverUnmoved ? 1u : 0u);
+    for (PieceTypeId pt : cm.partners) h.add(pt);
+    h.add(cm.partnerUnmoved ? 1u : 0u);
+    for (const auto sc : cm.safe) h.add(static_cast<std::uint64_t>(sc));
   }
   for (std::size_t i = 1; i < markTags.size(); ++i) {
     h.add(markTags[i].name);

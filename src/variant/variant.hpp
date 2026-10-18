@@ -79,6 +79,36 @@ struct CastleTemplate {
   std::uint8_t rightsBit{0};
 };
 
+/// A move of two pieces (M19): castling, and any move like it. The *mover* makes an exact
+/// step (the king's two cells); the *partner* is found, not named - the first piece along
+/// the mover's direction of travel, beyond where the mover lands - and is carried to the cell
+/// the mover crossed last. Nothing is a fixed coordinate, so the same definition castles on
+/// any board size, along any axis, on either side, in any dimension.
+///
+/// The conditions are the ones castling has: the mover (and the partner) unmoved, the cells
+/// between them empty (implied by "the first piece along the way"), and none of the named
+/// cells attacked by the other side.
+struct CompoundMove {
+  /// Which cells of the mover's travel must not be attacked: where it starts, the cells it
+  /// crosses (strictly between start and landing), and where it lands.
+  enum class SafeCell : std::uint8_t { From, Path, To };
+
+  std::string name;
+  /// The FEN castling letter - upper case for White, lower for Black - or 0 for none.
+  char fenLetter{0};
+  PieceTypeId mover{kNoPiece};
+  /// The mover's exact step. Its direction per colour is resolved by finalize().
+  MoveAtom step;
+  bool moverUnmoved{true};
+  std::vector<PieceTypeId> partners;
+  bool partnerUnmoved{true};
+  std::vector<SafeCell> safe;
+  /// Resolved by finalize(): the unit direction of the step per colour (an index into the
+  /// direction table) and how many of them make the whole step.
+  std::uint32_t unitDir[kNumColors]{};
+  std::uint32_t steps{1};
+};
+
 struct StartPiece {
   Coord at;
   PieceTypeId type{kNoPiece};
@@ -117,6 +147,7 @@ class VariantSpec {
   /// Index 0 is the reserved empty entry, so a PieceTypeId indexes directly.
   std::vector<PieceTypeDef> pieces;
   std::vector<CastleTemplate> castles;
+  std::vector<CompoundMove> compounds;
   /// The tags marks can carry (M19). Index 0 is always "ep", the en-passant target, which
   /// blocks nothing; a variant adds its own, and a tag that `blocks` makes the cells it is
   /// on impassable and un-enterable (a "destroyed" square).
