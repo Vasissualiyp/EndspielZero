@@ -7,6 +7,9 @@
 #include <string_view>
 #include <vector>
 
+#include <optional>
+
+#include "assets/piece_model.hpp"
 #include "base/result.hpp"
 #include "pieces/atom.hpp"
 #include "space/dim_spec.hpp"
@@ -51,6 +54,41 @@ class VariantDoc {
   /// piece has that name.
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,
                                            const std::vector<MoveAtom>& atoms);
+
+  /// A piece's identity: everything about it that is not a move. `heightPermille` 0 means
+  /// "let the game decide"; `shape` empty means the archetype is read off the moves.
+  struct PieceInfo {
+    std::string name;
+    std::string symbol;
+    bool royal{false};
+    bool resetsDrawClock{false};
+    std::string shape;
+    int heightPermille{0};
+    std::vector<std::string> promotesTo;
+  };
+  [[nodiscard]] Result<PieceInfo> pieceInfo(std::string_view piece) const;
+  /// Rewrite a piece's identity (its name is not touched; see `renamePiece`).
+  [[nodiscard]] Result<void> setPieceInfo(std::string_view piece, const PieceInfo& info);
+  /// Rename a piece, and every `promotes_to` that names it.
+  [[nodiscard]] Result<void> renamePiece(std::string_view piece, std::string_view to);
+  /// Append a piece: a copy of `base` (its moves, identity, body and icon) under a new
+  /// name and symbol, or a plain one-step piece when `base` is empty. The order of
+  /// pieces is the order of their ids, so a new one goes last and nothing is renumbered.
+  [[nodiscard]] Result<void> addPiece(std::string_view name, std::string_view symbol,
+                                      std::string_view base);
+  /// Remove a piece and every promotion that names it. A variant keeps at least one.
+  [[nodiscard]] Result<void> removePiece(std::string_view piece);
+
+  /// A piece's authored 3-D body and flat icon, when it has any. Cosmetic: neither is
+  /// part of `VariantId`, and the loader ignores them. `nullopt` clears.
+  [[nodiscard]] Result<std::optional<assets::PieceModel>> pieceBody(
+      std::string_view piece) const;
+  [[nodiscard]] Result<void> setPieceBody(std::string_view piece,
+                                          const std::optional<assets::PieceModel>& body);
+  [[nodiscard]] Result<std::optional<assets::IconModel>> pieceIcon(
+      std::string_view piece) const;
+  [[nodiscard]] Result<void> setPieceIcon(std::string_view piece,
+                                          const std::optional<assets::IconModel>& icon);
 
   /// The author's one-line pitch. Cosmetic: not part of `VariantId`.
   [[nodiscard]] std::string description() const;

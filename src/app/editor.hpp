@@ -2,7 +2,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,6 +31,9 @@ class Editor {
   [[nodiscard]] Result<void> saveFile(const std::filesystem::path& path);
 
   [[nodiscard]] bool dirty() const noexcept { return cursor_ != savedCursor_; }
+  /// Bumps on every accepted edit, undo and redo, so a screen can tell its copy of a
+  /// piece's body or its cached validation is stale without comparing documents.
+  [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
 
   [[nodiscard]] bool canUndo() const noexcept { return cursor_ > 0; }
   [[nodiscard]] bool canRedo() const noexcept { return cursor_ + 1 < history_.size(); }
@@ -58,6 +63,30 @@ class Editor {
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,
                                            const std::vector<MoveAtom>& atoms);
 
+  /// A piece's identity, the piece list, and authored bodies. Every change is one entry
+  /// on the undo stack.
+  using PieceInfo = VariantDoc::PieceInfo;
+  [[nodiscard]] Result<PieceInfo> pieceInfo(std::string_view piece) const;
+  Result<void> setPieceInfo(std::string_view piece, const PieceInfo& info);
+  Result<void> renamePiece(std::string_view piece, std::string_view to);
+  Result<void> addPiece(std::string_view name, std::string_view symbol,
+                        std::string_view base);
+  Result<void> removePiece(std::string_view piece);
+  [[nodiscard]] Result<std::optional<assets::PieceModel>> pieceBody(
+      std::string_view piece) const;
+  Result<void> setPieceBody(std::string_view piece,
+                            const std::optional<assets::PieceModel>& body);
+  [[nodiscard]] Result<std::optional<assets::IconModel>> pieceIcon(
+      std::string_view piece) const;
+  Result<void> setPieceIcon(std::string_view piece,
+                            const std::optional<assets::IconModel>& icon);
+
+  /// Does the document, as it stands, load? The editor is a front end to the loader and
+  /// grows no second set of rules: this runs the real one on the serialized text and
+  /// returns its message, which is what the screen shows against the control that broke
+  /// it. SAVE is held back while this fails.
+  [[nodiscard]] Result<void> validate() const;
+
   [[nodiscard]] std::string serialize() const;
 
  private:
@@ -75,6 +104,7 @@ class Editor {
   std::vector<std::string> history_;
   std::size_t cursor_{0};
   std::size_t savedCursor_{0};
+  std::uint64_t revision_{0};
 };
 
 }  // namespace cb::app

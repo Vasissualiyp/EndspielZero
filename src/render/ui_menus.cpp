@@ -721,34 +721,6 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
 
-  // A transparent click target over the preview board: left-click a square to cycle it
-  // empty -> black piece -> white piece, so a capture can be tried before it is saved.
-  if (previewValid_) {
-    const float side = previewCell_ * static_cast<float>(kPreviewN);
-    ImGui::SetNextWindowPos(previewOrigin_, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(side, side), ImGuiCond_Always);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("##previewclicks", nullptr,
-                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBackground |
-                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoCollapse);
-    ImGui::InvisibleButton("##cells", ImVec2(side, side));
-    if (ImGui::IsItemClicked()) {
-      const ImVec2 m = ImGui::GetIO().MousePos;
-      const int x = static_cast<int>((m.x - previewOrigin_.x) / previewCell_);
-      const int y = static_cast<int>((m.y - previewOrigin_.y) / previewCell_);
-      if (x >= 0 && x < kPreviewN && y >= 0 && y < kPreviewN &&
-          !(x == kPreviewN / 2 && y == kPreviewN / 2)) {
-        auto& cell =
-            previewCells_[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
-        cell = static_cast<std::uint8_t>((cell + 1) % 3);
-      }
-    }
-    ImGui::End();
-    ImGui::PopStyleVar();
-  }
-
   const PaneMove move = paneMove();
   beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("editor", t, mono, scale_);
@@ -931,14 +903,28 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::SameLine();
   if (button("REDO", t, px(84), false, true, true, display)) editor->redo();
   ImGui::SameLine();
-  if (button("SAVE", t, px(84), editor->dirty(), false, true, display)) {
+  // The loader's verdict, cached per revision: one validator, and the message is its own.
+  // SAVE is held back while the document would not load - there is no "save anyway".
+  if (validatedRevision_ != editor->revision()) {
+    const Result<void> ok = editor->validate();
+    validateNote_ = ok.has_value() ? std::string{} : ok.error().format();
+    validatedRevision_ = editor->revision();
+  }
+  if (button("SAVE", t, px(84), editor->dirty(), false, validateNote_.empty(), display)) {
     (void)shell.saveEditor();
   }
   ImGui::SameLine();
   if (button("HELP", t, px(84), false, true, true, display)) editorPage_ = 2;
   ImGui::SameLine();
   if (button("CLEAR", t, px(88), false, true, true, display)) {
-    for (auto& row : previewCells_) row.fill(0);
+    for (auto& cells : previewOcc_) std::fill(cells.begin(), cells.end(), 0);
+  }
+  if (!validateNote_.empty()) {
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("cannot save: %s", validateNote_.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
   }
 
   // The controls are ImGui's, but they wear the game's clothes: rounded, panel-coloured,
@@ -992,17 +978,27 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     // Three jobs on one piece - how it moves, what its body is, what its flat outline
     // is - so three tabs rather than three screens. Moving between them must not feel
     // like leaving the piece behind.
-    designTab_ = std::clamp(designTab_, 0, 2);
-    tabRow({"MOVES", "BODY", "FLAT ICON"}, designTab_, t, fontDisplay_, scale_);
+    designTab_ = std::clamp(designTab_, 0, 3);
+    tabRow({"MOVES", "BODY", "FLAT ICON", "IDENTITY"}, designTab_, t, fontDisplay_,
+           scale_);
 
     const std::string piece = names[static_cast<std::size_t>(editorPiece_)];
+    // The header stays put and the tab scrolls under it: a designer this long would
+    // otherwise carry its own undo and tabs off the top of the screen.
+    ImGui::BeginChild("##designbody",
+                      ImVec2(0, std::max(px(160.0f), ImGui::GetContentRegionAvail().y -
+                                                         controlHeight() - px(26.0f))),
+                      false, ImGuiWindowFlags_NavFlattened);
     if (designTab_ == 0) {
       drawMovesTab(shell, piece);
     } else if (designTab_ == 1) {
       drawBodyTab(shell);
-    } else {
+    } else if (designTab_ == 2) {
       drawIconTab(shell);
+    } else {
+      drawIdentityTab(shell, piece);
     }
+    ImGui::EndChild();
   }
   ImGui::PopStyleColor(9);
   ImGui::PopStyleVar(3);

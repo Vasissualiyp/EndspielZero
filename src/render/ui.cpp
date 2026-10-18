@@ -2,6 +2,7 @@
 #include "render/ui.hpp"
 
 #include <algorithm>
+#include <unordered_map>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -173,9 +174,8 @@ float smoothstep(float t) {
 ///
 /// `behind` is what the icon is drawn on: the cut-outs are painted in it, which is how
 /// a knight gets an eye out of a single-colour silhouette.
-void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
-                    Archetype shape, IconStyle style) {
-  const PieceIcon icon = pieceIcon(style, shape);
+void drawIconTable(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
+                   const PieceIcon& icon) {
   // The box is 100 wide; r is the icon's half-size on screen.
   const float k = r / 50.0f;
   const auto trace = [&](const IconPoly& poly, ImU32 fill) {
@@ -192,6 +192,41 @@ void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
   };
   for (const IconPoly& poly : icon.fills) trace(poly, col);
   for (const IconPoly& poly : icon.cuts) trace(poly, behind);
+}
+
+void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
+                    Archetype shape, IconStyle style) {
+  drawIconTable(dl, c, r, col, behind, pieceIcon(style, shape));
+}
+
+/// A piece's authored icon as a drawable table, converted once and kept: the conversion
+/// owns the points the table's spans refer to. A piece with no icon of its own keeps the
+/// shipped one for its archetype. Checked by value, so an edit made in the designer is
+/// picked up the next frame.
+const PieceIcon* authoredIcon(const PieceTypeDef& def) {
+  if (!def.icon.has_value()) return nullptr;
+  struct Cached {
+    assets::IconModel model;
+    std::unique_ptr<OwnedIcon> table;
+  };
+  static std::unordered_map<const PieceTypeDef*, std::pair<Cached, PieceIcon>> cache;
+  const assets::IconModel& want = *def.icon;
+  auto& slot = cache[&def];
+  if (!slot.first.table || !(slot.first.model == want)) {
+    slot.first.model = want;
+    slot.first.table = std::make_unique<OwnedIcon>(want);
+    slot.second = slot.first.table->view();
+  }
+  return &slot.second;
+}
+
+void drawPieceOf(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
+                 const PieceTypeDef& def, IconStyle style) {
+  if (const PieceIcon* own = authoredIcon(def)) {
+    drawIconTable(dl, c, r, col, behind, *own);
+  } else {
+    drawPieceGlyph(dl, c, r, col, behind, archetypeFor(def), style);
+  }
 }
 
 }  // namespace
@@ -576,7 +611,7 @@ void Ui::newFrame() {
   if (inject_) {
     ImGuiIO& io = ImGui::GetIO();
     io.AddMousePosEvent(injectPos_.x, injectPos_.y);
-    io.AddMouseButtonEvent(0, injectDown_);
+    io.AddMouseButtonEvent(injectButton_, injectDown_);
   }
   ImGui::NewFrame();
 }
@@ -588,10 +623,21 @@ void Ui::updateObjectDrag(app::Shell& shell, const ImVec2& min, const ImVec2& ma
   // The grab has to *start* on the object. Testing "inside" every frame would let a
   // drag that began on a menu row keep turning the object once the pointer crossed the
   // hairline, which feels like the interface grabbing at the cursor.
-  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && inside && !io.WantCaptureMouse) {
-    objectDrag_ = true;
-  }
-  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) objectDrag_ = false;
+  // The piece designer's board uses the left button to place pieces, so there the grab is
+  // the right or middle button; everywhere else it is the left one.
+  const bool placing = shell.screen() == app::Screen::Editor;
+  const auto grabbing = [&] {
+    return placing ? (ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                      ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+                   : ImGui::IsMouseDown(ImGuiMouseButton_Left);
+  };
+  const auto pressed = [&] {
+    return placing ? (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+                      ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+                   : ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  };
+  if (pressed() && inside && !io.WantCaptureMouse) objectDrag_ = true;
+  if (!grabbing()) objectDrag_ = false;
   if (!objectDrag_) return;
 
   const app::Settings& set = shell.settings();
@@ -744,7 +790,6 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
 }
 
 void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& max) {
-  previewValid_ = false;
   const app::Editor* editor = shell.editor();
   if (editor == nullptr) return;
   const std::vector<std::string> names = editor->pieceNames();
@@ -785,10 +830,12 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   }
   const CellId origin = ds.toCell(centre);
 
-  std::vector<std::uint8_t> mark(cells.size() == 0 ? 0 : (ds.cellCount()), 0);
+  std::vector<std::uint8_t> mark(ds.cellCount(), 0);
+  std::vector<std::uint8_t>& occupied = previewOcc_[static_cast<std::size_t>(dims)];
+  occupied.resize(ds.cellCount(), 0);
+  occupied[origin] = 0;
   const int orientIndex = editor->orientationAxis() == 0 ? 0 : 1;
   for (const MoveAtom& a : *atoms) {
-    if (a.mode == MoveMode::Hop) continue;  // needs a hurdle; not modelled here
     const std::vector<Direction> dirs =
         a.oriented
             ? expandAtomOriented(a.mags, static_cast<std::uint8_t>(dims),
@@ -799,7 +846,9 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
                          ? extent - 1
                          : std::min(static_cast<int>(a.maxK), extent - 1);
     for (const Direction& d : dirs) {
-      for (int n = first; n <= last; ++n) {
+      // A hop must clear exactly one occupied cell, and only lands beyond it.
+      bool hurdled = false;
+      for (int n = 1; n <= last; ++n) {
         Coord p = centre;
         for (std::uint8_t k = 0; k < d.nsup; ++k) {
           const std::uint8_t ax = d.sup[k];
@@ -807,16 +856,26 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
         }
         if (!ds.inRange(p)) break;
         const CellId c = ds.toCell(p);
-        // Only the two-dimensional board carries the scratch pieces, so above it every
-        // ray simply runs to the edge - which is the thing worth seeing there anyway.
-        std::uint8_t occ = 0;
-        if (dims == 2) {
-          const int gx = p.c[0];
-          const int gy = extent - 1 - p.c[1];
-          if (gx >= 0 && gx < kPreviewN && gy >= 0 && gy < kPreviewN) {
-            occ =
-                previewCells_[static_cast<std::size_t>(gy)][static_cast<std::size_t>(gx)];
+        const std::uint8_t occ = occupied[c];
+        if (a.mode == MoveMode::Hop) {
+          if (!hurdled) {
+            if (occ != 0) hurdled = true;
+            continue;
           }
+          if (n < first) {
+            if (occ != 0) break;
+            continue;
+          }
+          if (occ != 0) {
+            if (occ == 1 && a.capture != CapturePolicy::Cannot) mark[c] = 2;
+            break;
+          }
+          if (a.capture != CapturePolicy::Must && mark[c] == 0) mark[c] = 1;
+          continue;
+        }
+        if (n < first) {
+          if (occ != 0 && a.mode != MoveMode::Leap) break;
+          continue;
         }
         if (occ != 0) {
           if (occ == 1 && a.capture != CapturePolicy::Cannot) mark[c] = 2;
@@ -909,52 +968,65 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
     }
   }
 
-  // The scratch pieces, and the piece itself, on the flat board only.
+  // The pieces: the selected one at the centre, and whatever has been placed, far to near
+  // like the tiles so a stack of boards overlaps the right way round.
   PieceTypeDef shapeDef;
   shapeDef.atoms = *atoms;
   const Archetype shape = archetypeFor(shapeDef);
   const float cell =
       std::hypot(at(1, 0, 0).x - at(0, 0, 0).x, at(1, 0, 0).y - at(0, 0, 0).y);
-  if (dims == 2) {
-    for (int gy = 0; gy < kPreviewN; ++gy) {
-      for (int gx = 0; gx < kPreviewN; ++gx) {
-        const std::uint8_t occ =
-            previewCells_[static_cast<std::size_t>(gy)][static_cast<std::size_t>(gx)];
-        if (occ == 0) continue;
-        Coord p(2);
-        p.c[0] = static_cast<std::int16_t>(gx);
-        p.c[1] = static_cast<std::int16_t>(extent - 1 - gy);
-        if (!ds.inRange(p)) continue;
-        for (const view::Placement& pl : cells) {
-          if (pl.cell != ds.toCell(p)) continue;
-          const ImVec2 c = at(pl.x, pl.y, pl.z);
-          dl->AddCircleFilled(c, cell * 0.36f, u32(t.pieceToken), 18);
-          drawPieceGlyph(dl, c, cell * 0.30f, u32(occ == 1 ? t.blackPiece : t.whitePiece),
-                         u32(t.pieceToken), Archetype::Dome, iconStyle_);
-          break;
-        }
-      }
+  for (auto it = tiles.begin(); it != tiles.end(); ++it) {
+    const std::uint8_t occ = it->cell == origin ? 3 : occupied[it->cell];
+    if (occ == 0) continue;
+    const ImVec2 c((it->p[0].x + it->p[1].x + it->p[2].x + it->p[3].x) * 0.25f,
+                   (it->p[0].y + it->p[1].y + it->p[2].y + it->p[3].y) * 0.25f);
+    const float r = cell * (dims == 2 ? 0.36f : 0.30f);
+    dl->AddCircleFilled(c, r, u32(t.pieceToken), 18);
+    if (occ == 3) {
+      drawPieceGlyph(dl, c, r * 0.84f, u32(t.whitePiece), u32(t.pieceToken), shape,
+                     iconStyle_);
+    } else {
+      drawPieceGlyph(dl, c, r * 0.84f, u32(occ == 1 ? t.blackPiece : t.whitePiece),
+                     u32(t.pieceToken), Archetype::Dome, iconStyle_);
     }
-  }
-  for (const view::Placement& pl : cells) {
-    if (pl.cell != origin) continue;
-    const ImVec2 c = at(pl.x, pl.y, pl.z);
-    dl->AddCircleFilled(c, cell * 0.36f, u32(t.pieceToken), 18);
-    drawPieceGlyph(dl, c, cell * 0.30f, u32(t.whitePiece), u32(t.pieceToken), shape,
-                   iconStyle_);
   }
 
-  // The click target for the scratch board, on the flat board only: above two dimensions
-  // a drag has to reach the board to turn it, and a window over it would eat the drag.
-  if (dims == 2) {
-    const view::Placement* first = nullptr;
-    for (const view::Placement& pl : cells) {
-      if (first == nullptr || pl.x < first->x || pl.y > first->y) first = &pl;
-    }
-    if (first != nullptr) {
-      previewOrigin_ = ImVec2(at(-0.5f, static_cast<float>(extent) - 0.5f, 0.0f));
-      previewCell_ = cell;
-      previewValid_ = true;
+  // The pointer. Left click places the chosen piece on the cell under it - in any
+  // dimension, by hit-testing the drawn quads nearest first - and right or middle drag
+  // turns the board (`updateObjectDrag`). Nothing is a window over the board, so neither
+  // gesture can be eaten by one.
+  ImGuiIO& io = ImGui::GetIO();
+  previewHover_ = -1;
+  const bool over = !io.WantCaptureMouse && io.MousePos.x >= min.x &&
+                    io.MousePos.x < max.x && io.MousePos.y >= min.y &&
+                    io.MousePos.y < max.y;
+  if (over) {
+    const auto inside = [&](const Tile& q) {
+      float sign = 0.0f;
+      for (int i = 0; i < 4; ++i) {
+        const ImVec2& a = q.p[i];
+        const ImVec2& b = q.p[(i + 1) % 4];
+        const float cr = (b.x - a.x) * (io.MousePos.y - a.y) -
+                         (b.y - a.y) * (io.MousePos.x - a.x);
+        if (cr != 0.0f) {
+          if (sign != 0.0f && (cr > 0.0f) != (sign > 0.0f)) return false;
+          sign = cr;
+        }
+      }
+      return true;
+    };
+    for (auto it = tiles.rbegin(); it != tiles.rend(); ++it) {
+      if (!inside(*it)) continue;
+      previewHover_ = static_cast<std::int64_t>(it->cell);
+      dl->AddQuad(it->p[0], it->p[1], it->p[2], it->p[3], u32(t.bone, 0.9f), 2.0f);
+      if (it->cell != origin && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        std::uint8_t& slot = occupied[it->cell];
+        // Pressing the same piece again takes it off: one gesture to place, one to undo.
+        slot = slot == static_cast<std::uint8_t>(previewTool_)
+                   ? static_cast<std::uint8_t>(0)
+                   : static_cast<std::uint8_t>(previewTool_);
+      }
+      break;
     }
   }
 }
@@ -2076,9 +2148,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // to sit on - and the thing being read is the figure.
       dl->AddCircleFilled(centre, radius, u32(t.pieceToken, focus), 24);
       dl->AddCircle(centre, radius, u32(t.boardRim, focus), 24, px(1.5f));
-      drawPieceGlyph(
+      drawPieceOf(
           dl, centre, radius * 0.82f, u32(white ? t.whitePiece : t.blackPiece, focus),
-          u32(t.pieceToken, focus), archetypeFor(v.pieces[piece.type]), iconStyle_);
+          u32(t.pieceToken, focus), v.pieces[piece.type], iconStyle_);
     };
 
     const view::MoveAnimation& anim = session.animation();

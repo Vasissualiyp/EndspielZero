@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "io/variant_toml.hpp"
 
+#include "io/model_toml.hpp"
+
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -340,6 +342,17 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                     "piece '" + p.name + "': height must be between 0.2 and 4.0",
                     lineOf(node));
       }
+    }
+    // An authored body and icon are cosmetic: one that does not build is dropped, and the
+    // piece is drawn from its archetype instead - a variant is never unplayable for want
+    // of a model.
+    if (const auto* bt = (*t)["body"].as_table()) {
+      auto body = bodyFromToml(*bt);
+      if (body.has_value() && assets::validate(*body).has_value()) p.body = std::move(body);
+    }
+    if (const auto* it = (*t)["icon"].as_table()) {
+      auto icon = iconFromToml(*it);
+      if (icon.has_value() && assets::validate(*icon).has_value()) p.icon = std::move(icon);
     }
     if (const auto* pr = (*t)["promotes_to"].as_array()) {
       for (const auto& x : *pr) promotesTo[p.name].push_back(x.value_or(std::string{}));

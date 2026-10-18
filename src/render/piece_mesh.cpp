@@ -622,6 +622,198 @@ void buildArchetype(MeshLibrary& m, Archetype which, std::int32_t base) {
 
 }  // namespace
 
+
+// ---------------------------------------------------------------------------
+// Authored bodies
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct V3 {
+  float x{0}, y{0}, z{0};
+};
+V3 operator+(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+V3 operator-(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+V3 operator*(V3 a, float k) { return {a.x * k, a.y * k, a.z * k}; }
+float dot3(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+V3 cross3(V3 a, V3 b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+/// Collects a model's triangles. A triangle's winding is decided here, from the normals
+/// its vertices carry, so the callers can build in whatever handedness is convenient - a
+/// mirrored copy is a reflection, which would otherwise turn every face inside out.
+struct ModelBuilder {
+  ModelMesh mesh;
+  float totalHeight{1.0f};
+
+  std::uint32_t vertex(V3 p, V3 n) {
+    const float len = std::sqrt(dot3(n, n));
+    if (len > 1e-8f) n = n * (1.0f / len);
+    mesh.vertices.push_back(
+        MeshVertex{{p.x, p.y, p.z}, {n.x, n.y, n.z}, p.z / totalHeight, {1, 1, 1, 1}});
+    return static_cast<std::uint32_t>(mesh.vertices.size() - 1);
+  }
+  void tri(std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+    const auto& va = mesh.vertices[a];
+    const auto& vb = mesh.vertices[b];
+    const auto& vc = mesh.vertices[c];
+    const V3 pa{va.pos[0], va.pos[1], va.pos[2]};
+    const V3 pb{vb.pos[0], vb.pos[1], vb.pos[2]};
+    const V3 pc{vc.pos[0], vc.pos[1], vc.pos[2]};
+    const V3 geometric = cross3(pb - pa, pc - pa);
+    if (dot3(geometric, geometric) < 1e-14f) return;  // a sliver on the axis: no area
+    const V3 want{va.normal[0] + vb.normal[0] + vc.normal[0],
+                  va.normal[1] + vb.normal[1] + vc.normal[1],
+                  va.normal[2] + vb.normal[2] + vc.normal[2]};
+    if (dot3(geometric, want) < 0.0f) std::swap(b, c);
+    mesh.indices.push_back(static_cast<std::uint16_t>(a));
+    mesh.indices.push_back(static_cast<std::uint16_t>(b));
+    mesh.indices.push_back(static_cast<std::uint16_t>(c));
+  }
+};
+
+float signedArea2(const std::vector<assets::ModelPoint>& pts) {
+  float a = 0.0f;
+  for (std::size_t i = 0; i < pts.size(); ++i) {
+    const auto& p = pts[i];
+    const auto& q = pts[(i + 1) % pts.size()];
+    a += static_cast<float>(p.x) * static_cast<float>(q.y) -
+         static_cast<float>(q.x) * static_cast<float>(p.y);
+  }
+  return a;
+}
+
+void revolve(ModelBuilder& b, const assets::PieceModel& model) {
+  const auto& pts = model.profile.points;
+  if (pts.size() < 3) return;
+  const float tau = 2.0f * std::numbers::pi_v<float>;
+  const int segs = std::max<int>(3, model.segments);
+  const float orient = signedArea2(pts) >= 0.0f ? 1.0f : -1.0f;
+  for (std::size_t i = 0; i < pts.size(); ++i) {
+    const auto& pa = pts[i];
+    const auto& pb = pts[(i + 1) % pts.size()];
+    if (pa.x <= 0 && pb.x <= 0) continue;  // along the axis: nothing to sweep
+    const float ra = static_cast<float>(pa.x) / 1000.0f;
+    const float za = static_cast<float>(pa.y) / 1000.0f;
+    const float rb = static_cast<float>(pb.x) / 1000.0f;
+    const float zb = static_cast<float>(pb.y) / 1000.0f;
+    // Outward in the (radius, height) plane: to the right of the direction of travel for
+    // an anticlockwise profile, the left for a clockwise one.
+    const float dr = rb - ra;
+    const float dz = zb - za;
+    const float nr = orient * dz;
+    const float nz = -orient * dr;
+    for (int j = 0; j < segs; ++j) {
+      const float a0 = tau * static_cast<float>(j) / static_cast<float>(segs);
+      const float a1 = tau * static_cast<float>(j + 1) / static_cast<float>(segs);
+      const float c0 = std::cos(a0), s0 = std::sin(a0);
+      const float c1 = std::cos(a1), s1 = std::sin(a1);
+      const std::uint32_t v0 = b.vertex({c0 * ra, s0 * ra, za}, {c0 * nr, s0 * nr, nz});
+      const std::uint32_t v1 = b.vertex({c1 * ra, s1 * ra, za}, {c1 * nr, s1 * nr, nz});
+      const std::uint32_t v2 = b.vertex({c1 * rb, s1 * rb, zb}, {c1 * nr, s1 * nr, nz});
+      const std::uint32_t v3 = b.vertex({c0 * rb, s0 * rb, zb}, {c0 * nr, s0 * nr, nz});
+      b.tri(v0, v1, v2);
+      b.tri(v0, v2, v3);
+    }
+  }
+}
+
+/// One copy of an element: the outline extruded about its plane. `frame` gives the plane's
+/// two directions (`u` along the outline's x, up for its y) and the way it is extruded.
+void prism(ModelBuilder& b, const assets::Element& e, V3 origin, V3 u, V3 extrude,
+           float thickness) {
+  const auto& pts = e.outline.points;
+  if (pts.size() < 3) return;
+  const V3 up{0, 0, 1};
+  const auto at = [&](const assets::ModelPoint& p, float w) {
+    return origin + u * (static_cast<float>(p.x) / 1000.0f) +
+           up * (static_cast<float>(p.y) / 1000.0f) + extrude * w;
+  };
+  const float half = thickness * 0.5f;
+  std::vector<IconPoint> flat;
+  flat.reserve(pts.size());
+  for (const auto& p : pts) {
+    flat.push_back(IconPoint{static_cast<float>(p.x), static_cast<float>(p.y)});
+  }
+  const std::vector<int> tris = earClipIcon(flat);
+  for (const float w : {half, -half}) {
+    const V3 n = extrude * (w > 0 ? 1.0f : -1.0f);
+    std::vector<std::uint32_t> ring;
+    ring.reserve(pts.size());
+    for (const auto& p : pts) ring.push_back(b.vertex(at(p, w), n));
+    for (std::size_t t = 0; t + 2 < tris.size(); t += 3) {
+      b.tri(ring[static_cast<std::size_t>(tris[t])],
+            ring[static_cast<std::size_t>(tris[t + 1])],
+            ring[static_cast<std::size_t>(tris[t + 2])]);
+    }
+  }
+  const float orient = signedArea2(pts) >= 0.0f ? 1.0f : -1.0f;
+  for (std::size_t i = 0; i < pts.size(); ++i) {
+    const auto& pa = pts[i];
+    const auto& pb = pts[(i + 1) % pts.size()];
+    const float du = static_cast<float>(pb.x - pa.x);
+    const float dv = static_cast<float>(pb.y - pa.y);
+    const V3 n = u * (orient * dv) + up * (-orient * du);
+    const std::uint32_t q0 = b.vertex(at(pa, half), n);
+    const std::uint32_t q1 = b.vertex(at(pb, half), n);
+    const std::uint32_t q2 = b.vertex(at(pb, -half), n);
+    const std::uint32_t q3 = b.vertex(at(pa, -half), n);
+    b.tri(q0, q1, q2);
+    b.tri(q0, q2, q3);
+  }
+}
+
+void place(ModelBuilder& b, const assets::PieceModel& model, const assets::Element& e) {
+  const float tau = 2.0f * std::numbers::pi_v<float>;
+  const float radius = static_cast<float>(e.radius) / 1000.0f;
+  const float lateral = static_cast<float>(e.lateral) / 1000.0f;
+  const float height = static_cast<float>(e.height) / 1000.0f;
+  const float thick = static_cast<float>(e.thickness) / 1000.0f;
+  const auto copy = [&](float theta, bool mirrored) {
+    const V3 radial{std::cos(theta), std::sin(theta), 0.0f};
+    // A reflection across the radial plane turns the tangent round, and nothing else.
+    const V3 tangent = V3{-std::sin(theta), std::cos(theta), 0.0f} * (mirrored ? -1.0f : 1.0f);
+    const V3 origin = radial * radius + tangent * lateral + V3{0, 0, height};
+    if (e.tangent) {
+      prism(b, e, origin, tangent, radial, thick);
+    } else {
+      prism(b, e, origin, radial, tangent, thick);
+    }
+  };
+  switch (model.symmetry.kind) {
+    case assets::SymmetryKind::Full:
+      break;  // refused by `validate`; nothing to place
+    case assets::SymmetryKind::KFold: {
+      const int k = std::max<int>(2, model.symmetry.k);
+      for (int i = 0; i < k; ++i) copy(tau * static_cast<float>(i) / static_cast<float>(k), false);
+      break;
+    }
+    case assets::SymmetryKind::Mirror:
+      copy(0.0f, false);
+      if (e.lateral != 0) copy(0.0f, true);
+      break;
+  }
+}
+
+}  // namespace
+
+ModelMesh assembleModel(const assets::PieceModel& model) {
+  ModelBuilder b;
+  float top = 0.1f;
+  for (const auto& p : model.profile.points) top = std::max(top, static_cast<float>(p.y) / 1000.0f);
+  for (const auto& e : model.elements) {
+    for (const auto& p : e.outline.points) {
+      top = std::max(top, static_cast<float>(e.height + p.y) / 1000.0f);
+    }
+  }
+  b.totalHeight = top;
+  b.mesh.height = top;
+  revolve(b, model);
+  for (const assets::Element& e : model.elements) place(b, model, e);
+  return std::move(b.mesh);
+}
+
 Archetype archetypeFromName(std::string_view name) {
   if (name == "dome") return Archetype::Dome;
   if (name == "tower") return Archetype::Tower;
@@ -729,7 +921,7 @@ float heightFor(const PieceTypeDef& piece) {
   return std::clamp(scale, 0.85f, 1.6f);
 }
 
-MeshLibrary MeshLibrary::build() {
+MeshLibrary MeshLibrary::build(const std::vector<CustomBody>& custom) {
   MeshLibrary m;
   for (std::size_t i = 0; i < static_cast<std::size_t>(Archetype::Count); ++i) {
     const auto base = static_cast<std::int32_t>(m.vertices.size());
@@ -763,6 +955,48 @@ MeshLibrary MeshLibrary::build() {
     addIconDisc(m, base, pieceIcon(IconStyle::Primitive, static_cast<Archetype>(i)));
     range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
     m.discRanges[i] = range;
+  }
+  // The authored bodies, after everything else so the archetypes' ranges are exactly what
+  // they were without them.
+  for (const CustomBody& c : custom) {
+    if (c.slot >= kCustomShapes) continue;
+    const std::size_t at = static_cast<std::size_t>(Archetype::Count) + c.slot;
+    const ModelMesh mesh = assembleModel(c.body);
+    if (mesh.vertices.empty()) continue;
+    {
+      const auto base = static_cast<std::int32_t>(m.vertices.size());
+      MeshRange range;
+      range.firstIndex = static_cast<std::uint32_t>(m.indices.size());
+      range.vertexOffset = base;
+      m.vertices.insert(m.vertices.end(), mesh.vertices.begin(), mesh.vertices.end());
+      m.indices.insert(m.indices.end(), mesh.indices.begin(), mesh.indices.end());
+      range.indexCount = static_cast<std::uint32_t>(mesh.indices.size());
+      m.ranges[at] = range;
+    }
+    // Its puck and token take the authored icon, or the silhouette the body would draw.
+    const std::optional<OwnedIcon> own =
+        c.icon.has_value() ? std::optional<OwnedIcon>(std::in_place, *c.icon)
+                           : std::nullopt;
+    const PieceIcon icon =
+        own.has_value() ? own->view() : pieceIcon(IconStyle::Primitive, c.fallback);
+    {
+      const auto base = static_cast<std::int32_t>(m.vertices.size());
+      MeshRange range;
+      range.firstIndex = static_cast<std::uint32_t>(m.indices.size());
+      range.vertexOffset = base;
+      addIconCylinder(m, base, icon);
+      range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
+      m.cylinderRanges[at] = range;
+    }
+    {
+      const auto base = static_cast<std::int32_t>(m.vertices.size());
+      MeshRange range;
+      range.firstIndex = static_cast<std::uint32_t>(m.indices.size());
+      range.vertexOffset = base;
+      addIconDisc(m, base, icon);
+      range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
+      m.discRanges[at] = range;
+    }
   }
   return m;
 }

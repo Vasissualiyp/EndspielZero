@@ -635,12 +635,91 @@ Result<void> BoardRenderer::ensureSurfaceCapacity(std::uint32_t frame,
               surfaceIndexCapacity_[frame]);
 }
 
+namespace {
+
+/// A fingerprint of the bodies and icons a variant's pieces carry; zero for none. Not a
+/// security hash - a change detector, so a body edited in the designer reaches the screen.
+std::uint64_t bodiesSignature(const VariantSpec& v) {
+  std::uint64_t h = 1469598103934665603ull;
+  bool any = false;
+  const auto mix = [&](std::uint64_t x) {
+    h ^= x + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+    h *= 1099511628211ull;
+  };
+  const auto outline = [&](const assets::Outline& o) {
+    mix(o.points.size());
+    for (const assets::ModelPoint& p : o.points) {
+      mix(static_cast<std::uint64_t>(static_cast<std::uint16_t>(p.x)) << 16 |
+          static_cast<std::uint16_t>(p.y));
+    }
+  };
+  for (std::size_t i = 1; i < v.pieces.size(); ++i) {
+    const PieceTypeDef& p = v.pieces[i];
+    if (!p.body.has_value() && !p.icon.has_value()) continue;
+    any = true;
+    mix(i);
+    if (p.body.has_value()) {
+      mix(1);
+      mix(p.body->segments);
+      mix(static_cast<std::uint64_t>(p.body->symmetry.kind));
+      mix(p.body->symmetry.k);
+      outline(p.body->profile);
+      for (const assets::Element& e : p.body->elements) {
+        outline(e.outline);
+        mix(static_cast<std::uint64_t>(static_cast<std::uint16_t>(e.radius)) << 32 |
+            static_cast<std::uint64_t>(static_cast<std::uint16_t>(e.height)) << 16 |
+            static_cast<std::uint16_t>(e.lateral));
+        mix(static_cast<std::uint64_t>(e.thickness) << 1 | (e.tangent ? 1u : 0u));
+      }
+    }
+    if (p.icon.has_value()) {
+      mix(2);
+      for (const assets::Outline& o : p.icon->fills) outline(o);
+      mix(3);
+      for (const assets::Outline& o : p.icon->cuts) outline(o);
+    }
+  }
+  return any ? (h | 1ull) : 0ull;
+}
+
+}  // namespace
+
+Result<void> BoardRenderer::syncBodies(const VariantSpec& v) {
+  const std::uint64_t sig = bodiesSignature(v);
+  if (sig == bodiesSig_) return {};
+  std::vector<CustomBody> custom;
+  customSlot_.assign(v.pieces.size(), -1);
+  std::size_t slot = 0;
+  for (std::size_t i = 1; i < v.pieces.size() && slot < kCustomShapes; ++i) {
+    // A piece with an icon but no body keeps its sculpted archetype; one with a body
+    // takes a slot, and its icon (if any) rides along.
+    if (!v.pieces[i].body.has_value()) continue;
+    custom.push_back(
+        CustomBody{slot, archetypeFor(v.pieces[i]), *v.pieces[i].body, v.pieces[i].icon});
+    customSlot_[i] = static_cast<int>(slot);
+    ++slot;
+  }
+  meshes_ = MeshLibrary::build(custom);
+  vkDeviceWaitIdle(ctx_->device());
+  if (vertexBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(ctx_->device(), vertexBuffer_, nullptr);
+  if (vertexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), vertexMem_, nullptr);
+  if (indexBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(ctx_->device(), indexBuffer_, nullptr);
+  if (indexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), indexMem_, nullptr);
+  vertexBuffer_ = indexBuffer_ = VK_NULL_HANDLE;
+  vertexMem_ = indexMem_ = VK_NULL_HANDLE;
+  if (auto r = uploadGeometry(); !r.has_value()) return r;
+  bodiesSig_ = sig;
+  return {};
+}
+
 InstanceSet BoardRenderer::buildInstances(
     const view::PositionView& p, const view::ViewConfig& cfg, const view::SeamMap* seams,
     const view::MoveAnimation* anim, const std::function<bool(CellId)>& visible,
     const std::function<bool(CellId)>& present,
     const std::vector<view::TimelineLink>& links) const {
   const VariantSpec& v = p.variant();
+  // Custom bodies are used only while they are the ones synced for *this* variant.
+  const bool useCustom = bodiesSig_ != 0 && bodiesSignature(v) == bodiesSig_;
 #ifdef CB_HAVE_IMGUI
   // The geometry view: the board *is* the surface. Each square is built as a patch of
   // that surface - a curved quad with a little thickness, its corners the surface's own
@@ -671,7 +750,9 @@ InstanceSet BoardRenderer::buildInstances(
     std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);
     std::vector<float> height(v.pieces.size(), 1.0f);
     for (std::size_t i = 1; i < v.pieces.size(); ++i) {
-      shape[i] = archetypeFor(v.pieces[i]);
+      shape[i] = useCustom && i < customSlot_.size() && customSlot_[i] >= 0
+                   ? customShape(static_cast<std::size_t>(customSlot_[i]))
+                   : archetypeFor(v.pieces[i]);
       height[i] = heightFor(v.pieces[i]);
     }
     const auto highlighted = p.highlighted();
@@ -835,12 +916,12 @@ InstanceSet BoardRenderer::buildInstances(
     }
 
     std::vector<std::vector<Instance>> byShape(
-        static_cast<std::size_t>(Archetype::Count));
+        kShapeSlots);
     // The token discs (M17.26) live in their own groups and are concatenated ahead of the
     // icons in each archetype's batch, so `record` draws the first `discCounts[s]` from
     // the disc mesh and the rest from the icon mesh.
     std::vector<std::vector<Instance>> byShapeDisc(
-        static_cast<std::size_t>(Archetype::Count));
+        kShapeSlots);
     const auto emitSurfacePiece = [&](std::vector<std::vector<Instance>>& into,
                                       std::vector<std::vector<Instance>>& discInto,
                                       const Piece& piece, const view::Vec3& centre,
@@ -893,7 +974,7 @@ InstanceSet BoardRenderer::buildInstances(
     // is pinned to the surface under it - `ground`, never the hovered `position` - so the
     // contact stays true while the piece rides above the board.
     std::vector<std::vector<Instance>> byShapeShadow(
-        static_cast<std::size_t>(Archetype::Count));
+        kShapeSlots);
     const auto emitSurfaceShadow = [&](const view::Vec3& centre, const view::Vec3& normal,
                                        const std::array<float, 4>& quat, float fit) {
       Instance sh{};
@@ -938,9 +1019,9 @@ InstanceSet BoardRenderer::buildInstances(
     // M18.1: the same capture flourish as the flat board, on its own square of the
     // surface - the captured piece shrinking and fading, and a blood flash at its foot.
     std::vector<std::vector<Instance>> byShapeFlourish(
-        static_cast<std::size_t>(Archetype::Count));
+        kShapeSlots);
     std::vector<std::vector<Instance>> byShapeFlourishDisc(
-        static_cast<std::size_t>(Archetype::Count));
+        kShapeSlots);
     if (anim != nullptr && anim->active() && anim->captures()) {
       const float t = anim->progress();
       const float fade = view::captureFade(t);
@@ -1075,7 +1156,9 @@ InstanceSet BoardRenderer::buildInstances(
   std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);
   std::vector<float> height(v.pieces.size(), 1.0f);
   for (std::size_t i = 1; i < v.pieces.size(); ++i) {
-    shape[i] = archetypeFor(v.pieces[i]);
+    shape[i] = useCustom && i < customSlot_.size() && customSlot_[i] >= 0
+                   ? customShape(static_cast<std::size_t>(customSlot_[i]))
+                   : archetypeFor(v.pieces[i]);
     height[i] = heightFor(v.pieces[i]);
   }
 
@@ -1085,12 +1168,12 @@ InstanceSet BoardRenderer::buildInstances(
   };
 
   // Two passes so instances of the same shape are contiguous: one draw call per shape.
-  std::vector<std::vector<Instance>> byShape(static_cast<std::size_t>(Archetype::Count));
+  std::vector<std::vector<Instance>> byShape(kShapeSlots);
   // M18.2: the contact shadows, kept apart from the opaque batches because they blend.
   // The flat (`options_.flat`) board draws its pieces in the interface, so the renderer
   // has no shadow to ground and emits none - the same cut the M18.1 flourish takes.
   std::vector<std::vector<Instance>> byShapeShadow(
-      static_cast<std::size_t>(Archetype::Count));
+      kShapeSlots);
   const view::Vec3 half = cellHalfExtent();
 
   // One soft decal on the cell under a piece, at the cell's own surface point.
@@ -1540,7 +1623,7 @@ InstanceSet BoardRenderer::buildInstances(
   // flash marks the square at the moment the pieces meet. Both are drawn blended further
   // down, which is why their alpha is the fade rather than a number nothing reads.
   std::vector<std::vector<Instance>> byShapeFlourish(
-      static_cast<std::size_t>(Archetype::Count));
+      kShapeSlots);
   if (anim != nullptr && anim->active() && anim->captures() && !options_.flat) {
     const float t = anim->progress();
     const float fade = view::captureFade(t);

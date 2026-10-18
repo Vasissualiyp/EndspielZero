@@ -321,6 +321,11 @@ Result<void> Shell::saveEditor() {
   if (editorPath_.empty()) {
     return fail(ErrorCode::Internal, "no save path is installed for the editor");
   }
+  // One validator: the file is written only if the loader would accept it.
+  if (auto ok = editor_->validate(); !ok.has_value()) {
+    message_ = ok.error().format();
+    return ok;
+  }
   return editor_->saveFile(editorPath_);
 }
 

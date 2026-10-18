@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "base/result.hpp"
 #include "base/zobrist.hpp"
 #include "geometry/geometry.hpp"
+#include "assets/piece_model.hpp"
 #include "pieces/atom.hpp"
 #include "space/dim_spec.hpp"
 
@@ -52,6 +54,11 @@ struct PieceTypeDef {
   /// deterministic core and may not contain floating point.
   std::string shape;
   int heightPermille{0};
+  /// An authored body and flat icon (M7.3), when the variant gives the piece them. Both
+  /// are cosmetic and outside the variant's identity: changing how a bishop looks must
+  /// not make a saved game unreplayable. Integer permille, like everything here.
+  std::optional<assets::PieceModel> body;
+  std::optional<assets::IconModel> icon;
 };
 
 /// A multi-piece move template. Castling is the familiar instance, but the shape

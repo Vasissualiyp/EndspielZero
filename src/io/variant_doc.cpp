@@ -8,6 +8,8 @@
 
 #include <toml++/toml.hpp>
 
+#include "io/model_toml.hpp"
+
 namespace cb {
 namespace {
 
@@ -64,6 +66,7 @@ std::string_view captureWord(CapturePolicy c) {
   }
   return "may";
 }
+
 
 }  // namespace
 
@@ -359,6 +362,245 @@ Result<void> VariantDoc::removeAxis(std::size_t index) {
     return fail(ErrorCode::ValidationError, "a board needs at least one axis");
   }
   arr->erase(arr->begin() + static_cast<std::ptrdiff_t>(index));
+  return {};
+}
+
+}  // namespace cb
+
+// ---------------------------------------------------------------------------
+// Piece identity, the piece list, and authored bodies.
+// ---------------------------------------------------------------------------
+
+namespace cb {
+namespace {
+
+toml::array* pieceArray(toml::table& root) {
+  return root["piece"].as_array();
+}
+
+void dropPromotionsTo(toml::table& root, std::string_view name) {
+  auto* arr = pieceArray(root);
+  if (arr == nullptr) return;
+  for (auto&& node : *arr) {
+    auto* t = node.as_table();
+    if (t == nullptr) continue;
+    auto* list = (*t)["promotes_to"].as_array();
+    if (list == nullptr) continue;
+    toml::array kept;
+    for (const auto& x : *list) {
+      if (x.value_or(std::string{}) != name) kept.push_back(*x.as_string());
+    }
+    if (kept.empty()) {
+      t->erase("promotes_to");
+    } else {
+      t->insert_or_assign("promotes_to", std::move(kept));
+    }
+  }
+}
+
+}  // namespace
+
+Result<VariantDoc::PieceInfo> VariantDoc::pieceInfo(std::string_view piece) const {
+  const toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  PieceInfo info;
+  info.name = std::string(piece);
+  info.symbol = (*pt)["symbol"].value_or(std::string{});
+  info.royal = (*pt)["royal"].value_or(false);
+  info.resetsDrawClock = (*pt)["resets_draw_clock"].value_or(false);
+  info.shape = (*pt)["shape"].value_or(std::string{});
+  if (const auto h = (*pt)["height"].value<double>()) {
+    info.heightPermille = static_cast<int>(*h * 1000.0 + 0.5);
+  }
+  if (const auto* list = (*pt)["promotes_to"].as_array()) {
+    for (const auto& x : *list) info.promotesTo.push_back(x.value_or(std::string{}));
+  }
+  return info;
+}
+
+Result<void> VariantDoc::setPieceInfo(std::string_view piece, const PieceInfo& info) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  if (info.symbol.size() != 1) {
+    return fail(ErrorCode::ValidationError, "a piece's symbol is a single character");
+  }
+  pt->insert_or_assign("symbol", info.symbol);
+  const auto flag = [&](const char* key, bool on) {
+    if (on) {
+      pt->insert_or_assign(key, true);
+    } else {
+      pt->erase(key);
+    }
+  };
+  flag("royal", info.royal);
+  flag("resets_draw_clock", info.resetsDrawClock);
+  if (info.shape.empty()) {
+    pt->erase("shape");
+  } else {
+    pt->insert_or_assign("shape", info.shape);
+  }
+  if (info.heightPermille <= 0) {
+    pt->erase("height");
+  } else {
+    pt->insert_or_assign("height", static_cast<double>(info.heightPermille) / 1000.0);
+  }
+  if (info.promotesTo.empty()) {
+    pt->erase("promotes_to");
+  } else {
+    toml::array list;
+    for (const std::string& n : info.promotesTo) list.push_back(n);
+    pt->insert_or_assign("promotes_to", std::move(list));
+  }
+  return {};
+}
+
+Result<void> VariantDoc::renamePiece(std::string_view piece, std::string_view to) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  if (to.empty()) return fail(ErrorCode::ValidationError, "a piece needs a name");
+  if (piece != to && findPieceTable(impl_->table, to) != nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "a piece is already called '" + std::string(to) + "'");
+  }
+  pt->insert_or_assign("name", std::string(to));
+  if (auto* arr = pieceArray(impl_->table)) {
+    for (auto&& node : *arr) {
+      auto* t = node.as_table();
+      if (t == nullptr) continue;
+      auto* list = (*t)["promotes_to"].as_array();
+      if (list == nullptr) continue;
+      toml::array renamed;
+      for (const auto& x : *list) {
+        const std::string n = x.value_or(std::string{});
+        renamed.push_back(n == piece ? std::string(to) : n);
+      }
+      t->insert_or_assign("promotes_to", std::move(renamed));
+    }
+  }
+  return {};
+}
+
+Result<void> VariantDoc::addPiece(std::string_view name, std::string_view symbol,
+                                  std::string_view base) {
+  if (name.empty()) return fail(ErrorCode::ValidationError, "a piece needs a name");
+  if (symbol.size() != 1) {
+    return fail(ErrorCode::ValidationError, "a piece's symbol is a single character");
+  }
+  if (findPieceTable(impl_->table, name) != nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "a piece is already called '" + std::string(name) + "'");
+  }
+  toml::table fresh;
+  if (!base.empty()) {
+    const toml::table* from = findPieceTable(impl_->table, base);
+    if (from == nullptr) {
+      return fail(ErrorCode::ValidationError,
+                  "no piece is called '" + std::string(base) + "'");
+    }
+    fresh = *from;
+    // A copy is a new piece, not a second king: royalty and promotions are the author's
+    // to decide again.
+    fresh.erase("royal");
+    fresh.erase("promotes_to");
+  } else {
+    toml::table move;
+    toml::array vec;
+    vec.push_back(static_cast<std::int64_t>(1));
+    move.insert("vector", std::move(vec));
+    toml::array moves;
+    moves.push_back(std::move(move));
+    fresh.insert("move", std::move(moves));
+  }
+  fresh.insert_or_assign("name", std::string(name));
+  fresh.insert_or_assign("symbol", std::string(symbol));
+  auto* arr = pieceArray(impl_->table);
+  if (arr == nullptr) {
+    impl_->table.insert_or_assign("piece", toml::array{});
+    arr = pieceArray(impl_->table);
+  }
+  arr->push_back(std::move(fresh));
+  return {};
+}
+
+Result<void> VariantDoc::removePiece(std::string_view piece) {
+  auto* arr = pieceArray(impl_->table);
+  if (arr == nullptr) return fail(ErrorCode::ValidationError, "no pieces to remove");
+  if (arr->size() <= 1) {
+    return fail(ErrorCode::ValidationError, "a variant keeps at least one piece");
+  }
+  for (std::size_t i = 0; i < arr->size(); ++i) {
+    const auto* t = (*arr)[i].as_table();
+    if (t != nullptr && (*t)["name"].value_or(std::string{}) == piece) {
+      arr->erase(arr->cbegin() + static_cast<std::ptrdiff_t>(i));
+      dropPromotionsTo(impl_->table, piece);
+      return {};
+    }
+  }
+  return fail(ErrorCode::ValidationError, "no piece is called '" + std::string(piece) + "'");
+}
+
+Result<std::optional<assets::PieceModel>> VariantDoc::pieceBody(
+    std::string_view piece) const {
+  const toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  const auto* body = (*pt)["body"].as_table();
+  if (body == nullptr) return std::optional<assets::PieceModel>{};
+  return bodyFromToml(*body);
+}
+
+Result<void> VariantDoc::setPieceBody(std::string_view piece,
+                                      const std::optional<assets::PieceModel>& body) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  if (!body.has_value()) {
+    pt->erase("body");
+    return {};
+  }
+  toml::table t = bodyToToml(*body);
+  pt->insert_or_assign("body", std::move(t));
+  return {};
+}
+
+Result<std::optional<assets::IconModel>> VariantDoc::pieceIcon(
+    std::string_view piece) const {
+  const toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  const auto* icon = (*pt)["icon"].as_table();
+  if (icon == nullptr) return std::optional<assets::IconModel>{};
+  return iconFromToml(*icon);
+}
+
+Result<void> VariantDoc::setPieceIcon(std::string_view piece,
+                                      const std::optional<assets::IconModel>& icon) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  if (!icon.has_value()) {
+    pt->erase("icon");
+    return {};
+  }
+  toml::table t = iconToToml(*icon);
+  pt->insert_or_assign("icon", std::move(t));
   return {};
 }
 

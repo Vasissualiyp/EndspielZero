@@ -5,6 +5,8 @@
 #include <sstream>
 #include <utility>
 
+#include "io/variant_toml.hpp"
+
 namespace cb::app {
 
 Editor::Editor(VariantDoc doc, std::string sourceName)
@@ -56,12 +58,14 @@ Result<void> Editor::resetTo(const std::string& snapshot) {
 void Editor::undo() {
   if (!canUndo()) return;
   --cursor_;
+  ++revision_;
   (void)resetTo(history_[cursor_]);
 }
 
 void Editor::redo() {
   if (!canRedo()) return;
   ++cursor_;
+  ++revision_;
   (void)resetTo(history_[cursor_]);
 }
 
@@ -72,6 +76,7 @@ Result<void> Editor::edit(Fn&& fn) {
   history_.resize(cursor_ + 1);
   history_.push_back(doc_.serialize());
   cursor_ = history_.size() - 1;
+  ++revision_;
   return {};
 }
 
@@ -139,6 +144,52 @@ Result<void> Editor::setPieceAtoms(std::string_view piece,
                                    const std::vector<MoveAtom>& atoms) {
   return edit(
       [&](VariantDoc& d) -> Result<void> { return d.setPieceAtoms(piece, atoms); });
+}
+
+Result<Editor::PieceInfo> Editor::pieceInfo(std::string_view piece) const {
+  return doc_.pieceInfo(piece);
+}
+
+Result<void> Editor::setPieceInfo(std::string_view piece, const PieceInfo& info) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.setPieceInfo(piece, info); });
+}
+
+Result<void> Editor::renamePiece(std::string_view piece, std::string_view to) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.renamePiece(piece, to); });
+}
+
+Result<void> Editor::addPiece(std::string_view name, std::string_view symbol,
+                              std::string_view base) {
+  return edit(
+      [&](VariantDoc& d) -> Result<void> { return d.addPiece(name, symbol, base); });
+}
+
+Result<void> Editor::removePiece(std::string_view piece) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.removePiece(piece); });
+}
+
+Result<std::optional<assets::PieceModel>> Editor::pieceBody(std::string_view piece) const {
+  return doc_.pieceBody(piece);
+}
+
+Result<void> Editor::setPieceBody(std::string_view piece,
+                                  const std::optional<assets::PieceModel>& body) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.setPieceBody(piece, body); });
+}
+
+Result<std::optional<assets::IconModel>> Editor::pieceIcon(std::string_view piece) const {
+  return doc_.pieceIcon(piece);
+}
+
+Result<void> Editor::setPieceIcon(std::string_view piece,
+                                  const std::optional<assets::IconModel>& icon) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.setPieceIcon(piece, icon); });
+}
+
+Result<void> Editor::validate() const {
+  const auto loaded = loadVariantToml(doc_.serialize(), sourceName_);
+  if (loaded.has_value()) return {};
+  return fail(loaded.error().code, loaded.error().message, loaded.error().line);
 }
 
 std::string Editor::serialize() const {

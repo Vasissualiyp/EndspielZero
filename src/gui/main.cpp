@@ -52,15 +52,35 @@ std::filesystem::path variantDir() {
   return "variants";
 }
 
+/// Where the player's own variants live, or empty when only the shipped ones are in use
+/// (a capture without the user's settings must not depend on what is in their home). The
+/// piece designer saves here, never over a shipped file, and a variant saved under a
+/// shipped name takes its place in the library.
+static std::filesystem::path gUserVariantDir;
+
+/// The file a variant is read from: the player's own copy if there is one, else shipped.
+std::filesystem::path variantFile(const std::string& name) {
+  if (!gUserVariantDir.empty()) {
+    const auto mine = gUserVariantDir / (name + ".toml");
+    if (std::filesystem::is_regular_file(mine)) return mine;
+  }
+  return variantDir() / (name + ".toml");
+}
+
 std::vector<std::string> variantLibrary() {
   std::vector<std::string> names;
   std::error_code ec;
-  for (const auto& e : std::filesystem::directory_iterator(variantDir(), ec)) {
-    if (e.is_regular_file() && e.path().extension() == ".toml") {
-      names.push_back(e.path().stem().string());
+  const auto list = [&](const std::filesystem::path& dir) {
+    for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+      if (e.is_regular_file() && e.path().extension() == ".toml") {
+        names.push_back(e.path().stem().string());
+      }
     }
-  }
+  };
+  list(variantDir());
+  if (!gUserVariantDir.empty()) list(gUserVariantDir);
   std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
   return names;
 }
 
@@ -183,13 +203,13 @@ char keyChar(SDL_Keycode key) {
 std::unique_ptr<app::Shell> makeShell(const std::filesystem::path& settings = {}) {
   auto shell = app::Shell::create(variantLibrary(), settings);
   shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
-    auto v = loadVariantFile(variantDir() / (name + ".toml"));
+    auto v = loadVariantFile(variantFile(name));
     if (!v.has_value()) return fail(v.error().code, v.error().message);
     return std::move(*v);
   });
   // The editor reads and writes the author's own file, not the resolved spec.
   shell->setVariantSourceLoader([](const std::string& name) -> Result<std::string> {
-    const auto path = variantDir() / (name + ".toml");
+    const auto path = variantFile(name);
     std::ifstream in(path);
     if (!in) {
       return fail(ErrorCode::ParseError,
@@ -199,8 +219,14 @@ std::unique_ptr<app::Shell> makeShell(const std::filesystem::path& settings = {}
     ss << in.rdbuf();
     return ss.str();
   });
-  shell->setVariantPathResolver(
-      [](const std::string& name) { return variantDir() / (name + ".toml"); });
+  // Saved into the player's own directory when there is one: a designer that overwrote
+  // the shipped files would damage the game it is editing.
+  shell->setVariantPathResolver([](const std::string& name) {
+    if (gUserVariantDir.empty()) return variantDir() / (name + ".toml");
+    std::error_code ec;
+    std::filesystem::create_directories(gUserVariantDir, ec);
+    return gUserVariantDir / (name + ".toml");
+  });
   shell->setBundledGames(bundledGames());
   return shell;
 }
@@ -455,6 +481,10 @@ void applyAttractLook(app::Shell& shell) {
 
 /// Tell the renderer what the engine says just happened, so the board can show it.
 void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
+  // The variant's own piece bodies, if it brings any, before the board is built from them.
+  if (auto ok = renderer.syncBodies(session.variant()); !ok.has_value()) {
+    std::fprintf(stderr, "%s\n", ok.error().format().c_str());
+  }
   const auto& history = session.game().moveHistory();
   if (history.empty()) {
     renderer.setLastMove(kInvalidCell, kInvalidCell);
@@ -996,10 +1026,26 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::size_t at = 0;
     while (at < gUiClicks.size()) {
       const std::size_t end = std::min(gUiClicks.find(';', at), gUiClicks.size());
-      float x = 0.0f, y = 0.0f;
-      if (std::sscanf(gUiClicks.substr(at, end - at).c_str(), "%f,%f", &x, &y) == 2) {
+      const std::string one = gUiClicks.substr(at, end - at);
+      float x = 0.0f, y = 0.0f, x2 = 0.0f, y2 = 0.0f;
+      int button = 0;
+      if (std::sscanf(one.c_str(), "drag:%f,%f,%f,%f,%d", &x, &y, &x2, &y2, &button) ==
+          5) {
+        // A drag: press at the start, move in four steps, release at the end.
+        (*ui)->injectMouse(x, y, false, button);
+        if (!renderFrame(0.0f).has_value()) return 1;
+        (*ui)->injectMouse(x, y, true, button);
+        if (!renderFrame(0.0f).has_value()) return 1;
+        for (int i = 1; i <= 4; ++i) {
+          const float f = static_cast<float>(i) / 4.0f;
+          (*ui)->injectMouse(x + (x2 - x) * f, y + (y2 - y) * f, true, button);
+          if (!renderFrame(0.0f).has_value()) return 1;
+        }
+        (*ui)->injectMouse(x2, y2, false, button);
+        if (!renderFrame(0.0f).has_value()) return 1;
+      } else if (std::sscanf(one.c_str(), "%f,%f,%d", &x, &y, &button) >= 2) {
         for (const bool down : {false, true, false}) {
-          (*ui)->injectMouse(x, y, down);
+          (*ui)->injectMouse(x, y, down, button);
           if (!renderFrame(0.0f).has_value()) return 1;
         }
       }
@@ -1206,7 +1252,9 @@ int main(int argc, char** argv) {
           "the reviewable screens include it; --screen watch is the bundled-game "
           "picker.\n"
           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
-          "--ui-click \"x,y;x,y\" replays pointer clicks (pixels) before the capture.\n"
+          "--ui-click \"x,y;x,y,button;drag:x1,y1,x2,y2,button\" replays pointer clicks and\n"
+          "drags (pixels; button 0 left, 1 right, 2 middle) before the capture.\n"
+          "--variants-dir DIR reads and saves the player's own variants there.\n"
           "--piece NAME opens the designer captures on that piece.\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
@@ -1282,6 +1330,8 @@ int main(int argc, char** argv) {
       gUiClicks = argv[++i];
     else if (arg == "--piece" && i + 1 < argc)
       gPieceName = argv[++i];
+    else if (arg == "--variants-dir" && i + 1 < argc)
+      gUserVariantDir = argv[++i];
     else if (arg == "--dims" && i + 1 < argc)
       previewDims = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
     else if (!arg.starts_with("-"))
@@ -1290,6 +1340,13 @@ int main(int argc, char** argv) {
   // A trailer render is footage: the board and the grade, no interface.
   if (!gTrailerClipDir.empty()) cinema = true;
   const std::string& targetPath = !clipDir.empty() ? clipDir : shotPath;
+  // The player's own variants are part of the game when it is being played, and of a
+  // capture only when asked for (`--user-settings`, or a directory named outright).
+  if (gUserVariantDir.empty() &&
+      (gUseUserSettings ||
+       (targetPath.empty() && benchFrames == 0 && gTrailerClipDir.empty()))) {
+    gUserVariantDir = app::Settings::defaultPath().parent_path() / "variants";
+  }
   if (!targetPath.empty() || benchFrames > 0 || !gTrailerClipDir.empty()) {
     return captureFrame(
         variantName.empty() ? "standard" : variantName, targetPath, script, screen,

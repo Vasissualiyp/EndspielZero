@@ -3,6 +3,9 @@
 
 #include <cstdint>
 #include <span>
+#include <vector>
+
+#include "assets/piece_model.hpp"
 
 #include "render/piece_mesh.hpp"
 
@@ -46,6 +49,26 @@ struct PieceIcon {
   /// Outlines drawn in the colour behind the piece, cutting detail out of the
   /// silhouette - a knight's eye, a slot in a rook's base. Empty for the cheap set.
   std::span<const IconPoly> cuts;
+};
+
+/// An authored icon, converted to the table form the drawing code reads and owning the
+/// points the spans refer to. Permille becomes the 100-unit glyph box. Not copyable - a
+/// copy's spans would point into the original - but movable, which keeps the buffers.
+class OwnedIcon {
+ public:
+  explicit OwnedIcon(const assets::IconModel& model);
+  OwnedIcon(const OwnedIcon&) = delete;
+  OwnedIcon& operator=(const OwnedIcon&) = delete;
+  OwnedIcon(OwnedIcon&&) noexcept = default;
+  OwnedIcon& operator=(OwnedIcon&&) noexcept = default;
+
+  [[nodiscard]] PieceIcon view() const { return PieceIcon{fills_, cuts_}; }
+
+ private:
+  std::vector<std::vector<IconPoint>> fillPoints_;
+  std::vector<std::vector<IconPoint>> cutPoints_;
+  std::vector<IconPoly> fills_;
+  std::vector<IconPoly> cuts_;
 };
 
 /// The icon for an archetype. Every archetype has one in every style; Cell and Portal

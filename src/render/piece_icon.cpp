@@ -154,6 +154,22 @@ IconStyle iconStyleFromName(std::string_view name) noexcept {
   return name == "primitive" ? IconStyle::Primitive : IconStyle::Faceted;
 }
 
+OwnedIcon::OwnedIcon(const assets::IconModel& model) {
+  const auto convert = [](const assets::Outline& o) {
+    std::vector<IconPoint> pts;
+    pts.reserve(o.points.size());
+    for (const assets::ModelPoint& p : o.points) {
+      pts.push_back(IconPoint{static_cast<float>(p.x) / 10.0f, static_cast<float>(p.y) / 10.0f});
+    }
+    return pts;
+  };
+  for (const assets::Outline& o : model.fills) fillPoints_.push_back(convert(o));
+  for (const assets::Outline& o : model.cuts) cutPoints_.push_back(convert(o));
+  // Spans only once the outer vectors have stopped growing, so none of them dangles.
+  for (const auto& pts : fillPoints_) fills_.push_back(IconPoly{pts});
+  for (const auto& pts : cutPoints_) cuts_.push_back(IconPoly{pts});
+}
+
 PieceIcon pieceIcon(IconStyle style, Archetype shape) {
   const bool plain = style == IconStyle::Primitive;
   switch (shape) {

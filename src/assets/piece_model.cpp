@@ -140,6 +140,18 @@ Result<void> validate(const PieceModel& m) {
         !ok.has_value()) {
       return ok;
     }
+    const Element& e = m.elements[i];
+    if (e.radius < 0 || e.radius > kBox || e.height < 0 || e.height > kBox) {
+      return fail(ErrorCode::ValidationError, what + " is placed outside the piece's box");
+    }
+    if (e.lateral < -kBox / 2 || e.lateral > kBox / 2) {
+      return fail(ErrorCode::ValidationError, what + " is offset too far to one side");
+    }
+    if (e.thickness < 20 || e.thickness > kBox) {
+      return fail(ErrorCode::ValidationError,
+                  what + " must be between 20 and 1000 thick, not " +
+                      std::to_string(e.thickness));
+    }
   }
   return {};
 }
@@ -218,8 +230,17 @@ PieceModel archetypeModel(std::string_view name) {
              {230, 200},
              {220, 620},
              {330, 700},
-             {330, 830},
-             {0, 830}});
+             {330, 760},
+             {0, 760}});
+    // The crenellations: four merlons round the rim, which is what makes a rook a rook.
+    m.symmetry = Symmetry{SymmetryKind::KFold, 4};
+    Element merlon;
+    merlon.outline.points = {{-80, 0}, {80, 0}, {80, 120}, {-80, 120}};
+    merlon.radius = 250;
+    merlon.height = 760;
+    merlon.tangent = true;
+    merlon.thickness = 110;
+    m.elements.push_back(merlon);
   } else if (name == "spire") {  // bishop
     profile({{0, 0},
              {350, 0},
@@ -244,6 +265,8 @@ PieceModel archetypeModel(std::string_view name) {
     point.outline.points = {{0, 0}, {90, 130}, {0, 210}, {-90, 130}};
     point.radius = 250;
     point.height = 810;
+    point.tangent = true;
+    point.thickness = 90;
     m.elements.push_back(point);
   } else if (name == "monolith") {  // king
     profile({{0, 0},

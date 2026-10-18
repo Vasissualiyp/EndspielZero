@@ -2,9 +2,11 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
+#include "assets/piece_model.hpp"
 #include "variant/variant.hpp"
 
 namespace cb::render {
@@ -86,6 +88,17 @@ enum class Archetype : std::uint8_t {
   Count
 };
 
+/// A variant's own pieces can bring bodies of their own, and each takes one of these extra
+/// shape slots after the archetypes. A shape index at or above `Archetype::Count` is
+/// therefore a custom body; a variant with more custom pieces than slots draws the rest
+/// from their archetype, which is the fallback that keeps a variant playable.
+inline constexpr std::size_t kCustomShapes = 12;
+inline constexpr std::size_t kShapeSlots =
+    static_cast<std::size_t>(Archetype::Count) + kCustomShapes;
+[[nodiscard]] constexpr Archetype customShape(std::size_t slot) noexcept {
+  return static_cast<Archetype>(static_cast<std::size_t>(Archetype::Count) + slot);
+}
+
 /// Resolve a name from a variant file. An unknown name is not an error - it falls back
 /// to Tower, because a variant must never be unplayable for want of a model.
 Archetype archetypeFromName(std::string_view name);
@@ -99,28 +112,52 @@ std::string_view archetypeName(Archetype a);
 /// army that reads at a glance rather than seven identical blocks.
 Archetype archetypeFor(const PieceTypeDef& piece);
 
+/// A piece body built from an authored model: the profile swept about the axis, plus the
+/// elements the symmetry places. Local units as the archetypes use them - the foot's
+/// radius a third of a cell, z up, the model's permille divided by a thousand - and the
+/// same `MeshVertex` the shared buffers take, with indices relative to the first vertex.
+/// Deterministic: one model, one mesh.
+struct ModelMesh {
+  std::vector<MeshVertex> vertices;
+  std::vector<std::uint16_t> indices;
+  /// The highest point of the body, in local units.
+  float height{0.0f};
+};
+ModelMesh assembleModel(const assets::PieceModel& model);
+
 /// Relative height, with a pawn at 1.0. Encodes value, so the tallest piece on the
 /// board is the one that matters most even in an army you have never seen.
 float heightFor(const PieceTypeDef& piece);
 
 /// Build every archetype into one vertex and index buffer, with a range per shape.
+/// A piece body to build into the library at a custom slot, with the icon its puck and
+/// token take - the authored one, or the shipped one for its archetype.
+struct CustomBody {
+  std::size_t slot{0};
+  /// The shipped shape the piece would otherwise be, whose icon a body with none of its
+  /// own keeps.
+  Archetype fallback{Archetype::Tower};
+  assets::PieceModel body;
+  std::optional<assets::IconModel> icon;
+};
+
 struct MeshLibrary {
   std::vector<MeshVertex> vertices;
   std::vector<std::uint16_t> indices;
-  MeshRange ranges[static_cast<std::size_t>(Archetype::Count)];
+  MeshRange ranges[kShapeSlots];
   /// The shape view's alternate piece mesh (M17.25): each archetype's **Primitive** icon
   /// extruded into a two-sided puck, the same outline on both faces. Empty for the
   /// archetypes that are not pieces - Cell, Portal, Arrow, Fillet and Disc. Lives in the
   /// same vertex and index buffers as `ranges`, so the draw loop binds one buffer either
   /// way and only the range changes.
-  MeshRange cylinderRanges[static_cast<std::size_t>(Archetype::Count)];
+  MeshRange cylinderRanges[kShapeSlots];
   /// The shape view's token discs (M17.26): a plain white circular puck under each icon
   /// decal, one per archetype, in the same buffers. The disc's colour is the *instance's*
   /// - read live off `theme_.pieceToken` every build - never baked here, exactly like the
   /// icon mesh. Empty for the archetypes that are not pieces.
-  MeshRange discRanges[static_cast<std::size_t>(Archetype::Count)];
+  MeshRange discRanges[kShapeSlots];
 
-  static MeshLibrary build();
+  static MeshLibrary build(const std::vector<CustomBody>& custom = {});
 };
 
 }  // namespace cb::render
