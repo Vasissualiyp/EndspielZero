@@ -44,6 +44,9 @@ struct Move {
   PieceTypeId promoteTo{kNoPiece};
   std::uint8_t flags{0};
   std::uint8_t castleIndex{0xFF};
+  /// Which of the mover's atoms made this move (0xFF for none): `make` reads the marks it
+  /// leaves from there. Not part of a move's identity.
+  std::uint8_t atomIndex{0xFF};
 
   [[nodiscard]] bool isCapture() const noexcept { return has(flags, MoveFlag::Capture); }
   [[nodiscard]] bool isCastle() const noexcept { return has(flags, MoveFlag::Castle); }
@@ -81,10 +84,24 @@ struct FieldChange {
 /// The two vectors stay empty - and therefore allocate nothing - for a variant with no
 /// custom fields and no rules, which is why standard chess keeps its no-allocation
 /// property while an exploding variant can still be undone exactly.
+/// A named tag on a cell for a number of plies (M19). The en-passant target is the tag "ep"
+/// on the passed cell for one ply, carrying the piece it exposes; a "destroyed" square is a
+/// blocking tag on a landing's surroundings. `owner` is who made the move that left it - an
+/// en-passant mark can only be used by the other side.
+struct Mark {
+  CellId cell{kInvalidCell};
+  std::uint16_t tag{0};
+  std::uint16_t ttl{0};  ///< plies left; 0 is forever
+  std::uint8_t owner{0};
+  CellId victim{kInvalidCell};
+
+  friend bool operator==(const Mark&, const Mark&) = default;
+};
+
 struct Undo {
   Piece captured{};
-  CellId epBefore{kInvalidCell};
-  CellId epVictimBefore{kInvalidCell};
+  /// The marks before the move, restored exactly by unmake.
+  std::vector<Mark> marksBefore;
   std::uint8_t castleRightsBefore{0};
   std::int32_t halfmoveBefore{0};
   std::uint64_t hashBefore{0};

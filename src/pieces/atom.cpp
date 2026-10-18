@@ -53,6 +53,30 @@ Result<MoveAtom> MoveAtom::canonicalize(MoveAtom a) {
   // Pins in axis order, so two spellings of the same move are the same move.
   std::sort(a.pins.begin(), a.pins.end(),
             [](const Pin& l, const Pin& r) { return l.axis < r.axis; });
+  if (!a.captureAt.empty() || a.needsMark >= 0) {
+    if (a.captureAt.empty()) {
+      return fail(ErrorCode::ValidationError,
+                  "a move that needs a mark says where the piece it captures stands: "
+                  "give it a 'captures at' offset");
+    }
+    if (a.capture != CapturePolicy::Must) {
+      return fail(ErrorCode::ValidationError,
+                  "a move that captures somewhere other than where it lands is capture-only "
+                  "('must'): it moves onto an empty cell to take the piece beside it");
+    }
+    for (std::size_t i = 0; i < a.captureAt.size(); ++i) {
+      if (a.captureAt[i].value == 0) {
+        return fail(ErrorCode::ValidationError, "a capture offset needs nonzero components");
+      }
+      for (std::size_t j = i + 1; j < a.captureAt.size(); ++j) {
+        if (a.captureAt[i].axis == a.captureAt[j].axis) {
+          return fail(ErrorCode::ValidationError, "a capture offset names the same axis twice");
+        }
+      }
+    }
+    std::sort(a.captureAt.begin(), a.captureAt.end(),
+              [](const Pin& l, const Pin& r) { return l.axis < r.axis; });
+  }
   if (!a.pins.empty() && a.oriented) {
     return fail(ErrorCode::ValidationError,
                 "a move with pinned components says its direction itself; "
@@ -156,6 +180,21 @@ std::string MoveAtom::toString() const {
   if (oriented) out += " forward";
   if (fromRegion[0].active()) out += " from-home";
   if (unmoved) out += " unmoved";
+  for (const MarkSpec& m : marks) {
+    out += " marks(" + std::to_string(m.tag) + ":" +
+           (m.where == MarkWhere::Passed ? "passed" : m.where == MarkWhere::Landed ? "landed" : "around") +
+           (m.where == MarkWhere::Around ? ":" + std::to_string(m.radius) : "") + ":" +
+           (m.duration == 0 ? "forever" : std::to_string(m.duration)) + ")";
+  }
+  if (!captureAt.empty()) {
+    out += " captures-at{";
+    for (std::size_t i = 0; i < captureAt.size(); ++i) {
+      if (i != 0) out += ',';
+      out += std::to_string(captureAt[i].axis) + ":" + std::to_string(captureAt[i].value);
+    }
+    out += "}";
+    if (needsMark >= 0) out += " needs-mark(" + std::to_string(needsMark) + ")";
+  }
   return out;
 }
 
@@ -165,7 +204,8 @@ bool operator==(const MoveAtom& a, const MoveAtom& b) {
          a.capture == b.capture && a.oriented == b.oriented &&
          a.fromRegion[0].axis == b.fromRegion[0].axis &&
          a.fromRegion[0].value == b.fromRegion[0].value &&
-         a.leavesEnPassant == b.leavesEnPassant && a.unmoved == b.unmoved;
+         a.leavesEnPassant == b.leavesEnPassant && a.unmoved == b.unmoved &&
+         a.marks == b.marks && a.captureAt == b.captureAt && a.needsMark == b.needsMark;
 }
 
 std::vector<Direction> expandAtom(const SmallVec<std::int16_t, kMaxDims>& mags,

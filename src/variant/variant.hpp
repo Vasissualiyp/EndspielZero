@@ -117,6 +117,19 @@ class VariantSpec {
   /// Index 0 is the reserved empty entry, so a PieceTypeId indexes directly.
   std::vector<PieceTypeDef> pieces;
   std::vector<CastleTemplate> castles;
+  /// The tags marks can carry (M19). Index 0 is always "ep", the en-passant target, which
+  /// blocks nothing; a variant adds its own, and a tag that `blocks` makes the cells it is
+  /// on impassable and un-enterable (a "destroyed" square).
+  struct MarkTag {
+    std::string name;
+    bool blocks{false};
+  };
+  std::vector<MarkTag> markTags;
+  /// Computed by finalize(): some tag blocks, or some move captures at an offset - the two
+  /// things movegen pays for only when a variant uses them.
+  bool hasBlockingMarks{false};
+  bool hasOffsetCaptures{false};
+  [[nodiscard]] int findMarkTag(std::string_view name) const;
   std::vector<StartPiece> start;
   Color startSideToMove{Color::White};
 

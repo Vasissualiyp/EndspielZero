@@ -56,6 +56,19 @@ std::vector<std::string> axisNamesOf(const toml::table& root) {
   return names;
 }
 
+/// "ep", then the variant's own tags, in file order - the indices atoms refer to.
+std::vector<std::string> markTagNamesOf(const toml::table& root) {
+  std::vector<std::string> names{"ep"};
+  if (const auto* tags = root["mark"].as_array()) {
+    for (const auto& node : *tags) {
+      const auto* t = node.as_table();
+      const std::string n = t != nullptr ? (*t)["name"].value_or(std::string{}) : std::string{};
+      if (!n.empty() && n != "ep") names.push_back(n);
+    }
+  }
+  return names;
+}
+
 std::string_view modeWord(MoveMode m) {
   switch (m) {
     case MoveMode::Slide:
@@ -145,7 +158,7 @@ Result<std::vector<MoveAtom>> VariantDoc::pieceAtoms(std::string_view piece) con
     MoveAtom a;
     {
       std::string why;
-      if (!readAtomKind(*mt, axisNamesOf(impl_->table), orientAxis, a, why)) continue;
+      if (!readAtomKind(*mt, axisNamesOf(impl_->table), orientAxis, markTagNamesOf(impl_->table), a, why)) continue;
     }
 
     const std::string maxText = (*mt)["max"].value_or(std::string{});
@@ -193,7 +206,7 @@ Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
   toml::array moves;
   for (const MoveAtom& a : atoms) {
     toml::table m;
-    writeAtomKind(a, axisNamesOf(impl_->table), m);
+    writeAtomKind(a, axisNamesOf(impl_->table), markTagNamesOf(impl_->table), m);
     if (a.minK != 1) m.insert("min", static_cast<std::int64_t>(a.minK));
     if (a.maxK == kUnlimited) {
       m.insert("max", std::string{"inf"});
@@ -219,6 +232,37 @@ Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
   return {};
 }
 
+std::vector<VariantDoc::MarkTagInfo> VariantDoc::markTags() const {
+  std::vector<MarkTagInfo> out;
+  const auto* tags = impl_->table["mark"].as_array();
+  if (tags == nullptr) return out;
+  for (const auto& node : *tags) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    MarkTagInfo info;
+    info.name = (*t)["name"].value_or(std::string{});
+    info.blocks = (*t)["blocks"].value_or(false);
+    if (!info.name.empty() && info.name != "ep") out.push_back(std::move(info));
+  }
+  return out;
+}
+
+Result<void> VariantDoc::setMarkTags(const std::vector<MarkTagInfo>& tags) {
+  if (tags.empty()) {
+    impl_->table.erase("mark");
+    return {};
+  }
+  toml::array arr;
+  for (const MarkTagInfo& tag : tags) {
+    toml::table t;
+    t.insert("name", tag.name);
+    if (tag.blocks) t.insert("blocks", true);
+    arr.push_back(std::move(t));
+  }
+  impl_->table.insert_or_assign("mark", std::move(arr));
+  return {};
+}
+
 Result<std::string> VariantDoc::pieceMovesText(std::string_view piece) const {
   const toml::table* pt = findPieceTable(impl_->table, piece);
   if (pt == nullptr) {
@@ -231,7 +275,7 @@ Result<std::string> VariantDoc::pieceMovesText(std::string_view piece) const {
   auto atoms = pieceAtoms(piece);
   if (!atoms.has_value()) return fail(atoms.error().code, atoms.error().message);
   const MovesetContext ctx = movesetContextFor(impl_->table);
-  return printMoveset(*atoms, ctx.axisNames, ctx.orientAxis);
+  return printMoveset(*atoms, ctx.axisNames, ctx.orientAxis, ctx.markTags);
 }
 
 Result<void> VariantDoc::setPieceMovesText(std::string_view piece, std::string_view text) {

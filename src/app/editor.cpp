@@ -176,15 +176,26 @@ std::vector<MoveAtom> Editor::bundleAtoms(std::string_view bundle, std::size_t b
   } else if (bundle == "forward capture" && orientAxis >= 0) {
     out.push_back(atom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true));
   } else if (bundle == "pawn" && orientAxis >= 0) {
-    // The three canonical rows: the push, the double step from the home rank (which leaves
-    // an en passant square), and the diagonal capture. This *is* the shipped pawn.
+    // The canonical rows: the push, the double step while unmoved (which leaves an "ep"
+    // mark for one ply), the diagonal capture, and en passant. This *is* the shipped pawn.
     out.push_back(atom({1}, 1, MoveMode::Leap, CapturePolicy::Cannot, true));
     MoveAtom twice = atom({1}, 2, MoveMode::Slide, CapturePolicy::Cannot, true);
     twice.minK = 2;
     twice.unmoved = true;
-    twice.leavesEnPassant = true;
+    twice.marks.push_back(MarkSpec{0, MarkWhere::Passed, 1, 1});  // the "ep" tag, one ply
     out.push_back(twice);
     out.push_back(atom({1, 1}, 1, MoveMode::Leap, CapturePolicy::Must, true));
+    // En passant: land on the cell the double step passed and take the pawn beside it - a
+    // capture at an offset, allowed only onto an "ep" mark.
+    MoveAtom passant;
+    passant.pins.push(Pin{static_cast<std::uint8_t>(orientAxis), 1});
+    passant.mags.push(1);
+    passant.flip = true;
+    passant.capture = CapturePolicy::Must;
+    passant.mode = MoveMode::Leap;
+    passant.captureAt.push(Pin{static_cast<std::uint8_t>(orientAxis), -1});
+    passant.needsMark = 0;
+    out.push_back(passant);
   }
   return out;
 }
@@ -284,6 +295,14 @@ Result<std::string> Editor::describeRules() const {
   if (!loaded.has_value()) return fail(loaded.error().code, loaded.error().message, loaded.error().line);
   if (!loaded->ruleSet) return std::string{};
   return static_cast<const rules::RuleSet*>(loaded->ruleSet.get())->describe();
+}
+
+std::vector<Editor::MarkTagInfo> Editor::markTags() const {
+  return doc_.markTags();
+}
+
+Result<void> Editor::setMarkTags(const std::vector<MarkTagInfo>& tags) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.setMarkTags(tags); });
 }
 
 Result<void> Editor::validate() const {

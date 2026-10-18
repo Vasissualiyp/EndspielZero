@@ -9,7 +9,7 @@ name = "atomic"
 description = "Captures detonate: the capturing piece destroys its neighbours as well."
 difficulty = "easy"
 side_to_move = "white"
-en_passant = true
+en_passant = false
 stalemate = "draw"
 halfmove_draw_limit = 100
 orientation_axis = "rank"
@@ -51,7 +51,7 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   capture = "cannot"
   forward = true
   unmoved = true
-  leaves_en_passant = true
+  marks = [{ tag = "ep", where = "passed", duration = 1 }]
 
   # The diagonal capture: magnitudes {1,1}, forward, capture-only.
   [[piece.move]]
@@ -60,6 +60,18 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "leap"
   capture = "must"
   forward = true
+
+  # En passant: capture-only, landing on the cell a double step passed over and taking the
+  # pawn that passed it - a capture at an offset, allowed only onto an "ep" mark.
+  [[piece.move]]
+  vector = [1]
+  pin = ["rank:+1"]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  flip = true
+  captures_at = ["rank:-1"]
+  needs_mark = "ep"
 
 [[piece]]
 name = "knight"

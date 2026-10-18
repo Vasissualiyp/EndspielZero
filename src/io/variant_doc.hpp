@@ -51,6 +51,16 @@ class VariantDoc {
   /// A piece's atoms as they are authored. Fails when no piece has that name.
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;
 
+  /// The variant's own mark tags (M19), in file order; "ep" is always tag 0 and not listed.
+  /// A tag that `blocks` makes the cells it marks impassable.
+  struct MarkTagInfo {
+    std::string name;
+    bool blocks{false};
+    friend bool operator==(const MarkTagInfo&, const MarkTagInfo&) = default;
+  };
+  [[nodiscard]] std::vector<MarkTagInfo> markTags() const;
+  [[nodiscard]] Result<void> setMarkTags(const std::vector<MarkTagInfo>& tags);
+
   /// A piece's moves as moveset text (M19): the text it was written as, if it has one, else
   /// the moves it has, spelled out. `setPieceMovesText` checks the text against this
   /// variant's board and stores it as written - `U r in 1..D : [1 x r]^k` stays symbolic -

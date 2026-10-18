@@ -63,8 +63,8 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   dbl.minK = 2;
   dbl.oriented = true;
   dbl.capture = CapturePolicy::Cannot;
-  dbl.leavesEnPassant = true;
   dbl.unmoved = true;
+  dbl.marks.push_back(MarkSpec{0, MarkWhere::Passed, 1, 1});  // the "ep" tag, one ply
 
   MoveAtom pawnCapture = atom({1, 1}, 1, MoveMode::Leap);
   pawnCapture.oriented = true;
@@ -73,7 +73,15 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   PieceTypeDef pawn;
   pawn.name = "pawn";
   pawn.symbol = 'P';
-  pawn.atoms = {push, dbl, pawnCapture};
+  // En passant: land on the cell a double step passed over, take the pawn beside it.
+  MoveAtom passant = atom({1}, 1, MoveMode::Leap);
+  passant.pins.push(Pin{static_cast<std::uint8_t>(kRankAxis), 1});
+  passant.flip = true;
+  passant.capture = CapturePolicy::Must;
+  passant.captureAt.push(Pin{static_cast<std::uint8_t>(kRankAxis), -1});
+  passant.needsMark = 0;
+
+  pawn.atoms = {push, dbl, pawnCapture, passant};
   pawn.resetsDrawClock = true;
   v.pieces.push_back(pawn);
 
@@ -115,7 +123,7 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
 
   v.promotion[static_cast<std::size_t>(Color::White)] = Region{kRankAxis, 7};
   v.promotion[static_cast<std::size_t>(Color::Black)] = Region{kRankAxis, 0};
-  v.enPassant = true;
+  v.enPassant = false;
   v.stalemate = StalematePolicy::Draw;
   v.halfmoveDrawLimit = 100;
 

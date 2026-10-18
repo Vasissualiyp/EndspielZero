@@ -35,8 +35,16 @@ class Position {
   }
 
   [[nodiscard]] Color sideToMove() const noexcept { return side_; }
-  [[nodiscard]] CellId epTarget() const noexcept { return ep_; }
-  [[nodiscard]] CellId epVictim() const noexcept { return epVictim_; }
+  /// The en-passant target and the piece it exposes: the "ep" mark (tag 0), if there is one.
+  [[nodiscard]] CellId epTarget() const noexcept;
+  [[nodiscard]] CellId epVictim() const noexcept;
+  /// Every mark on the board (M19), and the queries movegen asks.
+  [[nodiscard]] const std::vector<Mark>& marks() const noexcept { return marks_; }
+  [[nodiscard]] const Mark* markAt(CellId c, std::uint16_t tag) const noexcept;
+  /// Some blocking tag marks this cell: nothing may enter or cross it.
+  [[nodiscard]] bool blockedAt(CellId c) const noexcept {
+    return anyBlocked_ && blocked_.test(c);
+  }
   [[nodiscard]] std::uint8_t castleRights() const noexcept { return castleRights_; }
   [[nodiscard]] std::int32_t halfmoveClock() const noexcept { return halfmove_; }
   [[nodiscard]] std::int32_t fullmoveNumber() const noexcept { return fullmove_; }
@@ -48,6 +56,8 @@ class Position {
   void removeAt(CellId c);
   void setSideToMove(Color c);
   void setEpTarget(CellId target, CellId victim = kInvalidCell);
+  /// Add a mark (setup, e.g. reading FEN-N), keeping the hash and the blocked set.
+  void addMark(const Mark& m);
   void setCastleRights(std::uint8_t mask);
   void setClocks(std::int32_t halfmove, std::int32_t fullmove);
   /// Set or clear the moved bit of the piece on a cell (setup, e.g. reading FEN-N). The hash
@@ -101,8 +111,12 @@ class Position {
   BitWords occ_[kNumColors];
   BitWords occAll_;
   Color side_{Color::White};
-  CellId ep_{kInvalidCell};
-  CellId epVictim_{kInvalidCell};
+  std::vector<Mark> marks_;
+  BitWords blocked_;
+  bool anyBlocked_{false};
+  void rebuildBlocked();
+  /// XOR every mark's key into or out of the hash.
+  void hashMarks(const std::vector<Mark>& marks);
   std::uint8_t castleRights_{0};
   std::int32_t halfmove_{0};
   std::int32_t fullmove_{1};

@@ -67,6 +67,13 @@ MovesetContext movesetContextFor(const toml::table& root) {
     }
   }
   ctx.dims = static_cast<std::uint8_t>(ctx.axisNames.size());
+  if (const auto* tags = root["mark"].as_array()) {
+    for (const auto& node : *tags) {
+      const auto* t = node.as_table();
+      const std::string n = t != nullptr ? (*t)["name"].value_or(std::string{}) : std::string{};
+      if (!n.empty() && n != "ep") ctx.markTags.push_back(n);
+    }
+  }
   // Names: the variant's own table first, then the shared library.
   const toml::table* own = root["movesets"].as_table();
   ctx.lookup = [own](std::string_view name) -> std::optional<std::string> {

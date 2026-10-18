@@ -109,6 +109,12 @@ class Editor {
   /// line - or the loader's message when the document does not load.
   [[nodiscard]] Result<std::string> describeRules() const;
 
+  /// The variant's own mark tags: named marks a move can leave on cells, for a number of
+  /// plies or forever; a blocking tag makes the cells it marks impassable.
+  using MarkTagInfo = VariantDoc::MarkTagInfo;
+  [[nodiscard]] std::vector<MarkTagInfo> markTags() const;
+  Result<void> setMarkTags(const std::vector<MarkTagInfo>& tags);
+
   /// Does the document, as it stands, load? The editor is a front end to the loader and
   /// grows no second set of rules: this runs the real one on the serialized text and
   /// returns its message, which is what the screen shows against the control that broke

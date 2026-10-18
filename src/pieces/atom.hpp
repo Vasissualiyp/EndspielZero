@@ -61,6 +61,24 @@ struct Pin {
   friend bool operator==(const Pin&, const Pin&) = default;
 };
 
+/// Where a move leaves a mark (M19): the cell it passed over last (a double step's skipped
+/// square), the cell it landed on, or the cells around where it landed - within `radius`,
+/// the landing cell excluded.
+enum class MarkWhere : std::uint8_t { Passed, Landed, Around };
+
+/// A mark a move leaves behind: a named tag on cells, for a number of plies or forever. En
+/// passant is the tag "ep" on the passed cell for one ply; "destroyed" cells that nothing
+/// may enter are a blocking tag on the surroundings of a landing, for as long as the
+/// variant says. The tag's own properties (does it block?) are the variant's `markTags`.
+struct MarkSpec {
+  std::uint16_t tag{0};
+  MarkWhere where{MarkWhere::Passed};
+  std::uint16_t radius{1};
+  std::uint32_t duration{0};  ///< plies it lasts; 0 is forever
+
+  friend bool operator==(const MarkSpec&, const MarkSpec&) = default;
+};
+
 /// A region of the board, expressed as a predicate on one axis. Deliberately
 /// weak: "the last rank" and "the home rank" do not exist on a torus, so a
 /// variant there simply leaves the region inactive (M3.4).
@@ -125,6 +143,17 @@ struct MoveAtom {
   bool unmoved{false};
   /// Passing over cells must leave an en-passant target behind (a double step).
   bool leavesEnPassant{false};
+  /// Marks this move leaves behind, besides the en-passant target.
+  std::vector<MarkSpec> marks{};
+  /// A capture-only move that takes the piece *not* on its landing cell but at this offset
+  /// from it (flipped for the other side when `flip`): en passant, a checkers jump. Empty
+  /// for an ordinary capture.
+  SmallVec<Pin, kMaxDims> captureAt{};
+  /// ...and only when the landing cell carries a mark of this tag left by the opponent
+  /// (en passant); -1 means no such condition (a checkers jump).
+  std::int16_t needsMark{-1};
+  /// Resolved by finalize(): the direction table entry of `captureAt`, per colour.
+  std::uint32_t captureDir[kNumColors]{};
 
   /// Span into the variant's global direction table, per colour. The two spans
   /// differ only for oriented atoms.

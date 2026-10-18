@@ -61,6 +61,13 @@ int VariantSpec::findCellField(std::string_view n) const {
   return -1;
 }
 
+int VariantSpec::findMarkTag(std::string_view n) const {
+  for (std::size_t i = 0; i < markTags.size(); ++i) {
+    if (markTags[i].name == n) return static_cast<int>(i);
+  }
+  return -1;
+}
+
 PieceTypeId VariantSpec::findPieceBySymbol(char upper) const {
   for (std::size_t i = 1; i < pieces.size(); ++i) {
     if (pieces[i].symbol == upper) return static_cast<PieceTypeId>(i);
@@ -105,6 +112,24 @@ Result<void> VariantSpec::finalize() {
                 "orientation axis " + std::to_string(orientationAxis) +
                     " does not exist on a " + std::to_string(nd) + "-axis board");
   }
+
+  // ---- mark tags ------------------------------------------------------------
+  // "ep" is always tag 0: the en-passant target is a mark like any other, and the engine's
+  // legacy `leaves_en_passant` / `en_passant` ride on it.
+  if (markTags.empty() || markTags[0].name != "ep") markTags.insert(markTags.begin(), MarkTag{"ep", false});
+  if (markTags[0].blocks) {
+    return fail(ErrorCode::ValidationError, "the en-passant tag 'ep' cannot block");
+  }
+  for (std::size_t i = 0; i < markTags.size(); ++i) {
+    if (markTags[i].name.empty()) return fail(ErrorCode::ValidationError, "a mark tag needs a name");
+    for (std::size_t j = i + 1; j < markTags.size(); ++j) {
+      if (markTags[i].name == markTags[j].name) {
+        return fail(ErrorCode::ValidationError, "two mark tags are called '" + markTags[i].name + "'");
+      }
+    }
+    if (markTags[i].blocks) hasBlockingMarks = true;
+  }
+  if (markTags.size() > 255) return fail(ErrorCode::BudgetExceeded, "a variant has at most 255 mark tags");
 
   // ---- expand atoms into the global direction table ----------------------
   // Each atom owns a contiguous span, so the table carries a few duplicate
@@ -156,6 +181,26 @@ Result<void> VariantSpec::finalize() {
         atom.maxK = r.hi;
       }
       if (atom.unmoved) p.tracksMoved = true;
+      for (const MarkSpec& m : atom.marks) {
+        if (m.tag >= markTags.size()) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "' leaves a mark with an undeclared tag");
+        }
+        if (m.where == MarkWhere::Around && m.radius == 0) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "': marks around a landing need a radius of at least 1");
+        }
+      }
+      if (atom.needsMark >= 0 && static_cast<std::size_t>(atom.needsMark) >= markTags.size()) {
+        return fail(ErrorCode::ValidationError,
+                    "piece '" + p.name + "' needs a mark with an undeclared tag");
+      }
+      for (const Pin& pin : atom.captureAt) {
+        if (pin.axis >= nd) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "' captures at an axis the board does not have");
+        }
+      }
       // A move whose direction is its own (oriented, pinned, exact, expanded) differs by
       // colour; a plain one is symmetric and both colours share a span.
       const bool sided = atom.oriented || atom.flip || atom.kind != MoveKind::Extrapolated ||
@@ -185,6 +230,25 @@ Result<void> VariantSpec::finalize() {
                           std::to_string(kMaxDirections) + " entries on a " +
                           std::to_string(nd) +
                           "-axis board; reduce the atom's order or the dimension count");
+        }
+      }
+
+      // Where an offset capture takes its piece: one direction per colour, flipped as the
+      // move is, so the geometry steps from the landing cell to the piece beside it.
+      if (!atom.captureAt.empty()) {
+        hasOffsetCaptures = true;
+        MoveAtom off;
+        off.kind = MoveKind::Exact;
+        off.pins = atom.captureAt;
+        off.flip = atom.flip;
+        for (int ci = 0; ci < kNumColors; ++ci) {
+          const auto dirs = expandAtomFor(off, nd, orientationAxis, static_cast<Color>(ci));
+          if (dirs.empty()) {
+            return fail(ErrorCode::ValidationError,
+                        "piece '" + p.name + "' has a capture offset the board cannot take");
+          }
+          atom.captureDir[ci] = static_cast<std::uint32_t>(dirTable.size());
+          dirTable.push_back(scaleByPitch(dims, dirs[0]));
         }
       }
 
@@ -357,6 +421,10 @@ Result<void> VariantSpec::finalize() {
         h.add(static_cast<std::uint64_t>(a.fromRegion[ci].value));
       }
     }
+  }
+  for (std::size_t i = 1; i < markTags.size(); ++i) {
+    h.add(markTags[i].name);
+    h.add(markTags[i].blocks ? 1u : 0u);
   }
   h.add(static_cast<std::uint64_t>(orientationAxis));
   h.add(enPassant ? 1u : 0u);

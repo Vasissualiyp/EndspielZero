@@ -83,7 +83,17 @@ std::string toFen(const Position& p) {
       unmoved += cellName(d, c);
     }
   }
-  if (unusual) out << ' ' << (unmoved.empty() ? "-" : unmoved);
+  // Marks other than the en-passant target (which has its own field): `tag:cell:plies:side`,
+  // "plies" being 0 for a mark that lasts forever. They need the field before them written.
+  std::string marks;
+  for (const Mark& m : p.marks()) {
+    if (m.tag == 0) continue;
+    if (!marks.empty()) marks += ',';
+    marks += v.markTags[m.tag].name + ":" + cellName(d, m.cell) + ":" + std::to_string(m.ttl) +
+             ":" + (m.owner == 0 ? "w" : "b");
+  }
+  if (unusual || !marks.empty()) out << ' ' << (unmoved.empty() ? "-" : unmoved);
+  if (!marks.empty()) out << ' ' << marks;
   return out.str();
 }
 
@@ -228,6 +238,34 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
         p.setMoved(*cell, false);
         at = comma + 1;
       }
+    }
+  }
+
+  // ---- marks -------------------------------------------------------------------
+  if (fields.size() > 7 && fields[7] != "-") {
+    std::size_t at = 0;
+    const std::string& list = fields[7];
+    while (at <= list.size()) {
+      const std::size_t comma = std::min(list.find(',', at), list.size());
+      const std::string item = list.substr(at, comma - at);
+      std::vector<std::string> parts;
+      std::size_t q = 0;
+      while (q <= item.size()) {
+        const std::size_t colon = std::min(item.find(':', q), item.size());
+        parts.push_back(item.substr(q, colon - q));
+        q = colon + 1;
+      }
+      if (parts.size() != 4) {
+        return fail(ErrorCode::ParseError, "a mark is written tag:cell:plies:side, not '" + item + "'");
+      }
+      const int tag = v.findMarkTag(parts[0]);
+      if (tag < 0) return fail(ErrorCode::ParseError, "no mark tag is called '" + parts[0] + "'");
+      const auto cell = parseCell(d, parts[1]);
+      if (!cell.has_value()) return fail(cell.error().code, cell.error().message);
+      p.addMark(Mark{*cell, static_cast<std::uint16_t>(tag),
+                     static_cast<std::uint16_t>(std::strtol(parts[2].c_str(), nullptr, 10)),
+                     static_cast<std::uint8_t>(parts[3] == "b" ? 1 : 0), kInvalidCell});
+      at = comma + 1;
     }
   }
 

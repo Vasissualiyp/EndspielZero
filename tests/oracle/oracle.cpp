@@ -65,11 +65,7 @@ const std::vector<Direction>& directionsFor(const VariantSpec& v, const MoveAtom
   const auto it = cache.find(key);
   if (it != cache.end()) return it->second;
 
-  std::vector<Direction> dirs =
-      atom.oriented
-          ? expandAtomOriented(atom.mags, v.dims.dims(),
-                               static_cast<std::uint8_t>(v.orientationAxis), side)
-          : expandAtom(atom.mags, v.dims.dims());
+  std::vector<Direction> dirs = expandAtomFor(atom, v.dims.dims(), v.orientationAxis, side);
 
   // An atom's magnitudes are units of *movement*; a direction is in lattice cells, and
   // an axis may be sampled more finely than a piece moves along it - the turn axis holds
@@ -118,6 +114,9 @@ std::vector<Move> pseudoLegal(const Position& p) {
     for (const MoveAtom& atom : v.pieces[piece.type].atoms) {
       const Region& gate = atom.fromRegion[static_cast<std::size_t>(side)];
       if (gate.active() && !gate.contains(fromCoord)) continue;
+      if (atom.unmoved && piece.hasMoved()) continue;
+      bool leavesPassed = false;
+      for (const MarkSpec& m : atom.marks) leavesPassed = leavesPassed || m.where == MarkWhere::Passed;
 
       for (const Direction& dir : directionsFor(v, atom, side)) {
         const auto cells = ray(v, from, dir, atom.maxK);
@@ -132,6 +131,14 @@ std::vector<Move> pseudoLegal(const Position& p) {
           const bool own = !target.empty() && target.colorOf() == side;
           const bool enemy = !target.empty() && !own;
           const bool longEnough = k >= atom.minK;
+          // A cell a blocking mark is on: a slider stops, a leaper does not land.
+          if (v.hasBlockingMarks && p.blockedAt(to)) {
+            if (atom.mode == MoveMode::Leap) {
+              prev = to;
+              continue;
+            }
+            break;
+          }
 
           if (atom.mode == MoveMode::Hop) {
             if (!hurdleFound) {
@@ -160,7 +167,7 @@ std::vector<Move> pseudoLegal(const Position& p) {
             continue;
           }
           if (enemy) {
-            if (longEnough && atom.capture != CapturePolicy::Cannot) {
+            if (longEnough && atom.capture != CapturePolicy::Cannot && atom.captureAt.empty()) {
               appendPromotions(
                   v,
                   Move{.from = from,
@@ -177,6 +184,7 @@ std::vector<Move> pseudoLegal(const Position& p) {
           if (longEnough) {
             if (atom.capture != CapturePolicy::Must) {
               Move m{.from = from, .to = to};
+              if (leavesPassed && !atom.leavesEnPassant) m.epTarget = prev;
               if (atom.leavesEnPassant && prev != kInvalidCell) {
                 m.flags = static_cast<std::uint8_t>(
                     m.flags | static_cast<std::uint8_t>(MoveFlag::LeavesEnPassant));
@@ -184,6 +192,37 @@ std::vector<Move> pseudoLegal(const Position& p) {
                 m.epVictim = to;
               }
               appendPromotions(v, m, piece.type, side, toCoord, out);
+            } else if (!atom.captureAt.empty()) {
+              // Captures at an offset: land empty, take the piece beside the landing cell.
+              MoveAtom off;
+              off.kind = MoveKind::Exact;
+              off.pins = atom.captureAt;
+              off.flip = atom.flip;
+              auto offDirs = expandAtomFor(off, v.dims.dims(), v.orientationAxis, side);
+              const Mark* mk = atom.needsMark >= 0
+                                   ? p.markAt(to, static_cast<std::uint16_t>(atom.needsMark))
+                                   : nullptr;
+              if (!offDirs.empty() &&
+                  (atom.needsMark < 0 || (mk != nullptr && mk->owner != static_cast<std::uint8_t>(side)))) {
+                std::array<std::int16_t, kMaxDims> v2{};
+                for (std::uint8_t a = 0; a < offDirs[0].n; ++a) {
+                  v2[a] = static_cast<std::int16_t>(offDirs[0].v[a] * v.dims.pitch(a));
+                }
+                const auto victimCells = ray(v, to, Direction::make(v2, offDirs[0].n), 1);
+                if (!victimCells.empty()) {
+                  const Piece victim = p.at(victimCells[0].cell);
+                  if (!victim.empty() && victim.colorOf() != side) {
+                    appendPromotions(
+                        v,
+                        Move{.from = from,
+                             .to = to,
+                             .captureCell = victimCells[0].cell,
+                             .flags = static_cast<std::uint8_t>(
+                                 MoveFlag::Capture | (atom.needsMark >= 0 ? MoveFlag::EnPassant : MoveFlag::None))},
+                        piece.type, side, toCoord, out);
+                  }
+                }
+              }
             } else if (v.enPassant && to == p.epTarget() &&
                        p.epVictim() != kInvalidCell) {
               appendPromotions(v,
@@ -249,6 +288,8 @@ bool isAttacked(const Position& p, CellId target, Color by) {
     const Coord fromCoord = v.dims.toCoord(from);
     for (const MoveAtom& atom : v.pieces[piece.type].atoms) {
       if (atom.capture == CapturePolicy::Cannot) continue;
+      if (!atom.captureAt.empty()) continue;  // takes the piece beside where it lands
+      if (atom.unmoved && piece.hasMoved()) continue;
       const Region& gate = atom.fromRegion[static_cast<std::size_t>(by)];
       if (gate.active() && !gate.contains(fromCoord)) continue;
       for (const Direction& dir : directionsFor(v, atom, by)) {

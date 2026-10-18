@@ -344,6 +344,10 @@ TEST_CASE("every piece in every shipped variant can be built from the palette", 
         for (const MoveAtom& a : app::Editor::bundleAtoms("forward capture", axes, orient)) {
           bundle.push_back(a);
         }
+      } else if (piece == "pawn" && want.atoms.size() == 3) {
+        // A double step, but no en passant: the pawn's first three rows without the mark.
+        bundle.pop_back();
+        bundle[1].marks.clear();
       }
       REQUIRE_FALSE(bundle.empty());
       // The queen's bundle runs to the board's dimension; compare what actually expands.

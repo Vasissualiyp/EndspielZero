@@ -584,12 +584,92 @@ class Evaluator {
             Region{ctx_.orientAxis, static_cast<std::int16_t>(rank)};
       } else if (f.text == "unmoved") {
         atom.unmoved = true;
+      } else if (f.text == "marks") {
+        // marks tag(where [radius], duration): what the move leaves behind.
+        const Token tagTok = expect(Tok::Ident, "a mark tag after 'marks'");
+        std::optional<std::size_t> index;
+        for (std::size_t i = 0; i < ctx_.markTags.size(); ++i) {
+          if (ctx_.markTags[i] == tagTok.text) index = i;
+        }
+        if (!index) fail_at(tagTok, "no mark tag is called '" + tagTok.text + "' (declare it with [[mark]])");
+        expect(Tok::LParen, "'(' after the tag");
+        const Token whereTok = expect(Tok::Ident, "passed, landed or around");
+        MarkSpec spec;
+        spec.tag = static_cast<std::uint16_t>(*index);
+        if (whereTok.text == "passed") {
+          spec.where = MarkWhere::Passed;
+        } else if (whereTok.text == "landed") {
+          spec.where = MarkWhere::Landed;
+        } else if (whereTok.text == "around") {
+          spec.where = MarkWhere::Around;
+          spec.radius = static_cast<std::uint16_t>(std::max(1L, peek().kind == Tok::Int ? intExpr() : 1L));
+        } else {
+          fail_at(whereTok, "a mark goes passed, landed or around - not '" + whereTok.text + "'");
+        }
+        expect(Tok::Comma, "',' before the duration");
+        if (isWord("forever")) {
+          take();
+          spec.duration = 0;
+        } else {
+          const long n = intExpr();
+          if (n < 1) fail_at(peek(), "a mark lasts at least 1 ply (or 'forever')");
+          spec.duration = static_cast<std::uint32_t>(n);
+        }
+        expect(Tok::RParen, "')'");
+        atom.marks.push_back(spec);
+      } else if (f.text == "captures") {
+        // captures at [rank:-1]: the piece taken stands at this offset from the landing cell.
+        if (!isWord("at")) fail_at(peek(), "expected 'at' after 'captures'");
+        take();
+        expect(Tok::LBracket, "'['");
+        std::size_t capEntry = 0;
+        bool firstEntry = true;
+        while (peek().kind != Tok::RBracket) {
+          if (peek().kind == Tok::End) fail_at(peek(), "expected ']' to close the offset");
+          if (!firstEntry) expect(Tok::Comma, "',' between components");
+          firstEntry = false;
+          if (peek().kind == Tok::Ident && peek(1).kind == Tok::Colon) {
+            const Token axisName = take();
+            take();
+            long sign = 1;
+            if (peek().kind == Tok::Plus) {
+              take();
+            } else if (peek().kind == Tok::Minus) {
+              take();
+              sign = -1;
+            }
+            const Token num = expect(Tok::Int, "a number after the axis");
+            atom.captureAt.push(Pin{static_cast<std::uint8_t>(axisIndex(axisName)),
+                                    static_cast<std::int16_t>(sign * num.value)});
+          } else {
+            long sign = 1;
+            if (peek().kind == Tok::Plus) {
+              take();
+            } else if (peek().kind == Tok::Minus) {
+              take();
+              sign = -1;
+            }
+            const long n = intTerm();
+            if (n != 0) {
+              atom.captureAt.push(Pin{static_cast<std::uint8_t>(capEntry), static_cast<std::int16_t>(sign * n)});
+            }
+          }
+          ++capEntry;
+        }
+        expect(Tok::RBracket, "']'");
+      } else if (f.text == "needs") {
+        const Token tagTok = expect(Tok::Ident, "a mark tag after 'needs'");
+        atom.needsMark = -1;
+        for (std::size_t i = 0; i < ctx_.markTags.size(); ++i) {
+          if (ctx_.markTags[i] == tagTok.text) atom.needsMark = static_cast<std::int16_t>(i);
+        }
+        if (atom.needsMark < 0) fail_at(tagTok, "no mark tag is called '" + tagTok.text + "'");
       } else if (f.text == "epmark") {
         atom.leavesEnPassant = true;
       } else {
         fail_at(f, "unknown word '" + f.text +
                        "' after a move (known: slide leap hop may must cannot flip noflip "
-                       "forward unmoved positive negative both)");
+                       "forward unmoved marks captures needs positive negative both)");
       }
     }
 
@@ -637,7 +717,8 @@ Result<std::vector<MoveAtom>> evalMoveset(std::string_view text, const MovesetCo
 // ===========================================================================
 
 std::string printMoveset(const std::vector<MoveAtom>& atoms,
-                         const std::vector<std::string>& axisNames, int orientAxis) {
+                         const std::vector<std::string>& axisNames, int orientAxis,
+                         const std::vector<std::string>& markTags) {
   std::string out;
   for (std::size_t n = 0; n < atoms.size(); ++n) {
     const MoveAtom& a = atoms[n];
@@ -692,6 +773,25 @@ std::string printMoveset(const std::vector<MoveAtom>& atoms,
       out += " fromrank " + std::to_string(a.fromRegion[static_cast<std::size_t>(Color::White)].value);
     }
     if (a.unmoved) out += " unmoved";
+    for (const MarkSpec& m : a.marks) {
+      const std::string tag = m.tag < markTags.size() ? markTags[m.tag] : "tag" + std::to_string(m.tag);
+      out += " marks " + tag + "(" +
+             (m.where == MarkWhere::Passed ? "passed" : m.where == MarkWhere::Landed ? "landed" : "around " + std::to_string(m.radius)) +
+             ", " + (m.duration == 0 ? std::string("forever") : std::to_string(m.duration)) + ")";
+    }
+    if (!a.captureAt.empty()) {
+      out += " captures at [";
+      for (std::size_t i = 0; i < a.captureAt.size(); ++i) {
+        const Pin& p = a.captureAt[i];
+        if (i != 0) out += ',';
+        out += (p.axis < axisNames.size() ? axisNames[p.axis] : "axis" + std::to_string(p.axis)) + ":" +
+               (p.value > 0 ? "+" : "") + std::to_string(p.value);
+      }
+      out += "]";
+      if (a.needsMark >= 0) {
+        out += " needs " + (static_cast<std::size_t>(a.needsMark) < markTags.size() ? markTags[static_cast<std::size_t>(a.needsMark)] : "tag");
+      }
+    }
     if (a.leavesEnPassant) out += " epmark";
   }
   return out;

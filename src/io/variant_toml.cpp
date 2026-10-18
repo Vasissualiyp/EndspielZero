@@ -311,6 +311,27 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     return fail(r.error().code, r.error().message, r.error().line);
   }
 
+  // ---- mark tags -------------------------------------------------------------
+  // "ep" is tag 0 always; the variant's own follow. Parsed before pieces, which name them.
+  std::vector<std::string> markTagNames{"ep"};
+  v.markTags.clear();
+  v.markTags.push_back(VariantSpec::MarkTag{"ep", false});
+  if (const auto* tags = tbl["mark"].as_array()) {
+    for (const auto& node : *tags) {
+      const auto* t = node.as_table();
+      if (t == nullptr) {
+        return fail(ErrorCode::ValidationError, "[[mark]] must be a table", lineOf(node));
+      }
+      const std::string name = (*t)["name"].value_or(std::string{});
+      if (name.empty()) {
+        return fail(ErrorCode::ValidationError, "every [[mark]] needs a name", lineOf(node));
+      }
+      if (name == "ep") continue;  // always declared
+      markTagNames.push_back(name);
+      v.markTags.push_back(VariantSpec::MarkTag{name, (*t)["blocks"].value_or(false)});
+    }
+  }
+
   // ---- pieces --------------------------------------------------------------
   v.pieces.clear();
   v.pieces.emplace_back();  // the reserved empty entry
@@ -392,7 +413,7 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
         std::vector<std::string> axisNames;
         for (std::size_t i = 0; i < v.dims.dims(); ++i) axisNames.push_back(v.dims.name(i));
         std::string why;
-        if (!readAtomKind(*mt, axisNames, v.orientationAxis, atom, why)) {
+        if (!readAtomKind(*mt, axisNames, v.orientationAxis, markTagNames, atom, why)) {
           return fail(ErrorCode::ValidationError, "piece '" + p.name + "': " + why,
                       lineOf(mnode));
         }

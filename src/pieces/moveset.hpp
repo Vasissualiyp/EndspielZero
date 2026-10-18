@@ -35,6 +35,8 @@ struct MovesetContext {
   std::uint8_t dims{2};
   std::vector<std::string> axisNames;
   int orientAxis{-1};
+  /// The mark tags the variant declares, "ep" first: what `marks` and `needs` may name.
+  std::vector<std::string> markTags{"ep"};
   /// A name the text does not define itself - the variant's `[movesets]` table, or the
   /// shared library of moveset files. Returns that name's text, or nothing.
   std::function<std::optional<std::string>(std::string_view)> lookup;
@@ -51,7 +53,7 @@ struct MovesetContext {
 /// `evalMoveset(printMoveset(a)) == a` for every set the language can express.
 /// `axisNames` names the axes pinned components refer to.
 [[nodiscard]] std::string printMoveset(const std::vector<MoveAtom>& atoms,
-                                       const std::vector<std::string>& axisNames,
-                                       int orientAxis);
+                                       const std::vector<std::string>& axisNames, int orientAxis,
+                                       const std::vector<std::string>& markTags = {"ep"});
 
 }  // namespace cb

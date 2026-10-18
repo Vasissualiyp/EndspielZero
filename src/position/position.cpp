@@ -84,8 +84,8 @@ void Position::clear() {
   for (Piece& c : cells_) c = Piece{};
   for (auto& o : occ_) o.clear();
   occAll_.clear();
-  ep_ = kInvalidCell;
-  epVictim_ = kInvalidCell;
+  marks_.clear();
+  rebuildBlocked();
   castleRights_ = 0;
   halfmove_ = 0;
   fullmove_ = 1;
@@ -125,11 +125,62 @@ void Position::setSideToMove(Color c) {
   }
 }
 
+CellId Position::epTarget() const noexcept {
+  for (const Mark& m : marks_) {
+    if (m.tag == 0) return m.cell;
+  }
+  return kInvalidCell;
+}
+
+CellId Position::epVictim() const noexcept {
+  for (const Mark& m : marks_) {
+    if (m.tag == 0) return m.victim;
+  }
+  return kInvalidCell;
+}
+
+const Mark* Position::markAt(CellId c, std::uint16_t tag) const noexcept {
+  for (const Mark& m : marks_) {
+    if (m.cell == c && m.tag == tag) return &m;
+  }
+  return nullptr;
+}
+
+void Position::rebuildBlocked() {
+  anyBlocked_ = false;
+  if (!v_->hasBlockingMarks) return;
+  if (blocked_.size() != cellCount()) blocked_.reset(cellCount());
+  blocked_.clear();
+  for (const Mark& m : marks_) {
+    if (m.tag < v_->markTags.size() && v_->markTags[m.tag].blocks) {
+      blocked_.set(m.cell);
+      anyBlocked_ = true;
+    }
+  }
+}
+
+void Position::hashMarks(const std::vector<Mark>& marks) {
+  for (const Mark& m : marks) hash_ ^= v_->zob.mark(m.cell, m.tag, m.ttl);
+}
+
+void Position::addMark(const Mark& m) {
+  marks_.push_back(m);
+  hash_ ^= v_->zob.mark(m.cell, m.tag, m.ttl);
+  rebuildBlocked();
+}
+
 void Position::setEpTarget(CellId target, CellId victim) {
-  hash_ ^= v_->zob.epTarget(ep_ == kInvalidCell ? cellCount() : ep_);
-  ep_ = target;
-  epVictim_ = target == kInvalidCell ? kInvalidCell : victim;
-  hash_ ^= v_->zob.epTarget(ep_ == kInvalidCell ? cellCount() : ep_);
+  // The tag-0 mark is the en-passant target: replace whatever there was. Set up from FEN
+  // or a test, so the side to move is the one who may use it and the opponent made it.
+  for (std::size_t i = marks_.size(); i-- > 0;) {
+    if (marks_[i].tag == 0) {
+      hash_ ^= v_->zob.mark(marks_[i].cell, 0, marks_[i].ttl);
+      marks_.erase(marks_.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+  }
+  if (target != kInvalidCell) {
+    addMark(Mark{target, 0, 1, static_cast<std::uint8_t>(opponent(side_)), victim});
+  }
 }
 
 void Position::setCastleRights(std::uint8_t mask) {
@@ -178,15 +229,14 @@ std::uint64_t Position::computeHash() const {
     if (!p.empty() && p.hasMoved()) h ^= v_->zob.moved(c);
   }
   if (side_ == Color::Black) h ^= v_->zob.side();
-  h ^= v_->zob.epTarget(ep_ == kInvalidCell ? cellCount() : ep_);
+  for (const Mark& m : marks_) h ^= v_->zob.mark(m.cell, m.tag, m.ttl);
   h ^= v_->zob.castleRights(castleRights_);
   return h;
 }
 
 void Position::make(const Move& m, Undo& u) {
   u.captured = Piece{};
-  u.epBefore = ep_;
-  u.epVictimBefore = epVictim_;
+  u.marksBefore.clear();
   u.castleRightsBefore = castleRights_;
   u.halfmoveBefore = halfmove_;
   u.hashBefore = hash_;
@@ -244,10 +294,60 @@ void Position::make(const Move& m, Undo& u) {
   }
   if (rights != castleRights_) setCastleRights(rights);
 
-  if (has(m.flags, MoveFlag::LeavesEnPassant)) {
-    setEpTarget(m.epTarget, m.epVictim);
-  } else {
-    setEpTarget(kInvalidCell);
+  // Marks: the ones already on the board age by a ply (and the last of them goes), then this
+  // move's own are left. En passant is the tag-0 mark; the move that made it is the mover's.
+  const bool leavesMarks =
+      has(m.flags, MoveFlag::LeavesEnPassant) ||
+      (m.atomIndex != 0xFF && !v_->pieces[mover.type].atoms[m.atomIndex].marks.empty());
+  if (!marks_.empty() || leavesMarks) {
+    u.marksBefore = marks_;
+    hashMarks(marks_);
+    std::vector<Mark> kept;
+    kept.reserve(marks_.size() + 2);
+    for (Mark mk : marks_) {
+      if (mk.ttl != 0) {
+        --mk.ttl;
+        if (mk.ttl == 0) continue;
+      }
+      kept.push_back(mk);
+    }
+    if (has(m.flags, MoveFlag::LeavesEnPassant) && m.epTarget != kInvalidCell) {
+      kept.push_back(Mark{m.epTarget, 0, 1, static_cast<std::uint8_t>(side_), m.epVictim});
+    }
+    if (m.atomIndex != 0xFF) {
+      for (const MarkSpec& spec : v_->pieces[mover.type].atoms[m.atomIndex].marks) {
+        const auto leave = [&](CellId cell) {
+          if (cell == kInvalidCell) return;
+          kept.push_back(Mark{cell, spec.tag, static_cast<std::uint16_t>(spec.duration),
+                              static_cast<std::uint8_t>(side_), kInvalidCell});
+        };
+        switch (spec.where) {
+          case MarkWhere::Passed:
+            leave(m.epTarget);
+            break;
+          case MarkWhere::Landed:
+            leave(m.to);
+            break;
+          case MarkWhere::Around: {
+            const Coord centre = v_->dims.toCoord(m.to);
+            for (CellId c = 0; c < v_->dims.cellCount(); ++c) {
+              if (c == m.to) continue;
+              const Coord at = v_->dims.toCoord(c);
+              bool near = true;
+              for (std::uint8_t a = 0; a < v_->dims.dims() && near; ++a) {
+                const int dd = at.c[a] - centre.c[a];
+                near = (dd < 0 ? -dd : dd) <= static_cast<int>(spec.radius);
+              }
+              if (near) leave(c);
+            }
+            break;
+          }
+        }
+      }
+    }
+    marks_ = std::move(kept);
+    hashMarks(marks_);
+    rebuildBlocked();
   }
 
   halfmove_ = resetClock ? 0 : halfmove_ + 1;
@@ -301,8 +401,10 @@ void Position::unmake(const Move& m, const Undo& u) {
 
   // Restoring these directly (rather than re-deriving) is what makes unmake
   // exact: the hash is restored, not recomputed, so a mismatch is detectable.
-  ep_ = u.epBefore;
-  epVictim_ = u.epVictimBefore;
+  if (!u.marksBefore.empty() || !marks_.empty()) {
+    marks_ = u.marksBefore;
+    rebuildBlocked();
+  }
   castleRights_ = u.castleRightsBefore;
   halfmove_ = u.halfmoveBefore;
   hash_ = u.hashBefore;

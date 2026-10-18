@@ -56,6 +56,11 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
   if (atom.unmoved && p.at(from).hasMoved()) return;
 
   const Geometry& geom = v_->geom;
+  // Which of the piece's atoms this is, carried on the move so `make` can read the marks it
+  // leaves behind.
+  const auto atomIdx = static_cast<std::uint8_t>(&atom - v_->pieces[type].atoms.data());
+  bool leavesPassedMark = false;
+  for (const MarkSpec& m : atom.marks) leavesPassedMark = leavesPassedMark || m.where == MarkWhere::Passed;
   const std::uint32_t begin = atom.dirBegin[ci];
   const std::uint32_t end = atom.dirEnd[ci];
 
@@ -75,6 +80,14 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
       if (rayClosed(w, from, startDir)) break;
 
       const CellId to = w.cell;
+      // A cell some blocking mark is on: a slider stops short of it, a leaper does not land.
+      if (v_->hasBlockingMarks && p.blockedAt(to)) {
+        if (atom.mode == MoveMode::Leap) {
+          prevCell = to;
+          continue;
+        }
+        break;
+      }
       // The origin still holds the moving piece, so a slider is blocked there and
       // a leaper passes over it - handled by the ordinary occupancy classification.
       const Occupant occ = classify(p, to, side);
@@ -90,13 +103,14 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
         }
         if (occ == Occupant::Own) break;
         if (occ == Occupant::Empty && atom.capture != CapturePolicy::Must) {
-          emit(p, Move{.from = from, .to = to}, type, side, w.coord, out);
+          emit(p, Move{.from = from, .to = to, .atomIndex = atomIdx}, type, side, w.coord, out);
         } else if (occ == Occupant::Enemy && atom.capture != CapturePolicy::Cannot) {
           emit(p,
                Move{.from = from,
                     .to = to,
                     .captureCell = to,
-                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
+                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture),
+                    .atomIndex = atomIdx},
                type, side, w.coord, out);
         }
         break;
@@ -108,12 +122,14 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
       }
 
       if (occ == Occupant::Enemy) {
-        if (longEnough && atom.capture != CapturePolicy::Cannot) {
+        // A move that captures at an offset takes only that piece, never the one it lands on.
+        if (longEnough && atom.capture != CapturePolicy::Cannot && atom.captureAt.empty()) {
           emit(p,
                Move{.from = from,
                     .to = to,
                     .captureCell = to,
-                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
+                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture),
+                    .atomIndex = atomIdx},
                type, side, w.coord, out);
         }
         if (atom.mode == MoveMode::Slide) break;
@@ -123,7 +139,8 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
       // The destination is empty.
       if (longEnough) {
         if (atom.capture != CapturePolicy::Must) {
-          Move m{.from = from, .to = to};
+          Move m{.from = from, .to = to, .atomIndex = atomIdx};
+          if (leavesPassedMark && !atom.leavesEnPassant) m.epTarget = prevCell;
           if (atom.leavesEnPassant && prevCell != kInvalidCell) {
             m.flags = static_cast<std::uint8_t>(
                 m.flags | static_cast<std::uint8_t>(MoveFlag::LeavesEnPassant));
@@ -131,6 +148,24 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
             m.epVictim = to;
           }
           emit(p, m, type, side, w.coord, out);
+        } else if (!atom.captureAt.empty()) {
+          // A capture-only move onto an empty cell that takes the piece beside it: en passant
+          // (the landing cell must carry the opponent's mark), a checkers jump (it need not).
+          const Mark* needed = atom.needsMark >= 0
+                                   ? p.markAt(to, static_cast<std::uint16_t>(atom.needsMark))
+                                   : nullptr;
+          if (atom.needsMark < 0 || (needed != nullptr && needed->owner != static_cast<std::uint8_t>(side))) {
+            Walker vw = geom.start(to, v_->dirTable[atom.captureDir[ci]]);
+            if (geom.step(vw)) {
+              const Piece victim = p.at(vw.cell);
+              if (!victim.empty() && victim.colorOf() != side) {
+                std::uint8_t flags = static_cast<std::uint8_t>(MoveFlag::Capture);
+                if (atom.needsMark >= 0) flags = static_cast<std::uint8_t>(flags | static_cast<std::uint8_t>(MoveFlag::EnPassant));
+                emit(p, Move{.from = from, .to = to, .captureCell = vw.cell, .flags = flags, .atomIndex = atomIdx},
+                     type, side, w.coord, out);
+              }
+            }
+          }
         } else if (v_->enPassant && to == p.epTarget() && p.epVictim() != kInvalidCell) {
           // A capture-only atom landing on the en-passant target takes the piece
           // that passed through, not the piece on the destination.
@@ -138,7 +173,8 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
                Move{.from = from,
                     .to = to,
                     .captureCell = p.epVictim(),
-                    .flags = MoveFlag::Capture | MoveFlag::EnPassant},
+                    .flags = MoveFlag::Capture | MoveFlag::EnPassant,
+                    .atomIndex = atomIdx},
                type, side, w.coord, out);
         }
       }
@@ -229,7 +265,9 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
   // A hopper's threat depends on a hurdle between it and the target, and a glued
   // board can make the backward walk a non-inverse of the forward one; either way
   // the scan is the only correct answer.
-  if (hasHoppers_ || !v_->geom.isBox()) return isAttackedByForwardScan(p, target, by);
+  if (hasHoppers_ || !v_->geom.isBox() || v_->hasOffsetCaptures) {
+    return isAttackedByForwardScan(p, target, by);
+  }
 
   const Geometry& geom = v_->geom;
 
