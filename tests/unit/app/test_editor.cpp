@@ -501,3 +501,40 @@ board = "k2/3/KQ1"
   REQUIRE(q.has_value());
   CHECK(q->pieces[q->findPiece("queen")].atoms.size() == 2);
 }
+
+TEST_CASE("castling is added, edited and removed as compound moves", "[unit][app]") {
+  // A standard board with its castling taken away, then given back through the editor.
+  std::string text = readFile(test::variantPath("standard"));
+  const auto at = text.find("[[compound]]");
+  REQUIRE(at != std::string::npos);
+  const auto end = text.find("[start]");
+  text.erase(at, end - at);
+  auto editor = app::Editor::open(text, "standard");
+  REQUIRE(editor.has_value());
+  CHECK(editor->compounds().empty());
+
+  REQUIRE(editor->addCastling("king", "rook").has_value());
+  const auto list = editor->compounds();
+  REQUIRE(list.size() == 2);
+  CHECK(list[0].vector == std::vector<int>{2, 0});
+  CHECK(list[1].vector == std::vector<int>{-2, 0});
+  CHECK(editor->validate().has_value());
+
+  const auto loaded = loadVariantToml(editor->serialize(), "standard");
+  REQUIRE(loaded.has_value());
+  const VariantSpec shipped = test::loadVariant("standard");
+  CHECK(loaded->variantId() == shipped.variantId());  // the same game as the shipped one
+
+  // Adding it again changes nothing; an edit that breaks it is the loader's complaint.
+  REQUIRE(editor->addCastling("king", "rook").has_value());
+  CHECK(editor->compounds().size() == 2);
+  auto broken = editor->compounds();
+  broken[0].partners = {"nonesuch"};
+  REQUIRE(editor->setCompounds(broken).has_value());
+  const auto bad = editor->validate();
+  REQUIRE_FALSE(bad.has_value());
+  CHECK(bad.error().message.find("nonesuch") != std::string::npos);
+  editor->undo();
+  REQUIRE(editor->setCompounds({}).has_value());
+  CHECK(editor->compounds().empty());
+}

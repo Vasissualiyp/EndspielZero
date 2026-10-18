@@ -232,6 +232,64 @@ Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
   return {};
 }
 
+std::vector<VariantDoc::CompoundInfo> VariantDoc::compounds() const {
+  std::vector<CompoundInfo> out;
+  const auto* arr = impl_->table["compound"].as_array();
+  if (arr == nullptr) return out;
+  for (const auto& node : *arr) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    CompoundInfo c;
+    c.name = (*t)["name"].value_or(std::string{});
+    c.fen = (*t)["fen"].value_or(std::string{});
+    c.piece = (*t)["piece"].value_or(std::string{});
+    if (const auto* vec = (*t)["vector"].as_array()) {
+      for (const auto& x : *vec) c.vector.push_back(static_cast<int>(x.value_or<std::int64_t>(0)));
+    }
+    c.flip = (*t)["flip"].value_or(false);
+    c.moverUnmoved = (*t)["unmoved"].value_or(true);
+    c.partnerUnmoved = (*t)["partner_unmoved"].value_or(true);
+    const auto strings = [&](const char* key, std::vector<std::string>& into) {
+      if (const auto* a = (*t)[key].as_array()) {
+        for (const auto& x : *a) into.push_back(x.value_or(std::string{}));
+      }
+    };
+    strings("partner", c.partners);
+    strings("safe", c.safe);
+    out.push_back(std::move(c));
+  }
+  return out;
+}
+
+Result<void> VariantDoc::setCompounds(const std::vector<CompoundInfo>& list) {
+  if (list.empty()) {
+    impl_->table.erase("compound");
+    return {};
+  }
+  toml::array arr;
+  for (const CompoundInfo& c : list) {
+    toml::table t;
+    t.insert("name", c.name);
+    t.insert("piece", c.piece);
+    toml::array vec;
+    for (const int x : c.vector) vec.push_back(static_cast<std::int64_t>(x));
+    t.insert("vector", std::move(vec));
+    if (c.flip) t.insert("flip", true);
+    if (!c.moverUnmoved) t.insert("unmoved", false);
+    toml::array partners;
+    for (const std::string& p : c.partners) partners.push_back(p);
+    t.insert("partner", std::move(partners));
+    if (!c.partnerUnmoved) t.insert("partner_unmoved", false);
+    toml::array safe;
+    for (const std::string& s : c.safe) safe.push_back(s);
+    t.insert("safe", std::move(safe));
+    if (!c.fen.empty()) t.insert("fen", c.fen);
+    arr.push_back(std::move(t));
+  }
+  impl_->table.insert_or_assign("compound", std::move(arr));
+  return {};
+}
+
 std::vector<VariantDoc::MarkTagInfo> VariantDoc::markTags() const {
   std::vector<MarkTagInfo> out;
   const auto* tags = impl_->table["mark"].as_array();

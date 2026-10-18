@@ -109,6 +109,15 @@ class Editor {
   /// line - or the loader's message when the document does not load.
   [[nodiscard]] Result<std::string> describeRules() const;
 
+  /// Compound moves - castling and kin: the mover's exact step, the partner found along it,
+  /// the cells that must not be attacked.
+  using CompoundInfo = VariantDoc::CompoundInfo;
+  [[nodiscard]] std::vector<CompoundInfo> compounds() const;
+  Result<void> setCompounds(const std::vector<CompoundInfo>& list);
+  /// Castling as the standard game has it: kingside and queenside, for the variant's king and
+  /// rook, both colours, on its first axis. Replaces any compound moves.
+  Result<void> addCastling(std::string_view king, std::string_view rook);
+
   /// The variant's own mark tags: named marks a move can leave on cells, for a number of
   /// plies or forever; a blocking tag makes the cells it marks impassable.
   using MarkTagInfo = VariantDoc::MarkTagInfo;

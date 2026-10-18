@@ -51,6 +51,24 @@ class VariantDoc {
   /// A piece's atoms as they are authored. Fails when no piece has that name.
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;
 
+  /// A compound move (M19), as the file spells it: the mover (a piece) makes an exact step
+  /// (`vector`, one signed entry per axis), the partner is found along it, and the `safe`
+  /// cells (`from`, `path`, `to`) must not be attacked. Castling is two of these.
+  struct CompoundInfo {
+    std::string name;
+    std::string fen;  ///< the castling-field letter, upper case; empty for none
+    std::string piece;
+    std::vector<int> vector;
+    bool flip{false};
+    bool moverUnmoved{true};
+    std::vector<std::string> partners;
+    bool partnerUnmoved{true};
+    std::vector<std::string> safe;
+    friend bool operator==(const CompoundInfo&, const CompoundInfo&) = default;
+  };
+  [[nodiscard]] std::vector<CompoundInfo> compounds() const;
+  [[nodiscard]] Result<void> setCompounds(const std::vector<CompoundInfo>& list);
+
   /// The variant's own mark tags (M19), in file order; "ep" is always tag 0 and not listed.
   /// A tag that `blocks` makes the cells it marks impassable.
   struct MarkTagInfo {

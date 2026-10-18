@@ -656,6 +656,194 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
     if (ImGui::Checkbox("leaves an en passant square behind", &a.leavesEnPassant)) {
       changed = true;
     }
+
+    // ---- the kind of move, and everything the table has no column for (M19).
+    {
+      const std::size_t axesN = editor->axes().size();
+      std::vector<std::string> axisNames;
+      for (const auto& ax : editor->axes()) axisNames.push_back(ax.name);
+      const int orientAxis = editor->orientationAxis();
+      std::vector<std::string> tagNames{"ep"};
+      for (const auto& tag : editor->markTags()) tagNames.push_back(tag.name);
+
+      // Type: extrapolated (free magnitudes, every axis and sign), exact (one literal vector
+      // once), expanded (a literal vector times k, both senses or one).
+      const char* kindWord = a.kind == MoveKind::Exact      ? "exact"
+                             : a.kind == MoveKind::Expanded ? "expanded"
+                                                            : "extrapolated";
+      ImGui::TextUnformatted("type");
+      ImGui::SameLine(px(70.0f));
+      if (ImGui::Button(kindWord)) {
+        const MoveKind next = a.kind == MoveKind::Extrapolated ? MoveKind::Exact
+                              : a.kind == MoveKind::Exact      ? MoveKind::Expanded
+                                                               : MoveKind::Extrapolated;
+        if (next == MoveKind::Extrapolated) {
+          // Back to free magnitudes: the literal vector's sizes, axes forgotten.
+          a.mags.clear();
+          for (const Pin& p : a.pins) a.mags.push(static_cast<std::int16_t>(std::abs(p.value)));
+          a.pins.clear();
+          a.flip = false;
+        } else if (a.kind == MoveKind::Extrapolated) {
+          // To a literal vector: the first magnitudes on the first axes, forward-positive.
+          a.pins.clear();
+          for (std::size_t m = 0; m < a.mags.size() && m < axesN; ++m) {
+            a.pins.push(Pin{static_cast<std::uint8_t>(m), a.mags[m]});
+          }
+          a.mags.clear();
+          a.oriented = false;
+          a.minK = 1;
+          a.maxK = next == MoveKind::Exact ? 1 : kUnlimited;
+        }
+        if (next == MoveKind::Exact) a.maxK = 1, a.minK = 1;
+        a.kind = next;
+        changed = true;
+      }
+      if (a.kind == MoveKind::Expanded) {
+        ImGui::SameLine();
+        const char* signWord = a.sign == StepSign::Both       ? "both ways"
+                               : a.sign == StepSign::Positive ? "positive only"
+                                                              : "negative only";
+        if (ImGui::Button(signWord)) {
+          a.sign = a.sign == StepSign::Both       ? StepSign::Positive
+                   : a.sign == StepSign::Positive ? StepSign::Negative
+                                                  : StepSign::Both;
+          changed = true;
+        }
+      }
+
+      // The literal vector, one signed number per axis (exact and expanded, and the pinned
+      // components of an extrapolated move).
+      if (a.kind != MoveKind::Extrapolated || !a.pins.empty() || true) {
+        ImGui::TextUnformatted(a.kind == MoveKind::Extrapolated ? "pinned" : "vector");
+        for (std::size_t ax = 0; ax < axesN; ++ax) {
+          ImGui::SameLine(ax == 0 ? px(70.0f) : 0.0f);
+          int value = 0;
+          for (const Pin& p : a.pins) {
+            if (p.axis == ax) value = p.value;
+          }
+          char id[24];
+          std::snprintf(id, sizeof(id), "pin%zu", ax);
+          if (stepper(id, value, -9, 9, t, scale_, px(30.0f))) {
+            SmallVec<Pin, kMaxDims> kept;
+            for (const Pin& p : a.pins) {
+              if (p.axis != ax) kept.push(p);
+            }
+            if (value != 0) kept.push(Pin{static_cast<std::uint8_t>(ax), static_cast<std::int16_t>(value)});
+            a.pins = kept;
+            changed = true;
+          }
+          ImGui::SameLine(0.0f, px(2.0f));
+          ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+          ImGui::TextUnformatted(ax < axisNames.size() ? axisNames[ax].c_str() : "?");
+          ImGui::PopStyleColor();
+        }
+      }
+      if (orientAxis >= 0) {
+        if (ImGui::Checkbox("flip along the orientation axis for the other side", &a.flip)) {
+          changed = true;
+        }
+      }
+
+      // Capturing somewhere else: en passant, a checkers jump.
+      ImGui::TextUnformatted("captures at");
+      for (std::size_t ax = 0; ax < axesN; ++ax) {
+        ImGui::SameLine(ax == 0 ? px(70.0f) : 0.0f);
+        int value = 0;
+        for (const Pin& p : a.captureAt) {
+          if (p.axis == ax) value = p.value;
+        }
+        char id[24];
+        std::snprintf(id, sizeof(id), "cap%zu", ax);
+        if (stepper(id, value, -9, 9, t, scale_, px(30.0f))) {
+          SmallVec<Pin, kMaxDims> kept;
+          for (const Pin& p : a.captureAt) {
+            if (p.axis != ax) kept.push(p);
+          }
+          if (value != 0) kept.push(Pin{static_cast<std::uint8_t>(ax), static_cast<std::int16_t>(value)});
+          a.captureAt = kept;
+          // Taking a piece beside the landing cell is a capture-only move onto an empty one.
+          if (!a.captureAt.empty()) a.capture = CapturePolicy::Must;
+          changed = true;
+        }
+        ImGui::SameLine(0.0f, px(2.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+        ImGui::TextUnformatted(ax < axisNames.size() ? axisNames[ax].c_str() : "?");
+        ImGui::PopStyleColor();
+      }
+      if (!a.captureAt.empty()) {
+        ImGui::TextUnformatted("only onto");
+        ImGui::SameLine(px(70.0f));
+        const std::string needs = a.needsMark < 0 ? std::string("any empty cell")
+                                                  : "a cell marked " + tagNames[static_cast<std::size_t>(a.needsMark)];
+        if (ImGui::Button(needs.c_str())) {
+          const int next = a.needsMark + 1;
+          a.needsMark = static_cast<std::int16_t>(next >= static_cast<int>(tagNames.size()) ? -1 : next);
+          changed = true;
+        }
+      }
+
+      // What the move leaves behind.
+      ImGui::TextUnformatted("leaves");
+      std::size_t dropMark = a.marks.size();
+      for (std::size_t m = 0; m < a.marks.size(); ++m) {
+        MarkSpec& mk = a.marks[m];
+        ImGui::PushID(static_cast<int>(m));
+        ImGui::SameLine(m == 0 ? px(70.0f) : 0.0f);
+        if (ImGui::Button(tagNames[std::min<std::size_t>(mk.tag, tagNames.size() - 1)].c_str())) {
+          mk.tag = static_cast<std::uint16_t>((mk.tag + 1) % tagNames.size());
+          changed = true;
+        }
+        ImGui::SameLine();
+        const char* where = mk.where == MarkWhere::Passed ? "on the cell passed"
+                            : mk.where == MarkWhere::Landed ? "on the landing cell"
+                                                            : "around the landing";
+        if (ImGui::Button(where)) {
+          mk.where = mk.where == MarkWhere::Passed   ? MarkWhere::Landed
+                     : mk.where == MarkWhere::Landed ? MarkWhere::Around
+                                                     : MarkWhere::Passed;
+          changed = true;
+        }
+        if (mk.where == MarkWhere::Around) {
+          ImGui::SameLine();
+          int radius = mk.radius;
+          if (stepper("radius", radius, 1, 9, t, scale_, px(26.0f))) {
+            mk.radius = static_cast<std::uint16_t>(radius);
+            changed = true;
+          }
+        }
+        ImGui::SameLine();
+        bool forever = mk.duration == 0;
+        if (ImGui::Checkbox("forever", &forever)) {
+          mk.duration = forever ? 0 : 1;
+          changed = true;
+        }
+        if (!forever) {
+          ImGui::SameLine();
+          int plies = static_cast<int>(mk.duration);
+          if (stepper("plies", plies, 1, 99, t, scale_, px(30.0f))) {
+            mk.duration = static_cast<std::uint32_t>(plies);
+            changed = true;
+          }
+          ImGui::SameLine(0.0f, px(2.0f));
+          ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+          ImGui::TextUnformatted("plies");
+          ImGui::PopStyleColor();
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x")) dropMark = m;
+        ImGui::PopID();
+      }
+      if (dropMark < a.marks.size()) {
+        a.marks.erase(a.marks.begin() + static_cast<std::ptrdiff_t>(dropMark));
+        changed = true;
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("+ mark")) {
+        a.marks.push_back(MarkSpec{static_cast<std::uint16_t>(tagNames.size() > 1 ? 1 : 0),
+                                   MarkWhere::Landed, 1, 0});
+        changed = true;
+      }
+    }
     ImGui::PopID();
     ImGui::PopFont();
   }
@@ -1820,6 +2008,227 @@ void Ui::drawRulesTab(app::Shell& shell) {
   }
   ImGui::PopStyleColor();
   ImGui::PopFont();
+}
+
+void Ui::drawMarksTab(app::Shell& shell) {
+  app::Editor* editor = shell.editor();
+  if (editor == nullptr) return;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextWrapped(
+      "A mark is a named tag a move leaves on cells - the cell it passed over, the cell it "
+      "landed on, or the cells around where it landed - for a number of plies or forever. "
+      "En passant is the built-in tag \"ep\" on the passed cell for one ply. A tag that "
+      "blocks makes the cells it marks impassable: \"destroyed\" squares. Moves leave marks "
+      "(the MOVES tab, a move's detail), and rules can ask (marked tag cell).");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+
+  sectionHead("TAGS", t, fontSmall_, scale_);
+  std::vector<app::Editor::MarkTagInfo> list = editor->markTags();
+  bool changed = false;
+  std::size_t removeAt = list.size();
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("ep   (built in: the en-passant target; blocks nothing)");
+  ImGui::PopStyleColor();
+  for (std::size_t i = 0; i < list.size(); ++i) {
+    ImGui::PushID(static_cast<int>(i));
+    if (editText("##tag", list[i].name, px(200.0f))) changed = true;
+    ImGui::SameLine();
+    if (ImGui::Checkbox("blocks (impassable)", &list[i].blocks)) changed = true;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("remove")) removeAt = i;
+    ImGui::PopID();
+  }
+  ImGui::PopFont();
+  if (removeAt < list.size()) {
+    list.erase(list.begin() + static_cast<std::ptrdiff_t>(removeAt));
+    changed = true;
+  }
+  if (button("+ TAG", t, px(100), false, true, true, display)) {
+    app::Editor::MarkTagInfo tag;
+    tag.name = "destroyed";
+    for (int n = 2; std::any_of(list.begin(), list.end(),
+                                 [&](const auto& o) { return o.name == tag.name; });
+         ++n) {
+      tag.name = "destroyed" + std::to_string(n);
+    }
+    tag.blocks = true;
+    list.push_back(std::move(tag));
+    changed = true;
+  }
+  if (changed) {
+    const Result<void> ok = editor->setMarkTags(list);
+    moveNote_ = ok.has_value() ? std::string{} : ok.error().message;
+  }
+  if (!moveNote_.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("%s", moveNote_.c_str());
+    ImGui::PopStyleColor();
+  }
+}
+
+void Ui::drawCompoundTab(app::Shell& shell) {
+  app::Editor* editor = shell.editor();
+  if (editor == nullptr) return;
+  const view::Theme& t = theme_;
+  auto* display = static_cast<ImFont*>(fontDisplay_);
+  auto* small = static_cast<ImFont*>(fontSmall_);
+
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextWrapped(
+      "A move of two pieces: castling, and anything like it. The mover makes an exact step "
+      "(the king's two cells). The partner is found, never named - the first piece of its kind "
+      "along that line, beyond where the mover lands - and carried to the cell the mover "
+      "crossed. The cells chosen must not be attacked. No coordinate is written anywhere, so "
+      "the same definition castles on any board, along any axis, in any dimension.");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+
+  const std::vector<std::string> pieces = editor->pieceNames();
+  const std::size_t axes = editor->axes().size();
+  const auto axisNames = [&] {
+    std::vector<std::string> n;
+    for (const auto& a : editor->axes()) n.push_back(a.name);
+    return n;
+  }();
+  std::vector<app::Editor::CompoundInfo> list = editor->compounds();
+  bool changed = false;
+  std::size_t removeAt = list.size();
+
+  for (std::size_t i = 0; i < list.size(); ++i) {
+    app::Editor::CompoundInfo& c = list[i];
+    ImGui::PushID(static_cast<int>(i));
+    char head[64];
+    std::snprintf(head, sizeof(head), "COMPOUND MOVE %zu", i + 1);
+    sectionHead(head, t, fontSmall_, scale_);
+    ImGui::PushFont(small);
+    if (editText("##name", c.name, px(220.0f))) changed = true;
+    ImGui::SameLine();
+    ImGui::TextUnformatted("FEN letter");
+    ImGui::SameLine();
+    if (editText("##fen", c.fen, px(36.0f))) changed = true;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("remove")) removeAt = i;
+
+    // The mover: a piece, and the exact step it takes, one signed number per axis.
+    ImGui::TextUnformatted("mover");
+    ImGui::SameLine();
+    if (ImGui::Button(c.piece.empty() ? "(choose)" : c.piece.c_str()) && !pieces.empty()) {
+      const auto at = std::find(pieces.begin(), pieces.end(), c.piece);
+      const std::size_t next = at == pieces.end() ? 0 : (static_cast<std::size_t>(at - pieces.begin()) + 1) % pieces.size();
+      c.piece = pieces[next];
+      changed = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted("steps");
+    c.vector.resize(axes, 0);
+    for (std::size_t a = 0; a < axes; ++a) {
+      ImGui::SameLine();
+      char id[24];
+      std::snprintf(id, sizeof(id), "ax%zu", a);
+      if (stepper(id, c.vector[a], -9, 9, t, scale_, px(30.0f))) changed = true;
+      ImGui::SameLine(0.0f, px(2.0f));
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+      ImGui::TextUnformatted(axisNames[a].c_str());
+      ImGui::PopStyleColor();
+    }
+    if (ImGui::Checkbox("the mover must never have moved", &c.moverUnmoved)) changed = true;
+    if (editor->orientationAxis() >= 0 &&
+        ImGui::Checkbox("flip along the orientation axis for the other side", &c.flip)) {
+      changed = true;
+    }
+
+    // The partner: which kinds, and unmoved.
+    ImGui::TextUnformatted("partner is found among");
+    ImGui::PushID("partners");
+    for (const std::string& name : pieces) {
+      ImGui::SameLine();
+      const auto found = std::find(c.partners.begin(), c.partners.end(), name);
+      const bool on = found != c.partners.end();
+      ImGui::PushStyleColor(ImGuiCol_Button, col(t.panelHi, on ? 1.0f : 0.45f));
+      ImGui::PushStyleColor(ImGuiCol_Text, col(on ? t.ember : t.boneDim));
+      if (ImGui::SmallButton(name.c_str())) {
+        if (on) {
+          c.partners.erase(found);
+        } else {
+          c.partners.push_back(name);
+        }
+        changed = true;
+      }
+      ImGui::PopStyleColor(2);
+    }
+    ImGui::PopID();
+    if (ImGui::Checkbox("the partner must never have moved", &c.partnerUnmoved)) changed = true;
+
+    // The cells that must not be attacked.
+    ImGui::TextUnformatted("none of these may be attacked:");
+    ImGui::PushID("safe");
+    for (const char* cell : {"from", "path", "to"}) {
+      ImGui::SameLine();
+      const auto found = std::find(c.safe.begin(), c.safe.end(), cell);
+      const bool on = found != c.safe.end();
+      ImGui::PushStyleColor(ImGuiCol_Button, col(t.panelHi, on ? 1.0f : 0.45f));
+      ImGui::PushStyleColor(ImGuiCol_Text, col(on ? t.ember : t.boneDim));
+      if (ImGui::SmallButton(cell)) {
+        if (on) {
+          c.safe.erase(found);
+        } else {
+          c.safe.push_back(cell);
+        }
+        changed = true;
+      }
+      ImGui::PopStyleColor(2);
+    }
+    ImGui::PopID();
+    ImGui::PopFont();
+    ImGui::PopID();
+  }
+  if (removeAt < list.size()) {
+    list.erase(list.begin() + static_cast<std::ptrdiff_t>(removeAt));
+    changed = true;
+  }
+
+  sectionHead("ADD", t, fontSmall_, scale_);
+  if (button("+ COMPOUND MOVE", t, px(190), false, true, true, display)) {
+    app::Editor::CompoundInfo c;
+    c.name = "compound " + std::to_string(list.size() + 1);
+    c.piece = pieces.empty() ? std::string{} : pieces.front();
+    c.vector.assign(axes, 0);
+    if (!c.vector.empty()) c.vector[0] = 2;
+    c.safe = {"from", "path", "to"};
+    list.push_back(std::move(c));
+    changed = true;
+  }
+  ImGui::SameLine();
+  if (button("+ STANDARD CASTLING", t, px(220), false, true, true, display)) {
+    // The variant's royal piece and a piece called rook, else the first two pieces.
+    std::string king = pieces.empty() ? std::string{} : pieces.back();
+    std::string rook = pieces.size() > 1 ? pieces[pieces.size() - 2] : king;
+    for (const std::string& n : pieces) {
+      if (n == "king") king = n;
+      if (n == "rook") rook = n;
+    }
+    const Result<void> ok = editor->addCastling(king, rook);
+    moveNote_ = ok.has_value() ? std::string{} : ok.error().message;
+    list = editor->compounds();
+    changed = false;
+  }
+  if (changed) {
+    const Result<void> ok = editor->setCompounds(list);
+    moveNote_ = ok.has_value() ? std::string{} : ok.error().message;
+  }
+  if (!moveNote_.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("%s", moveNote_.c_str());
+    ImGui::PopStyleColor();
+  }
 }
 
 }  // namespace cb::render

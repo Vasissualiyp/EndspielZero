@@ -279,6 +279,8 @@ class Ui {
   void drawIdentityTab(app::Shell& shell, const std::string& piece);
   void drawFieldsTab(app::Shell& shell);
   void drawRulesTab(app::Shell& shell);
+  void drawMarksTab(app::Shell& shell);
+  void drawCompoundTab(app::Shell& shell);
   /// Write the author's finished edit to the document. Held back while the pointer is
   /// down, so a drag is one undo entry, and refused while the shape is invalid.
   void commitDesign(app::Shell& shell, const std::string& piece);

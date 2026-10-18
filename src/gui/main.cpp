@@ -608,7 +608,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::Settings);
   else if (screen == "editor")
     shell->go(app::Screen::Editor);
-  else if (screen == "designer" || screen == "body" || screen == "flat") {
+  else if (screen == "designer" || screen == "body" || screen == "flat" || screen == "identity" ||
+           screen == "castling" || screen == "marks" || screen == "fields" || screen == "rules") {
     // The designers need a document open, which the editor's own entry does for them.
     (void)shell->openEditor(variantName);
     shell->go(app::Screen::Editor);
@@ -738,6 +739,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
   if (screen == "designer") (*ui)->openEditorPage(1, 0);
   if (screen == "body") (*ui)->openEditorPage(1, 1);
   if (screen == "flat") (*ui)->openEditorPage(1, 2);
+  if (screen == "identity") (*ui)->openEditorPage(1, 3);
+  if (screen == "castling") (*ui)->openEditorPage(1, 4);
+  if (screen == "marks") (*ui)->openEditorPage(1, 5);
+  if (screen == "fields") (*ui)->openEditorPage(1, 6);
+  if (screen == "rules") (*ui)->openEditorPage(1, 7);
   (*ui)->setPreviewDims(previewDims);
   // Point the library at the named variant, so a capture of a variant with a derived
   // overture shows *it* rather than the standard construction the first entry opens on.

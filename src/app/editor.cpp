@@ -2,6 +2,7 @@
 #include "app/editor.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <fstream>
 #include <sstream>
 #include <utility>
@@ -295,6 +296,36 @@ Result<std::string> Editor::describeRules() const {
   if (!loaded.has_value()) return fail(loaded.error().code, loaded.error().message, loaded.error().line);
   if (!loaded->ruleSet) return std::string{};
   return static_cast<const rules::RuleSet*>(loaded->ruleSet.get())->describe();
+}
+
+std::vector<Editor::CompoundInfo> Editor::compounds() const {
+  return doc_.compounds();
+}
+
+Result<void> Editor::setCompounds(const std::vector<CompoundInfo>& list) {
+  return edit([&](VariantDoc& d) -> Result<void> { return d.setCompounds(list); });
+}
+
+Result<void> Editor::addCastling(std::string_view king, std::string_view rook) {
+  const std::size_t axes = doc_.axes().size();
+  std::vector<CompoundInfo> list = doc_.compounds();
+  for (const auto& [name, step, letter] :
+       {std::tuple<const char*, int, const char*>{"castle kingside", 2, "K"},
+        {"castle queenside", -2, "Q"}}) {
+    CompoundInfo c;
+    c.name = name;
+    c.fen = letter;
+    c.piece = std::string(king);
+    c.vector.assign(axes, 0);
+    if (!c.vector.empty()) c.vector[0] = step;
+    c.partners = {std::string(rook)};
+    c.safe = {"from", "path", "to"};
+    // Not twice: a variant that already castles this way keeps its own.
+    bool have = false;
+    for (const CompoundInfo& o : list) have = have || o.name == c.name;
+    if (!have) list.push_back(std::move(c));
+  }
+  return setCompounds(list);
 }
 
 std::vector<Editor::MarkTagInfo> Editor::markTags() const {
