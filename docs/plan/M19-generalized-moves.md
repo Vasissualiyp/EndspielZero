@@ -1,6 +1,6 @@
 # M19 - Generalized moves: one data model for every piece, including the irregulars
 
-**Status: spec, not built.** Written 2026-10-18 at the project owner's direction ("we want a
+**Status: step 1 of section 10 is built (the three kinds, pins, flip, expansion, loader and editor round trip); everything else is spec.** Written 2026-10-18 at the project owner's direction ("we want a
 very generalizable engine"). It changes the move model, the position state and the editor, so
 it is written down first, with the tests that will prove it, before any of it is implemented.
 
@@ -264,3 +264,23 @@ removed templates' directions; a fuzz of malformed text never crashes or loops.
 4. Marks as tagged, timed cell state; blocking marks in movegen; en passant on top of them.
 5. `attacked(cell)`, `capture_offset`, compound moves; `[[castle]]` desugars to one.
 6. Editor: the table's new columns, the compound editor, marks, the palette.
+
+## 11. Step 1 as built (2026-10-18)
+
+- `MoveAtom` gained `kind` (`Extrapolated | Exact | Expanded`), `pins` (axis + signed value),
+  `flip` and `sign`; `expandAtomFor(atom, dims, orientAxis, colour)` is the one expansion the
+  engine, the preview and the tests share, and `stepRange` / `exactSteps` give the steps an
+  atom walks (an exact slide of n cells is the unit step n times, so the cells between are
+  checked). Classic atoms keep their original expansion and `toString` byte for byte, so
+  `VariantId` is unchanged for every shipped variant.
+- File spelling, shared by loader and editor document (`io/atom_toml.*`): `type = "exact" |
+  "expanded"`, a literal signed `vector` with one entry per axis, `sign`, `flip` (on by default
+  wherever a move names the orientation axis), and `pin = ["rank:+1"]` on extrapolated moves.
+  `forward`, `from_rank` and `leaves_en_passant` still read as before.
+- Proved: the new kinds reproduce every shipped pawn's directions and step ranges for both
+  colours on every shipped board that has one (golden); expansion counts (a pin plus one free
+  magnitude is `2(D-1)` directions); a small variant with an exact one-cell piece, a lance and
+  a flipped push generates exactly the expected moves; the editor writes the new spelling back
+  and the variant keeps its id.
+- Not yet: the move table's own columns for the new kinds (a literal move is read out as text
+  for now), the moveset language, `unmoved`, marks, `attacked`, compound moves.

@@ -135,21 +135,41 @@ Result<void> VariantSpec::finalize() {
                         "' has a forward-only atom but the variant declares no "
                         "orientation axis");
       }
+      if (atom.flip && orientationAxis < 0) {
+        return fail(ErrorCode::ValidationError,
+                    "piece '" + p.name +
+                        "' has a move that flips for the other side but the variant "
+                        "declares no orientation axis");
+      }
+      for (const Pin& pin : atom.pins) {
+        if (pin.axis >= nd) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "' pins axis " + std::to_string(pin.axis) +
+                          ", which a " + std::to_string(nd) + "-axis board does not have");
+        }
+      }
+      // An exact slide of n cells is the unit step taken n times, so the cells it passes
+      // over are checked; the atom's own step range says so.
+      if (atom.kind == MoveKind::Exact) {
+        const StepRange r = stepRange(atom);
+        atom.minK = r.lo;
+        atom.maxK = r.hi;
+      }
+      // A move whose direction is its own (oriented, pinned, exact, expanded) differs by
+      // colour; a plain one is symmetric and both colours share a span.
+      const bool sided = atom.oriented || atom.flip || atom.kind != MoveKind::Extrapolated ||
+                         !atom.pins.empty();
 
       for (int ci = 0; ci < kNumColors; ++ci) {
         const auto color = static_cast<Color>(ci);
         std::vector<Direction> dirs;
-        if (atom.oriented) {
-          dirs = expandAtomOriented(atom.mags, nd,
-                                    static_cast<std::uint8_t>(orientationAxis), color);
-        } else if (ci == 1) {
+        if (!sided && ci == 1) {
           // Unoriented atoms are symmetric, so both colours share one span.
           atom.dirBegin[1] = atom.dirBegin[0];
           atom.dirEnd[1] = atom.dirEnd[0];
           continue;
-        } else {
-          dirs = expandAtom(atom.mags, nd);
         }
+        dirs = expandAtomFor(atom, nd, orientationAxis, color);
 
         const auto begin = static_cast<std::uint32_t>(dirTable.size());
         for (const Direction& d : dirs) dirTable.push_back(scaleByPitch(dims, d));

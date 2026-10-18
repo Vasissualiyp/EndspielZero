@@ -37,7 +37,43 @@ std::uint64_t factorial(std::uint64_t n) {
 }  // namespace
 
 Result<MoveAtom> MoveAtom::canonicalize(MoveAtom a) {
-  if (a.mags.empty()) {
+  // Pins: distinct axes, nonzero values, and not mixed with the half-space shorthand.
+  for (std::size_t i = 0; i < a.pins.size(); ++i) {
+    if (a.pins[i].value == 0) {
+      return fail(ErrorCode::ValidationError,
+                  "a pinned component needs a nonzero value (a zero is implied by omission)");
+    }
+    for (std::size_t j = i + 1; j < a.pins.size(); ++j) {
+      if (a.pins[i].axis == a.pins[j].axis) {
+        return fail(ErrorCode::ValidationError,
+                    "a move pins the same axis twice");
+      }
+    }
+  }
+  if (!a.pins.empty() && a.oriented) {
+    return fail(ErrorCode::ValidationError,
+                "a move with pinned components says its direction itself; "
+                "'forward' is for the half-space shorthand only");
+  }
+  if (a.kind != MoveKind::Extrapolated) {
+    if (a.pins.empty()) {
+      return fail(ErrorCode::ValidationError,
+                  "an exact or expanded move needs a vector with a nonzero component");
+    }
+    if (!a.mags.empty()) {
+      return fail(ErrorCode::ValidationError,
+                  "an exact or expanded move is a literal vector; it has no free magnitudes");
+    }
+    if (a.oriented) {
+      return fail(ErrorCode::ValidationError,
+                  "'forward' applies to extrapolated moves; pin the orientation axis instead");
+    }
+    if (a.kind == MoveKind::Exact && (a.minK != 1 || a.maxK != 1)) {
+      return fail(ErrorCode::ValidationError,
+                  "an exact move is taken once; it has no step range");
+    }
+    if (a.kind == MoveKind::Exact) a.sign = StepSign::Both;
+  } else if (a.mags.empty()) {
     return fail(ErrorCode::ValidationError, "a move atom needs at least one magnitude");
   }
   for (std::size_t i = 0; i < a.mags.size(); ++i) {
@@ -72,7 +108,25 @@ Result<MoveAtom> MoveAtom::canonicalize(MoveAtom a) {
 }
 
 std::string MoveAtom::toString() const {
-  std::string out = "[";
+  // The original spelling is kept byte for byte for the original kind, because the text is
+  // what a variant's identity is hashed from; only the new forms say more.
+  std::string prefix;
+  if (kind != MoveKind::Extrapolated || !pins.empty()) {
+    prefix = kind == MoveKind::Exact ? "exact" : kind == MoveKind::Expanded ? "expanded" : "pinned";
+    prefix += '{';
+    for (std::size_t i = 0; i < pins.size(); ++i) {
+      if (i != 0) prefix += ',';
+      prefix += std::to_string(pins[i].axis) + ':' + (pins[i].value > 0 ? "+" : "") +
+                std::to_string(pins[i].value);
+    }
+    prefix += '}';
+    if (kind == MoveKind::Expanded && sign != StepSign::Both) {
+      prefix += sign == StepSign::Positive ? "+" : "-";
+    }
+    if (flip) prefix += " flip";
+    prefix += ' ';
+  }
+  std::string out = prefix + "[";
   for (std::size_t i = 0; i < mags.size(); ++i) {
     if (i != 0) out += ',';
     out += std::to_string(mags[i]);
@@ -102,7 +156,8 @@ std::string MoveAtom::toString() const {
 }
 
 bool operator==(const MoveAtom& a, const MoveAtom& b) {
-  return a.mags == b.mags && a.minK == b.minK && a.maxK == b.maxK && a.mode == b.mode &&
+  return a.kind == b.kind && a.pins == b.pins && a.flip == b.flip && a.sign == b.sign &&
+         a.mags == b.mags && a.minK == b.minK && a.maxK == b.maxK && a.mode == b.mode &&
          a.capture == b.capture && a.oriented == b.oriented &&
          a.fromRegion[0].axis == b.fromRegion[0].axis &&
          a.fromRegion[0].value == b.fromRegion[0].value &&
@@ -120,6 +175,87 @@ std::vector<Direction> expandAtom(const SmallVec<std::int16_t, kMaxDims>& mags,
 
   // std::set already orders lexicographically, which gives us determinism for
   // free - direction indices must not depend on the compiler or the platform.
+  out.reserve(uniq.size());
+  for (const auto& v : uniq) out.push_back(Direction::make(v, dims));
+  return out;
+}
+
+namespace {
+
+int gcdOf(int a, int b) {
+  a = a < 0 ? -a : a;
+  b = b < 0 ? -b : b;
+  while (b != 0) {
+    const int t = a % b;
+    a = b;
+    b = t;
+  }
+  return a;
+}
+
+}  // namespace
+
+std::uint32_t exactSteps(const MoveAtom& atom) noexcept {
+  if (atom.kind != MoveKind::Exact || atom.mode != MoveMode::Slide) return 1;
+  int g = 0;
+  for (const Pin& p : atom.pins) g = gcdOf(g, p.value);
+  return static_cast<std::uint32_t>(std::max(1, g));
+}
+
+StepRange stepRange(const MoveAtom& atom) noexcept {
+  if (atom.kind == MoveKind::Exact) {
+    const std::uint32_t n = exactSteps(atom);
+    return {n, n};
+  }
+  return {atom.minK, atom.maxK};
+}
+
+std::vector<Direction> expandAtomFor(const MoveAtom& atom, std::uint8_t dims,
+                                     int orientAxis, Color color) {
+  // The classic forms keep their classic expansion, so nothing about them can drift.
+  if (atom.kind == MoveKind::Extrapolated && atom.pins.empty()) {
+    if (atom.oriented && orientAxis >= 0) {
+      return expandAtomOriented(atom.mags, dims, static_cast<std::uint8_t>(orientAxis), color);
+    }
+    return expandAtom(atom.mags, dims);
+  }
+
+  std::array<std::int16_t, kMaxDims> vec{};
+  std::uint32_t used = 0;
+  for (const Pin& p : atom.pins) {
+    if (p.axis >= dims) return {};  // a pin on an axis the board does not have
+    int value = p.value;
+    // The other side's forward is this side's backward.
+    if (atom.flip && color == Color::Black && static_cast<int>(p.axis) == orientAxis) {
+      value = -value;
+    }
+    vec[p.axis] = static_cast<std::int16_t>(value);
+    used |= 1u << p.axis;
+  }
+
+  std::set<std::array<std::int16_t, kMaxDims>> uniq;
+  switch (atom.kind) {
+    case MoveKind::Extrapolated:
+      if (atom.mags.size() + atom.pins.size() > dims) return {};
+      enumerate(atom.mags, dims, 0, vec, used, uniq);
+      break;
+    case MoveKind::Exact: {
+      const int g = static_cast<int>(exactSteps(atom));
+      for (std::uint8_t a = 0; a < dims; ++a) vec[a] = static_cast<std::int16_t>(vec[a] / g);
+      uniq.insert(vec);
+      break;
+    }
+    case MoveKind::Expanded: {
+      if (atom.sign != StepSign::Negative) uniq.insert(vec);
+      if (atom.sign != StepSign::Positive) {
+        std::array<std::int16_t, kMaxDims> neg = vec;
+        for (std::uint8_t a = 0; a < dims; ++a) neg[a] = static_cast<std::int16_t>(-neg[a]);
+        uniq.insert(neg);
+      }
+      break;
+    }
+  }
+  std::vector<Direction> out;
   out.reserve(uniq.size());
   for (const auto& v : uniq) out.push_back(Direction::make(v, dims));
   return out;

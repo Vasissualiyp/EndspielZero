@@ -269,3 +269,48 @@ TEST_CASE("the geometry of each shipped board is what its file claims",
     CHECK(confined.size() < reach.size());
   }
 }
+
+TEST_CASE("the new move kinds reproduce every shipped pawn exactly", "[golden][variants]") {
+  // M19: a pawn is not special. The push is an exact step forward, the double step an exact
+  // two-cell slide, the capture one pinned forward component with one free magnitude. For
+  // every shipped pawn, on every board that has one, those expand to the very directions
+  // the half-space shorthand gave, for both colours - so the migration changes nothing.
+  for (const std::string& name : shippedVariantNames()) {
+    const auto loaded = loadVariantFile(test::variantPath(name));
+    REQUIRE(loaded.has_value());
+    const VariantSpec& v = *loaded;
+    const PieceTypeId pawn = v.findPiece("pawn");
+    if (pawn == kNoPiece || v.orientationAxis < 0) continue;
+    const auto nd = static_cast<std::uint8_t>(v.dims.dims());
+    const auto orient = static_cast<std::uint8_t>(v.orientationAxis);
+    for (const MoveAtom& a : v.pieces[pawn].atoms) {
+      if (!a.oriented) continue;
+      CAPTURE(name, a.toString());
+      MoveAtom t;
+      t.flip = true;
+      t.capture = a.capture;
+      t.mode = a.mode;
+      if (a.mags.size() == 1) {
+        t.kind = MoveKind::Exact;
+        const auto steps = static_cast<std::int16_t>(a.minK == a.maxK ? a.maxK : 1);
+        t.pins.push(Pin{orient, steps});
+      } else {
+        t.pins.push(Pin{orient, 1});
+        for (std::size_t i = 0; i + 1 < a.mags.size(); ++i) t.mags.push(a.mags[i]);
+      }
+      const auto canon = MoveAtom::canonicalize(t);
+      REQUIRE(canon.has_value());
+      for (const Color c : {Color::White, Color::Black}) {
+        const auto old = expandAtomOriented(a.mags, nd, orient, c);
+        const auto now = expandAtomFor(*canon, nd, v.orientationAxis, c);
+        REQUIRE(old.size() == now.size());
+        for (std::size_t i = 0; i < old.size(); ++i) CHECK(old[i] == now[i]);
+      }
+      if (a.mags.size() == 1) {
+        const StepRange r = stepRange(*canon);
+        CHECK(r.lo == a.minK);
+        CHECK(r.hi == a.maxK);
+      }
+    }
+  }
+}

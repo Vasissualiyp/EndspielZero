@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "io/variant_toml.hpp"
 
+#include "io/atom_toml.hpp"
 #include "io/model_toml.hpp"
 
 #include <fstream>
@@ -371,27 +372,14 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                     lineOf(mnode));
       }
       MoveAtom atom;
-      const auto* vec = (*mt)["vector"].as_array();
-      if (vec == nullptr || vec->empty()) {
-        return fail(ErrorCode::ValidationError,
-                    "piece '" + p.name +
-                        "': a move needs a 'vector' of magnitudes, e.g. vector = [1, 2]",
-                    lineOf(mnode));
-      }
-      for (const auto& m : *vec) {
-        const auto value = m.value<std::int64_t>();
-        if (!value.has_value()) {
-          return fail(ErrorCode::ValidationError,
-                      "piece '" + p.name + "': move vector entries must be integers",
+      {
+        std::vector<std::string> axisNames;
+        for (std::size_t i = 0; i < v.dims.dims(); ++i) axisNames.push_back(v.dims.name(i));
+        std::string why;
+        if (!readAtomKind(*mt, axisNames, v.orientationAxis, atom, why)) {
+          return fail(ErrorCode::ValidationError, "piece '" + p.name + "': " + why,
                       lineOf(mnode));
         }
-        if (atom.mags.size() >= kMaxDims) {
-          return fail(ErrorCode::BudgetExceeded,
-                      "piece '" + p.name + "': a move vector cannot have more than " +
-                          std::to_string(kMaxDims) + " magnitudes",
-                      lineOf(mnode));
-        }
-        atom.mags.push(static_cast<std::int16_t>(*value));
       }
 
       const std::string maxText = (*mt)["max"].value_or(std::string{});

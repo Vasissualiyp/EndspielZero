@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <map>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -12,6 +13,8 @@
 
 #include "app/editor.hpp"
 #include "io/variant_toml.hpp"
+#include "movegen/movegen.hpp"
+#include "position/position.hpp"
 #include "support/variants.hpp"
 
 using namespace cb;
@@ -352,4 +355,87 @@ TEST_CASE("every piece in every shipped variant can be built from the palette", 
       CHECK(got == wanted);
     }
   }
+}
+
+TEST_CASE("exact, expanded and pinned moves load, generate, and survive the editor",
+          "[unit][app]") {
+  const std::string text = R"(
+name = "kinds"
+orientation_axis = "rank"
+side_to_move = "white"
+[[axis]]
+name = "file"
+extent = 5
+[[axis]]
+name = "rank"
+extent = 5
+[[piece]]
+name = "king"
+symbol = "K"
+royal = true
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+[[piece]]
+name = "ram"
+symbol = "R"
+  # exactly one cell along the file, and nothing else
+  [[piece.move]]
+  type = "exact"
+  vector = [1, 0]
+  mode = "leap"
+[[piece]]
+name = "lance"
+symbol = "L"
+  # forward only, any distance
+  [[piece.move]]
+  type = "expanded"
+  vector = [0, 1]
+  sign = "positive"
+  max = "inf"
+  mode = "slide"
+[[piece]]
+name = "soldier"
+symbol = "S"
+  [[piece.move]]
+  type = "exact"
+  vector = [0, 1]
+  mode = "leap"
+  capture = "cannot"
+[start]
+board = "k4/5/5/5/KRL1S"
+)";
+  const auto loaded = loadVariantToml(text, "kinds");
+  REQUIRE(loaded.has_value());
+  const VariantSpec& v = *loaded;
+  // The default flip: a move that names the orientation axis flips, one that does not does not.
+  CHECK(v.pieces[v.findPiece("soldier")].atoms[0].flip);
+  CHECK_FALSE(v.pieces[v.findPiece("ram")].atoms[0].flip);
+
+  Position p = Position::startPosition(v);
+  const MoveGen gen(v);
+  std::map<std::string, int> byPiece;
+  MoveList moves(v.moveUpperBound());
+  gen.generateLegal(p, moves);
+  for (const Move& m : moves) ++byPiece[v.pieces[p.at(m.from).type].name];
+  CHECK(byPiece["ram"] == 0);      // its one cell to the right is the lance
+  CHECK(byPiece["lance"] == 4);    // up the board, five cells high: four free
+  CHECK(byPiece["soldier"] == 1);  // one step forward
+  CHECK(byPiece["king"] == 1);     // up (the right is the ram)
+
+  // The editor reads and writes the new spelling back without losing a thing.
+  auto editor = app::Editor::open(text, "kinds");
+  REQUIRE(editor.has_value());
+  const auto atoms = editor->pieceAtoms("lance");
+  REQUIRE(atoms.has_value());
+  REQUIRE(atoms->size() == 1);
+  CHECK((*atoms)[0].kind == MoveKind::Expanded);
+  CHECK((*atoms)[0].sign == StepSign::Positive);
+  REQUIRE(editor->setPieceAtoms("lance", *atoms).has_value());
+  REQUIRE(editor->setPieceAtoms("soldier", *editor->pieceAtoms("soldier")).has_value());
+  const auto again = loadVariantToml(editor->serialize(), "kinds");
+  REQUIRE(again.has_value());
+  CHECK(again->variantId() == v.variantId());
+  CHECK(again->pieces[again->findPiece("soldier")].atoms[0].flip);
 }

@@ -477,7 +477,17 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
       ImGui::PopStyleColor(3);
     }
 
-    for (std::size_t k = 0; k < a.mags.size(); ++k) {
+    // A literal or pinned move is a vector the steppers cannot show as magnitudes; it is
+    // read out as text until the table learns its columns (M19), and everything else about
+    // the move - kind, capture, repeats - still edits.
+    const bool literal = a.kind != MoveKind::Extrapolated || !a.pins.empty();
+    if (literal) {
+      at(colSteps, px(14.0f));
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
+      ImGui::TextUnformatted(a.toString().substr(0, a.toString().find(' ', a.toString().find('}') + 1)).c_str());
+      ImGui::PopStyleColor();
+    }
+    for (std::size_t k = 0; k < (literal ? 0 : a.mags.size()); ++k) {
       at(colSteps + static_cast<float>(k) * px(31.0f), 0.0f);
       int v = a.mags[k];
       char id[24];
@@ -487,7 +497,7 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
         changed = true;
       }
     }
-    {
+    if (!literal) {
       at(colAxes, 0.0f);
       int n = static_cast<int>(a.mags.size());
       if (stepper("axes", n, 1, static_cast<int>(kMaxDims), t, scale_, px(24.0f))) {
@@ -554,15 +564,12 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
       const std::size_t boardAxes = editor->axes().size();
       const int orient = editor->orientationAxis();
       ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-      if (a.mags.size() > boardAxes) {
-        ImGui::Text("needs %zu axes", a.mags.size());
+      const std::size_t needed = a.mags.size() + a.pins.size();
+      if (needed > boardAxes) {
+        ImGui::Text("needs %zu axes", needed);
       } else {
         const std::size_t dirs =
-            a.oriented && orient >= 0
-                ? expandAtomOriented(a.mags, static_cast<std::uint8_t>(boardAxes),
-                                     static_cast<std::uint8_t>(orient), Color::White)
-                      .size()
-                : expandAtom(a.mags, static_cast<std::uint8_t>(boardAxes)).size();
+            expandAtomFor(a, static_cast<std::uint8_t>(boardAxes), orient, Color::White).size();
         ImGui::Text("%zu dirs", dirs);
       }
       ImGui::PopStyleColor();

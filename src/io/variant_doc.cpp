@@ -8,6 +8,7 @@
 
 #include <toml++/toml.hpp>
 
+#include "io/atom_toml.hpp"
 #include "io/model_toml.hpp"
 
 namespace cb {
@@ -41,6 +42,17 @@ std::pair<int, std::int16_t> orientationAxisOf(const toml::table& root) {
     ++index;
   }
   return {-1, 0};
+}
+
+std::vector<std::string> axisNamesOf(const toml::table& root) {
+  std::vector<std::string> names;
+  if (const auto* axes = root["axis"].as_array()) {
+    for (const auto& node : *axes) {
+      const auto* t = node.as_table();
+      names.push_back(t != nullptr ? (*t)["name"].value_or(std::string{}) : std::string{});
+    }
+  }
+  return names;
 }
 
 std::string_view modeWord(MoveMode m) {
@@ -124,14 +136,10 @@ Result<std::vector<MoveAtom>> VariantDoc::pieceAtoms(std::string_view piece) con
     const auto* mt = node.as_table();
     if (mt == nullptr) continue;
     MoveAtom a;
-    if (const auto* vec = (*mt)["vector"].as_array()) {
-      for (const auto& v : *vec) {
-        if (const auto n = v.value<std::int64_t>()) {
-          a.mags.push(static_cast<std::int16_t>(*n));
-        }
-      }
+    {
+      std::string why;
+      if (!readAtomKind(*mt, axisNamesOf(impl_->table), orientAxis, a, why)) continue;
     }
-    if (a.mags.empty()) continue;
 
     const std::string maxText = (*mt)["max"].value_or(std::string{});
     if (maxText == "inf") {
@@ -177,9 +185,7 @@ Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
   toml::array moves;
   for (const MoveAtom& a : atoms) {
     toml::table m;
-    toml::array vec;
-    for (const auto mag : a.mags) vec.push_back(static_cast<std::int64_t>(mag));
-    m.insert("vector", std::move(vec));
+    writeAtomKind(a, axisNamesOf(impl_->table), m);
     if (a.minK != 1) m.insert("min", static_cast<std::int64_t>(a.minK));
     if (a.maxK == kUnlimited) {
       m.insert("max", std::string{"inf"});

@@ -836,15 +836,14 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   occupied[origin] = 0;
   const int orientIndex = editor->orientationAxis() == 0 ? 0 : 1;
   for (const MoveAtom& a : *atoms) {
-    const std::vector<Direction> dirs =
-        a.oriented
-            ? expandAtomOriented(a.mags, static_cast<std::uint8_t>(dims),
-                                 static_cast<std::uint8_t>(orientIndex), Color::White)
-            : expandAtom(a.mags, static_cast<std::uint8_t>(dims));
-    const int first = std::max(1, static_cast<int>(a.minK));
-    const int last = a.maxK == kUnlimited
+    const std::vector<Direction> dirs = expandAtomFor(
+        a, static_cast<std::uint8_t>(dims), editor->orientationAxis() >= 0 ? orientIndex : -1,
+        Color::White);
+    const StepRange range = stepRange(a);
+    const int first = std::max(1, static_cast<int>(range.lo));
+    const int last = range.hi == kUnlimited
                          ? extent - 1
-                         : std::min(static_cast<int>(a.maxK), extent - 1);
+                         : std::min(static_cast<int>(range.hi), extent - 1);
     for (const Direction& d : dirs) {
       // A hop must clear exactly one occupied cell, and only lands beyond it.
       bool hurdled = false;

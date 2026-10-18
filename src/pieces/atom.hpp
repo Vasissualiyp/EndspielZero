@@ -34,6 +34,33 @@ enum class CapturePolicy : std::uint8_t {
 
 constexpr std::uint32_t kUnlimited = 0xFFFF'FFFFu;
 
+/// The three kinds of move (M19). They differ in what the vector means:
+///
+///   Extrapolated  the magnitudes are *free*: permuted over every axis and every sign. A
+///                 rook is `[1]`, a knight `[1,2]`. This is the original atom, and all but
+///                 the pawn are this.
+///   Exact         the vector is literal and signed, positional by axis, taken once:
+///                 `[1,0]` is one cell along axis 0 and nothing else.
+///   Expanded      a literal vector times `k`, in both senses unless `sign` restricts it:
+///                 `[1,0]` is right or left, any distance; with `Positive` it is a lance.
+///
+/// Extrapolated moves may also *pin* components: a pawn's capture is "pin forward +1, one
+/// free magnitude 1", which in two dimensions is the two forward diagonals and in four is
+/// +/-1 on any one of the three other axes with +1 forward.
+enum class MoveKind : std::uint8_t { Extrapolated, Exact, Expanded };
+
+/// Which senses an expanded move runs in.
+enum class StepSign : std::uint8_t { Both, Positive, Negative };
+
+/// A component fixed to an axis with a sign: `{axis 1, +1}` is "one step forward" on a
+/// board whose second axis is rank.
+struct Pin {
+  std::uint8_t axis{0};
+  std::int16_t value{0};
+
+  friend bool operator==(const Pin&, const Pin&) = default;
+};
+
 /// A region of the board, expressed as a predicate on one axis. Deliberately
 /// weak: "the last rank" and "the home rank" do not exist on a torus, so a
 /// variant there simply leaves the region inactive (M3.4).
@@ -61,7 +88,19 @@ struct Region {
 /// The expansion is dimension-agnostic, which is the whole point: a knight on a
 /// 4-D board is this same atom, not new engine code.
 struct MoveAtom {
-  SmallVec<std::int16_t, kMaxDims> mags;  ///< canonical: ascending, all > 0
+  /// Which of the three kinds this is; see `MoveKind`.
+  MoveKind kind{MoveKind::Extrapolated};
+  /// Exact and expanded: the whole vector, one pin per nonzero component. Extrapolated:
+  /// the components that are fixed rather than free (usually none).
+  SmallVec<Pin, kMaxDims> pins{};
+  /// For the other colour, negate every pin on the variant's orientation axis. On by
+  /// default for the kinds that have a direction (the loader sets it); a rook has none.
+  bool flip{false};
+  /// Expanded only: run in both senses, or one.
+  StepSign sign{StepSign::Both};
+  /// Extrapolated: the free magnitudes, canonical: ascending, all > 0. Empty for the
+  /// literal kinds.
+  SmallVec<std::int16_t, kMaxDims> mags;
   /// Step counts this atom may take: k in [minK, maxK]. minK > 1 is how a
   /// "moves exactly n spaces" move (a pawn's double step) is expressed without
   /// duplicating the single-step move.
@@ -114,6 +153,26 @@ struct MoveAtom {
 
   friend bool operator==(const MoveAtom& a, const MoveAtom& b);
 };
+
+/// The directions an atom moves in for one colour, whatever its kind: the one definition
+/// that movegen, the preview and the tests agree on. `orientAxis` is the variant's
+/// orientation axis or -1. An atom that needs more axes than the board has expands to
+/// nothing, as `expandAtom` does. An exact slide of `n` cells is the unit direction taken
+/// `n` times (see `exactSteps`), so the cells between are checked.
+std::vector<Direction> expandAtomFor(const MoveAtom& atom, std::uint8_t dims,
+                                     int orientAxis, Color color);
+
+/// How many steps an exact slide is: the gcd of its vector, which is what makes a
+/// two-cell step need its first cell empty. 1 for anything else.
+std::uint32_t exactSteps(const MoveAtom& atom) noexcept;
+
+/// The step range the engine walks for this atom: an exact move is exactly its
+/// `exactSteps`, everything else is `[minK, maxK]`.
+struct StepRange {
+  std::uint32_t lo;
+  std::uint32_t hi;
+};
+StepRange stepRange(const MoveAtom& atom) noexcept;
 
 /// Expand an atom's magnitudes into direction vectors, in a canonical
 /// (lexicographic) order so that generation is deterministic across compilers.
