@@ -1,0 +1,2 @@
+-- A knight: a jump of 1 along one axis and 2 along another.
+[1,2]^1

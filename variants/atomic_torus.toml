@@ -89,31 +89,13 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 [[geometry.identify]]
 axis = "file"

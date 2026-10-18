@@ -1,0 +1,4 @@
+-- A queen: every straight line the board has - one axis, two, three, up to its
+-- dimension. D is the number of axes, so this is the 8-direction queen on a plane,
+-- the 26-direction one on a cube, and so on.
+U r in 1..D : [1 x r]^k

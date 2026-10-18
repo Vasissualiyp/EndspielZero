@@ -2,15 +2,13 @@
 #
 # cube5 - a 5x5x5 three-dimensional variant.
 #
-# The piece set follows Raumschach (Maack, 1907) except in one place: the unicorn
-# travels the triagonals and the bishop the planar diagonals, but the queen and king
-# are *line* movers - any number of steps along one axis or two, never three - so they
-# do not inherit the unicorn's cube diagonals. A line mover is the same piece in every
-# dimension (see straightLineAtoms in src/pieces/atom.hpp); the historical Raumschach
-# queen does combine rook, bishop and unicorn, and this variant deliberately does not.
-# The *pawn* rules and promotion conditions are EndspielZero's own choice too, plainly
-# stated rather than presented as a reconstruction - see docs/variants/cube5.md. A
-# faithful Raumschach needs its pawn rules taken from a primary source first.
+# The piece set follows Raumschach (Maack, 1907): the unicorn travels the triagonals, the
+# bishop the planar diagonals, and the queen *every* straight line - one axis, two or three,
+# 26 directions (the library's "queen" moveset: a union over the board's dimension). The
+# king steps one cell along a line of one or two axes.
+# The *pawn* rules and promotion conditions are EndspielZero's own choice, plainly stated
+# rather than presented as a reconstruction - see docs/variants/cube5.md. A faithful
+# Raumschach needs its pawn rules taken from a primary source first.
 #
 # What this variant is really for: it is the smallest board on which the vector-move
 # algebra's third-order atoms ([1,1,1]) mean anything, and it shows that a piece set
@@ -106,40 +104,16 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  # Every straight line: one axis (rook), two (bishop) or three (the cube diagonals).
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  # The same line mover, one step at a time.
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 # Levels are separated by "|", ranks by "/". White occupies levels 0 and 1, Black
 # levels 3 and 4; level 2 starts empty.
+
 [start]
 board = "5/5/5/PPPPP/RNKNR|5/5/5/PPPPP/BUQUB|5/5/5/5/5|buqub/ppppp/5/5/5|rnknr/ppppp/5/5/5"

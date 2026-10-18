@@ -3,6 +3,7 @@
 
 #include "io/atom_toml.hpp"
 #include "io/model_toml.hpp"
+#include "io/moveset_library.hpp"
 
 #include <fstream>
 #include <map>
@@ -17,6 +18,9 @@
 #include "io/rule_parse.hpp"
 
 namespace cb {
+namespace {
+const toml::array kNoMoves{};
+}  // namespace
 namespace {
 
 int lineOf(const toml::node& n) {
@@ -359,12 +363,24 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
       for (const auto& x : *pr) promotesTo[p.name].push_back(x.value_or(std::string{}));
     }
 
+    // A moveset written as text (the symbolic form), or by name from the library, comes
+    // first; any [[piece.move]] entries follow it.
+    if (const auto movesText = (*t)["moves"].value<std::string>()) {
+      const MovesetContext ctx = movesetContextFor(tbl);
+      auto atoms = evalMoveset(*movesText, ctx);
+      if (!atoms.has_value()) {
+        return fail(atoms.error().code,
+                    "piece '" + p.name + "' moves: " + atoms.error().message, lineOf(node));
+      }
+      for (const MoveAtom& a : *atoms) p.atoms.push_back(a);
+    }
     const auto* movesNode = (*t)["move"].as_array();
-    if (movesNode == nullptr || movesNode->empty()) {
+    if ((movesNode == nullptr || movesNode->empty()) && p.atoms.empty()) {
       return fail(ErrorCode::ValidationError,
-                  "piece '" + p.name + "' needs at least one [[piece.move]]",
+                  "piece '" + p.name + "' needs moves = \"...\" or at least one [[piece.move]]",
                   lineOf(node));
     }
+    if (movesNode == nullptr) movesNode = &kNoMoves;
     for (const auto& mnode : *movesNode) {
       const auto* mt = mnode.as_table();
       if (mt == nullptr) {

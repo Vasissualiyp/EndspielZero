@@ -50,6 +50,9 @@ Result<MoveAtom> MoveAtom::canonicalize(MoveAtom a) {
       }
     }
   }
+  // Pins in axis order, so two spellings of the same move are the same move.
+  std::sort(a.pins.begin(), a.pins.end(),
+            [](const Pin& l, const Pin& r) { return l.axis < r.axis; });
   if (!a.pins.empty() && a.oriented) {
     return fail(ErrorCode::ValidationError,
                 "a move with pinned components says its direction itself; "

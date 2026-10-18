@@ -1,0 +1,2 @@
+-- A bishop: any number of steps along two axes at once (a planar diagonal).
+[1,1]^k

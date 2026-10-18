@@ -1,0 +1,2 @@
+-- A nightrider: a knight move, repeated in the same direction.
+[1,2]^k
