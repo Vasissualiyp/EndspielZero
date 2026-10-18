@@ -241,7 +241,17 @@ void Shell::go(Screen s) {
   screen_ = s;
 }
 
+void Shell::discardEditorChanges() {
+  if (editor_ == nullptr) return;
+  const std::string name = editorVariant_;
+  (void)openEditor(name);
+}
+
 void Shell::back() {
+  if (screen_ == Screen::Editor && editor_ != nullptr && editor_->dirty() && !forceLeaveEditor_) {
+    editorLeaveRequested_ = true;
+    return;
+  }
   switch (screen_) {
     case Screen::Settings:
     case Screen::Editor:

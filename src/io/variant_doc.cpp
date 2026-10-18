@@ -190,8 +190,10 @@ Result<std::vector<MoveAtom>> VariantDoc::pieceAtoms(std::string_view piece) con
       }
     }
 
+    // An atom the engine would refuse is still the author's atom: it stays in the list, so the
+    // editor can show it (red) and let it be fixed, instead of it silently vanishing.
     auto canon = MoveAtom::canonicalize(a);
-    if (canon.has_value()) out.push_back(*canon);
+    out.push_back(canon.has_value() ? *canon : a);
   }
   return out;
 }

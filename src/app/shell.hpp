@@ -407,6 +407,20 @@ class Shell {
   /// Write the open document back to its file. Fails when nothing is open or no path
   /// resolver is installed.
   Result<void> saveEditor();
+  /// Leaving the editor with unsaved changes asks first: `back()` stays put and raises this
+  /// request, which the editor screen answers with its own dialog (save, leave without saving,
+  /// or stay). Nothing is lost to an Esc.
+  [[nodiscard]] bool editorLeaveRequested() const noexcept { return editorLeaveRequested_; }
+  void clearEditorLeaveRequest() noexcept { editorLeaveRequested_ = false; }
+  /// Throw away the editor's unsaved changes by reopening the file it was opened from.
+  void discardEditorChanges();
+  /// Leave the editor now, whatever its state: the dialog's answer.
+  void leaveEditor() {
+    editorLeaveRequested_ = false;
+    forceLeaveEditor_ = true;
+    back();
+    forceLeaveEditor_ = false;
+  }
 
   /// The document being edited, or nullptr when the editor has nothing open.
   [[nodiscard]] Editor* editor() noexcept { return editor_.get(); }
@@ -515,6 +529,8 @@ class Shell {
   /// Where "Surprise me" is in the library, so repeated presses move on (M14.2).
   std::size_t surpriseCursor_{0};
   std::unique_ptr<Editor> editor_;
+  bool editorLeaveRequested_{false};
+  bool forceLeaveEditor_{false};
   std::string editorVariant_;
   std::filesystem::path editorPath_;
   mutable std::unique_ptr<VariantSpec> preview_;

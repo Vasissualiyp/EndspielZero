@@ -247,6 +247,20 @@ bool Ui::outlineEditor(const char* id, ImVec2 min, ImVec2 max, assets::Outline& 
 
   drawGrid(dl, min, max, t, yUp, box);
 
+  // A shade of the rest of the piece first: what the outline being edited sits among. Its
+  // other fills as faint solids, its cut-outs as faint outlines.
+  const auto ghost = [&](const assets::Outline* o, bool cut) {
+    if (o == nullptr || o == &outline || o->points.size() < 3) return;
+    std::vector<ImVec2> pts;
+    pts.reserve(o->points.size());
+    for (const assets::ModelPoint& p : o->points) pts.push_back(toScreen(p, min, max, yUp, box));
+    if (!cut) fillPolygon(dl, pts.data(), static_cast<int>(pts.size()), u32(t.bone, 0.16f));
+    dl->AddPolyline(pts.data(), static_cast<int>(pts.size()),
+                    u32(cut ? t.ember : t.bone, cut ? 0.45f : 0.30f), ImDrawFlags_Closed, 1.0f);
+  };
+  for (const assets::Outline* o : outlineGhostFills_) ghost(o, false);
+  for (const assets::Outline* o : outlineGhostCuts_) ghost(o, true);
+
   // The filled silhouette first, so the shape reads as a shape and not as a wire.
   if (outline.points.size() >= 3) {
     dl->PathClear();
@@ -289,6 +303,16 @@ bool Ui::outlineEditor(const char* id, ImVec2 min, ImVec2 max, assets::Outline& 
   }
   ImGui::PopID();
   ImGui::SetCursorScreenPos(cursorWas);
+
+  // Delete takes the selected point away - only while the pointer is over *this* editor, so
+  // two editors that each remember a selection do not both lose a point to one keypress.
+  if (selected >= 0 && selected < static_cast<int>(outline.points.size()) &&
+      outline.points.size() > 3 && !ImGui::GetIO().WantTextInput &&
+      ImGui::IsMouseHoveringRect(min, max) && ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
+    outline.points.erase(outline.points.begin() + selected);
+    selected = -1;
+    changed = true;
+  }
 
   // The readout belongs on the drawing, not in a status line somewhere else: the number
   // an author is changing should be next to the thing they are dragging.
@@ -480,6 +504,21 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
     ImGui::PushID(static_cast<int>(i));
     MoveAtom& a = list[i];
     const float rowTop = ImGui::GetCursorPosY();
+    // A row the engine would refuse - a repeating hopper, a zero step - is shown red, whole,
+    // not explained in a paragraph; the sentence is a tooltip for whoever wants it.
+    const auto verdict = MoveAtom::canonicalize(a);
+    if (!verdict.has_value()) {
+      const ImVec2 rowMin(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x,
+                          ImGui::GetCursorScreenPos().y - px(4.0f));
+      const ImVec2 rowMax(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x,
+                          rowMin.y + px(54.0f));
+      ImDrawList* rowDl = ImGui::GetWindowDrawList();
+      rowDl->AddRectFilled(rowMin, rowMax, u32(t.blood, 0.28f), px(4.0f));
+      rowDl->AddRect(rowMin, rowMax, u32(t.blood, 0.9f), px(4.0f), 0, px(1.5f));
+      if (ImGui::IsMouseHoveringRect(rowMin, rowMax)) {
+        ImGui::SetTooltip("%s", verdict.error().message.c_str());
+      }
+    }
     // Every control in the row hangs off the same top, so a stacked stepper does not
     // drag the words next to it down with it.
     const auto at = [&](float x, float drop) {
@@ -1464,8 +1503,14 @@ void Ui::drawIconTab(app::Shell& shell) {
   assets::Outline& poly = shown < designIcon_.fills.size()
                               ? designIcon_.fills[shown]
                               : designIcon_.cuts[shown - designIcon_.fills.size()];
-  if (outlineEditor("icon", gridMin, gridMax, poly, designIconPoint_, false, "x", "y") &&
-      designIconMirror_) {
+  outlineGhostFills_.clear();
+  outlineGhostCuts_.clear();
+  for (const assets::Outline& o : designIcon_.fills) outlineGhostFills_.push_back(&o);
+  for (const assets::Outline& o : designIcon_.cuts) outlineGhostCuts_.push_back(&o);
+  const bool iconEdited = outlineEditor("icon", gridMin, gridMax, poly, designIconPoint_, false, "x", "y");
+  outlineGhostFills_.clear();
+  outlineGhostCuts_.clear();
+  if (iconEdited && designIconMirror_) {
     const std::size_t n = poly.points.size();
     for (std::size_t i = 0; i < n / 2; ++i) {
       const assets::ModelPoint& src = poly.points[i];

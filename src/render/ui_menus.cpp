@@ -725,6 +725,51 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("editor", t, mono, scale_);
 
+  // Leaving with unsaved changes is asked about, never assumed: `Shell::back` (a BACK or Esc
+  // anywhere) raises a request instead of leaving, and this is where it is answered.
+  if (shell.editorLeaveRequested()) {
+    leaveTarget_ = 2;
+    shell.clearEditorLeaveRequest();
+  }
+  if (leaveTarget_ != 0 && shell.editor() != nullptr) {
+    app::Editor* ed = shell.editor();
+    screenTitle("Unsaved changes", t, display, scale_, 1.9f);
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
+    ImGui::TextWrapped("%s has changes that are not saved. Leaving now throws them away.",
+                       shell.editorVariant().c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    const bool valid = ed->validate().has_value();
+    if (!valid) {
+      ImGui::PushFont(small);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+      ImGui::TextWrapped("It cannot be saved as it is: something in it is invalid.");
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+    }
+    ImGui::Dummy(ImVec2(0, px(10)));
+    const auto finish = [&] {
+      if (leaveTarget_ == 1) {
+        editorPage_ = 0;
+      } else {
+        shell.leaveEditor();
+      }
+      leaveTarget_ = 0;
+    };
+    if (button("SAVE AND LEAVE", t, px(220), true, false, valid, display)) {
+      if (shell.saveEditor().has_value()) finish();
+    }
+    if (button("LEAVE WITHOUT SAVING", t, px(260), false, false, true, display)) {
+      shell.discardEditorChanges();
+      designSyncedRevision_ = ~0ull;
+      finish();
+    }
+    if (button("STAY", t, px(120), false, false, true, display)) leaveTarget_ = 0;
+    endPane();
+    return request;
+  }
+
   // The editor's home: choose which designer. The piece designer is built; the board
   // designer is not, so it is offered but does nothing yet.
   if (editorPage_ == 0) {
@@ -909,6 +954,16 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     const Result<void> ok = editor->validate();
     validateNote_ = ok.has_value() ? std::string{} : ok.error().format();
     validatedRevision_ = editor->revision();
+    // Is a move row somewhere one the engine refuses? Then the rows say so, in red, and the
+    // sentence stays out of the header.
+    movesInvalid_ = false;
+    for (const std::string& name : editor->pieceNames()) {
+      const auto atoms = editor->pieceAtoms(name);
+      if (!atoms.has_value()) continue;
+      for (const MoveAtom& a : *atoms) {
+        if (!MoveAtom::canonicalize(a).has_value()) movesInvalid_ = true;
+      }
+    }
   }
   if (button("SAVE", t, px(84), editor->dirty(), false, validateNote_.empty(), display)) {
     (void)shell.saveEditor();
@@ -919,7 +974,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   if (button("CLEAR", t, px(88), false, true, true, display)) {
     for (auto& cells : previewOcc_) std::fill(cells.begin(), cells.end(), 0);
   }
-  if (!validateNote_.empty()) {
+  // A bad move row is shown red where it is; the sentence is only for what has no row.
+  if (!validateNote_.empty() && !movesInvalid_) {
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
     ImGui::TextWrapped("cannot save: %s", validateNote_.c_str());
@@ -961,6 +1017,10 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     // The names here and the "add a move" bundles below are both called rook, bishop,
     // knight and king; without a scope of their own they share an ImGui ID, and the
     // second row answers the first one's clicks.
+    // While something is invalid there is no moving on: not to another piece, not to
+    // another tab. Fix it, or leave without saving.
+    const bool locked = !validateNote_.empty();
+    ImGui::BeginDisabled(locked);
     ImGui::PushID("piece-chips");
     for (int i = 0; i < static_cast<int>(names.size()); ++i) {
       if (i != 0) ImGui::SameLine();
@@ -974,13 +1034,16 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     }
     ImGui::PopID();
     ImGui::PopFont();
+    ImGui::EndDisabled();
 
     // Three jobs on one piece - how it moves, what its body is, what its flat outline
     // is - so three tabs rather than three screens. Moving between them must not feel
     // like leaving the piece behind.
     designTab_ = std::clamp(designTab_, 0, 7);
+    ImGui::BeginDisabled(locked);
     tabRow({"MOVES", "BODY", "FLAT ICON", "IDENTITY", "CASTLING", "MARKS", "FIELDS", "RULES"},
            designTab_, t, fontDisplay_, scale_);
+    ImGui::EndDisabled();
 
     const std::string piece = names[static_cast<std::size_t>(editorPiece_)];
     // The header stays put and the tab scrolls under it: a designer this long would
@@ -1012,7 +1075,13 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::PopStyleVar(3);
 
   ImGui::Dummy(ImVec2(0, px(10)));
-  if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
+  if (button("BACK", t, px(120), false, false, true, display)) {
+    if (editor->dirty()) {
+      leaveTarget_ = 1;  // ask first
+    } else {
+      editorPage_ = 0;
+    }
+  }
   endPane();
   return request;
 }

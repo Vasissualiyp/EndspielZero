@@ -160,6 +160,11 @@ class Ui {
     injectDown_ = down;
     injectButton_ = button;
   }
+  /// A key event for the next frame (ImGuiKey), for `--ui-click "key:delete"`.
+  void injectKey(int key, bool down) noexcept {
+    injectKey_ = key;
+    injectKeyDown_ = down;
+  }
   void openEditorPiece(std::string name) { pendingPiece_ = std::move(name); }
 
   /// Point the library at a variant, for a capture that names one - the same forcing the
@@ -360,6 +365,16 @@ class Ui {
   assets::PieceModel previewMeshModel_{};
   bool previewMeshValid_{false};
   /// A note from the last move edit that did not take, shown in red under the list.
+  /// The rest of the piece, drawn faintly behind the outline being edited (the flat icon's
+  /// other fills and its cut-outs), set by the caller around `outlineEditor`.
+  std::vector<const assets::Outline*> outlineGhostFills_;
+  std::vector<const assets::Outline*> outlineGhostCuts_;
+  /// Where the "unsaved changes" dialog would leave to: 0 no dialog, 1 the editor's home, 2
+  /// out of the editor altogether.
+  int leaveTarget_{0};
+  /// The piece's move rows are invalid (set while drawing them): they are shown red, and the
+  /// header stays quiet rather than repeating the loader's sentence.
+  bool movesInvalid_{false};
   std::string moveNote_;
   /// The move row whose detail (steps, home rank, en passant, reach) is open.
   int selectedAtom_{-1};
@@ -374,6 +389,8 @@ class Ui {
   bool inject_{false};
   bool injectDown_{false};
   int injectButton_{0};
+  int injectKey_{0};
+  bool injectKeyDown_{false};
   ImVec2 injectPos_{0, 0};
   /// Which of the piece designer's three tabs is showing.
   int designTab_{0};

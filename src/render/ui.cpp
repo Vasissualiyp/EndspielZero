@@ -613,6 +613,10 @@ void Ui::newFrame() {
     io.AddMousePosEvent(injectPos_.x, injectPos_.y);
     io.AddMouseButtonEvent(injectButton_, injectDown_);
   }
+  if (injectKey_ != 0) {
+    ImGui::GetIO().AddKeyEvent(static_cast<ImGuiKey>(injectKey_), injectKeyDown_);
+    if (!injectKeyDown_) injectKey_ = 0;
+  }
   ImGui::NewFrame();
 }
 
