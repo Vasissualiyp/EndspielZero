@@ -1091,6 +1091,7 @@ void Ui::drawBodyTab(app::Shell& shell) {
                      ImVec2(gridMax.x + px(16.0f) + side, gridMax.y), designModel_,
                      clock_ * 0.6f);
 
+  ImGui::PushID("profile-buttons");
   if (button("+ POINT", t, px(92), false, true, true, display)) {
     // Inserted after the selected point, halfway to the next, so an insert lands where
     // the author was looking rather than at the end of a list.
@@ -1126,6 +1127,7 @@ void Ui::drawBodyTab(app::Shell& shell) {
     designProfilePoint_ = -1;
     designElement_ = designModel_.elements.empty() ? -1 : 0;
   }
+  ImGui::PopID();
 
   // ---- step 2: the sweep and its symmetry.
   sectionHead("STEP 2  REVOLVE AND SYMMETRY", t, fontSmall_, scale_);
@@ -1289,6 +1291,7 @@ void Ui::drawBodyTab(app::Shell& shell) {
       ImGui::Checkbox("broad round the rim (not outward)", &e.tangent);
       ImGui::EndGroup();
       ImGui::SetCursorScreenPos(ImVec2(eMin.x, std::max(ImGui::GetItemRectMax().y, eMax.y) + px(6.0f)));
+      ImGui::PushID("element-buttons");
       if (button("+ POINT", t, px(92), false, true, true, display)) {
         auto& pts = e.outline.points;
         if (!pts.empty()) {
@@ -1313,6 +1316,7 @@ void Ui::drawBodyTab(app::Shell& shell) {
           designElementPoint_ = -1;
         }
       }
+      ImGui::PopID();
     }
   }
 
@@ -1470,6 +1474,7 @@ void Ui::drawIconTab(app::Shell& shell) {
     }
   }
 
+  ImGui::PushID("icon-buttons");
   if (button(designIconMirror_ ? "MIRROR ON" : "MIRROR OFF", t, px(130),
              designIconMirror_, true, true, display)) {
     designIconMirror_ = !designIconMirror_;
@@ -1505,6 +1510,7 @@ void Ui::drawIconTab(app::Shell& shell) {
     designIconPoint_ = -1;
     designIconPoly_ = 0;
   }
+  ImGui::PopID();
 
   sectionHead("AT THE SIZE IT IS DRAWN", t, fontSmall_, scale_);
   {

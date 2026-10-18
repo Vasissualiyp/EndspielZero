@@ -209,6 +209,10 @@ class Shell {
   /// name. The order can only be computed here, because a difficulty lives in the
   /// variant's own file rather than in the name list the shell is handed at startup.
   void setVariantLoader(VariantLoader loader);
+  /// The loader the attract trailer uses: the variants as they ship, whatever the player has
+  /// saved over them. The trailer is a fixed showcase - its scripted moves are only known to
+  /// be legal on the shipped rules - so a variant edited in the designer must not break it.
+  void setShippedVariantLoader(VariantLoader loader) { shippedLoader_ = std::move(loader); }
   Result<void> startGame(const std::string& variantName);
 
   /// Saved games live in a `games` folder beside the settings file.
@@ -248,6 +252,8 @@ class Shell {
   /// main menu.
   void stopAttract();
   [[nodiscard]] bool attracting() const noexcept { return !attract_.empty(); }
+  /// Which beat of the sequence is playing.
+  [[nodiscard]] std::size_t attractIndex() const noexcept { return attractIndex_; }
   /// Which beat of the sequence is playing, for a status line or a test.
   [[nodiscard]] std::size_t attractStep() const noexcept { return attractIndex_; }
   [[nodiscard]] std::size_t attractCount() const noexcept { return attract_.size(); }
@@ -502,6 +508,7 @@ class Shell {
   Screen previous_{Screen::MainMenu};
   bool quit_{false};
   VariantLoader loader_;
+  VariantLoader shippedLoader_;
   VariantSourceLoader sourceLoader_;
   VariantPathResolver pathResolver_;
   OverturePlayer overtures_;

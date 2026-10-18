@@ -208,6 +208,12 @@ std::unique_ptr<app::Shell> makeShell(const std::filesystem::path& settings = {}
     if (!v.has_value()) return fail(v.error().code, v.error().message);
     return std::move(*v);
   });
+  // The trailer, and nothing else, plays the variants exactly as they ship.
+  shell->setShippedVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    auto v = loadVariantFile(variantDir() / (name + ".toml"));
+    if (!v.has_value()) return fail(v.error().code, v.error().message);
+    return std::move(*v);
+  });
   // The editor reads and writes the author's own file, not the resolved spec.
   shell->setVariantSourceLoader([](const std::string& name) -> Result<std::string> {
     const auto path = variantFile(name);

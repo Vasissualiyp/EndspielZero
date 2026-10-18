@@ -8,7 +8,9 @@
 // any other screen.
 #include <catch2/catch_test_macros.hpp>
 
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -18,6 +20,7 @@
 #include "game/game.hpp"
 #include "io/fen.hpp"
 #include "io/game_file.hpp"
+#include "io/variant_toml.hpp"
 #include "position/position.hpp"
 #include "support/variants.hpp"
 #include "view/morph.hpp"
@@ -302,4 +305,40 @@ TEST_CASE("every cut in the sequence lands on the previous shape's own end-of-st
   // Standard has nothing to morph from - the sequence's own cold open.
   CHECK(standard.variant == "standard");
   CHECK(standard.formedFrom == 1.0f);
+}
+
+TEST_CASE("the trailer plays the variants as they ship, not as the player saved them",
+          "[unit][app][attract]") {
+  // The player's own `standard` - here one whose queen has lost her diagonals - shadows the
+  // shipped one in the library. The trailer's scripted opener needs those diagonals, so it
+  // must not read the player's copy: the bug was the trailer stopping after a few moves
+  // and turning into an ordinary game.
+  auto shell = makeShell(tempSettings("attract-shipped.conf"));
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    std::ifstream in(test::variantPath(name));
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    std::string text = ss.str();
+    if (name == "standard") {
+      // Break the queen: she moves like a rook only.
+      const auto at = text.find("moves = \"queen\"");
+      if (at != std::string::npos) text.replace(at, 15, "moves = \"[1]^k\"");
+    }
+    return loadVariantToml(text, name);
+  });
+  shell->setShippedVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    auto v = loadVariantFile(test::variantPath(name));
+    if (!v.has_value()) return fail(v.error().code, v.error().message);
+    return std::move(*v);
+  });
+  shell->settings().watchDwell = 0.05f;
+  shell->startAttract(defaultAttractSequence());
+  REQUIRE(shell->attracting());
+  // Run through the whole standard opener (18 plies) and into the next beat.
+  for (int i = 0; i < 200000 && shell->attractIndex() == 0; ++i) {
+    shell->session()->advanceAnimation(0.02f);
+    (void)shell->advanceAttract(0.02f);
+  }
+  CHECK(shell->attracting());
+  CHECK(shell->attractIndex() == 1);
 }
