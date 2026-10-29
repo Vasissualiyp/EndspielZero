@@ -23,7 +23,7 @@ using namespace cb::app;
 namespace {
 
 constexpr const char* kStandardGame =
-    "# ChessBox game v1\n"
+    "# EndspielZero game v1\n"
     "variant standard\n"
     "start rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\n"
     "move e2e4\n"
@@ -69,7 +69,7 @@ TEST_CASE("the runner plays a game one move at a time to the same position",
 TEST_CASE("an illegal move stops the runner with the loader's own error",
           "[unit][app][game-runner]") {
   const GameFile file = parseOrThrow(
-      "# ChessBox game v1\n"
+      "# EndspielZero game v1\n"
       "variant standard\n"
       "start rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\n"
       "move e2e4\n"

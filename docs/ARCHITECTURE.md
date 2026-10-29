@@ -1,4 +1,4 @@
-# ChessBox Architecture
+# EndspielZero Architecture
 
 > Status: design, pre-implementation. Authoritative for module boundaries and
 > invariants. Changes to anything marked **[INVARIANT]** require a new ADR in
@@ -6,7 +6,7 @@
 
 ## 0. One-paragraph summary
 
-ChessBox is a FOSS sandbox for *finite-board* game variants of essentially
+EndspielZero is a FOSS sandbox for *finite-board* game variants of essentially
 arbitrary shape: any number of spatial dimensions, arbitrary boundary topology
 (cylinder, torus, Möbius, Klein bottle, real projective plane, and their
 higher-dimensional analogues), arbitrary piece movement expressed in a single

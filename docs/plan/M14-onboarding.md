@@ -157,7 +157,7 @@ each with a one-line "what changes here" - plus "Surprise me" (`Shell::surpriseV
 which skips the classic and captions its pick with the variant's own description) and "show
 me all the boards" into the full library. Headless tests: a first run opens the welcome and
 only once; the path starts at standard and each step is captioned; surprise picks a
-non-standard library variant. `chessbox_gui _ --shot o.ppm --screen welcome` captures it.
+non-standard library variant. `endspielzero_gui _ --shot o.ppm --screen welcome` captures it.
 
 **M14.4 (legibility) started (2026-10-01).** The seam legend is built:
 `view::seamLegend(seams, cfg, dims)` reduces the per-cell portal ramp to one entry per glued

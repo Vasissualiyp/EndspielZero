@@ -47,12 +47,12 @@ const char* boolText(bool b) {
 
 std::filesystem::path Settings::defaultPath() {
   if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0') {
-    return std::filesystem::path(xdg) / "chessbox" / "settings.conf";
+    return std::filesystem::path(xdg) / "endspielzero" / "settings.conf";
   }
   if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
-    return std::filesystem::path(home) / ".config" / "chessbox" / "settings.conf";
+    return std::filesystem::path(home) / ".config" / "endspielzero" / "settings.conf";
   }
-  return std::filesystem::path("chessbox-settings.conf");
+  return std::filesystem::path("endspielzero-settings.conf");
 }
 
 Settings Settings::load(const std::filesystem::path& path) {
@@ -191,7 +191,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   if (!out) {
     return fail(ErrorCode::Internal, "cannot write settings to '" + path.string() + "'");
   }
-  out << "# ChessBox settings. Edited by the game; safe to edit by hand.\n";
+  out << "# EndspielZero settings. Edited by the game; safe to edit by hand.\n";
   out << "gui_scale = " << guiScale << '\n';
   out << "fullscreen = " << boolText(fullscreen) << '\n';
   out << "vsync = " << boolText(vsync) << '\n';

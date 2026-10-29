@@ -1,4 +1,4 @@
-# Contributing to ChessBox
+# Contributing to EndspielZero
 
 Read [AGENTS.md](AGENTS.md) first — it is the map and the rulebook for humans and
 agents alike.

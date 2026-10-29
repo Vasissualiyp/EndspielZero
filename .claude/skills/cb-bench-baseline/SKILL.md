@@ -1,6 +1,6 @@
 ---
 name: cb-bench-baseline
-description: Run ChessBox benchmarks and record or compare a baseline. Use before and after any change to a hot path, or when asked whether something got faster or slower.
+description: Run EndspielZero benchmarks and record or compare a baseline. Use before and after any change to a hot path, or when asked whether something got faster or slower.
 ---
 
 # Benchmarks and baselines
@@ -9,7 +9,7 @@ description: Run ChessBox benchmarks and record or compare a baseline. Use befor
 
 ```bash
 cmake --preset release && cmake --build build/release
-./build/release/bench/chessbox_bench
+./build/release/bench/endspielzero_bench
 ```
 
 Release only. A Debug build is `-O0` by deliberate choice (nix injects `-O2`, which

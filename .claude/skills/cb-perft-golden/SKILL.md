@@ -1,6 +1,6 @@
 ---
 name: cb-perft-golden
-description: Generate, verify or debug ChessBox perft node counts, and localize a movegen bug to a single move. Use when a perft or golden count mismatches, or when adding node counts for a variant.
+description: Generate, verify or debug EndspielZero perft node counts, and localize a movegen bug to a single move. Use when a perft or golden count mismatches, or when adding node counts for a variant.
 ---
 
 # Perft goldens
@@ -28,14 +28,14 @@ otherwise. If you genuinely must change one, the commit message says why.
 Bisect with `divide`, which splits perft by first move:
 
 ```bash
-./build/dev/src/cli/chessbox "load <variant>" "fen <fen>" "divide 4"
+./build/dev/src/cli/endspielzero "load <variant>" "fen <fen>" "divide 4"
 ```
 
 Compare against a reference divide, descend into the first move whose subtotal is
 wrong, and repeat until depth 1. Then:
 
 ```bash
-./build/dev/src/cli/chessbox "fen <the bad position>" moves board
+./build/dev/src/cli/endspielzero "fen <the bad position>" moves board
 ```
 
 A count wrong at depth 1 is a move-generation bug. A count right at depth 1 but wrong

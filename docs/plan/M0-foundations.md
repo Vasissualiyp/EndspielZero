@@ -28,9 +28,9 @@ layering test already enforces the dependency rules from ARCH §1.
 ## M0.2 CMake skeleton
 
 - Top-level `CMakeLists.txt`, C++23, no compiler extensions.
-- Targets: `chessbox_base`, `chessbox_core` (aggregates L1–L8), `chessbox_io`,
-  `chessbox_cli`, `chessbox_tests`, `chessbox_bench`; `chessbox_render`,
-  `chessbox_net`, `chessbox_app` added in later milestones.
+- Targets: `endspielzero_base`, `endspielzero_core` (aggregates L1–L8), `endspielzero_io`,
+  `endspielzero_cli`, `endspielzero_tests`, `endspielzero_bench`; `endspielzero_render`,
+  `endspielzero_net`, `endspielzero_app` added in later milestones.
 - One CMake target per architectural layer directory, with `target_link_libraries`
   expressing exactly the allowed downward edges — so violating the layer map is a
   *link error*, not a review comment.
@@ -81,7 +81,7 @@ Written test-first, each with its own test file. Deliberately small.
 | `diag` counters/trace | profiling and debugging generalized code | compiled-out in release (a test asserts zero size impact) |
 | `log` | structured, level-filtered, no allocation on the disabled path | disabled-path allocation test |
 
-**No floats anywhere in `chessbox_base` or `chessbox_core`.** A tidy rule plus a
+**No floats anywhere in `endspielzero_base` or `endspielzero_core`.** A tidy rule plus a
 grep test enforces it. **[INVARIANT]**
 
 ## M0.5 CI
@@ -101,7 +101,7 @@ grep test enforces it. **[INVARIANT]**
   conventions, the TDD loop, and a file-by-file index. Written to be short and
   high-signal — it is loaded into every agent's context.
 - `CLAUDE.md`: a pointer to AGENTS.md and nothing else.
-- `README.md`: what ChessBox is, quickstart, status, license.
+- `README.md`: what EndspielZero is, quickstart, status, license.
 - `LICENSE`: GPL-3.0 (ADR-0008). SPDX headers on every source file, checked by a
   test.
 - `docs/adr/`: ADRs 0001–0008 recording the decisions already made, plus the
@@ -147,7 +147,7 @@ one row in the AGENTS.md index.
    network access beyond the flake inputs.
 2. `nix flake check` runs the entire gate described in the roadmap.
 3. Violating the layer map fails the build, not review.
-4. A float introduced into `chessbox_core` fails a test.
+4. A float introduced into `endspielzero_core` fails a test.
 5. An allocation inside a tripwire region fails a test.
 6. Every L0 component has a test file and ≥90% line coverage.
 7. Every shipped skill's commands and paths are verified by a test.

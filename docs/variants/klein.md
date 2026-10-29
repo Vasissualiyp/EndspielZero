@@ -17,4 +17,4 @@ small - kings, rooks and knights - and offset in both rank and file: with bishop
 giving check from almost anywhere and the ranks glued, larger or aligned armies start
 the game already lost.
 
-**Rules:** ChessBox's own. Perft: 48 and 1977.
+**Rules:** EndspielZero's own. Perft: 48 and 1977.

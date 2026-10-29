@@ -20,7 +20,7 @@ using namespace cb::app;
 namespace {
 
 std::filesystem::path tempSettings(const char* name) {
-  const auto dir = std::filesystem::temp_directory_path() / "chessbox-tests";
+  const auto dir = std::filesystem::temp_directory_path() / "endspielzero-tests";
   std::filesystem::create_directories(dir);
   const auto path = dir / name;
   std::filesystem::remove(path);

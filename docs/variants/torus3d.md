@@ -9,4 +9,4 @@ The armies are separated along the level axis rather than the rank axis: with ev
 axis glued, a 4-cell axis puts opposite ends only two steps apart, and facing each
 other across the ranks starts the game with the two kings attacking one another.
 
-**Rules:** ChessBox's own. Perft: 34 and 1028.
+**Rules:** EndspielZero's own. Perft: 34 and 1028.

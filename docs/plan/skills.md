@@ -1,6 +1,6 @@
 # Project Skills Plan
 
-Repetitive procedures in ChessBox live in the repo as project-local skills
+Repetitive procedures in EndspielZero live in the repo as project-local skills
 (`.claude/skills/<name>/SKILL.md`), not in anyone's head. Rationale: this
 codebase is deliberately uniform — adding the 20th piece, the 5th geometry, or
 the 12th effect primitive is the *same* sequence of edits every time, and that

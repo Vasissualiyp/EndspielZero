@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 {
-  description = "ChessBox - a generalizable FOSS sandbox for chess-like variants";
+  description = "EndspielZero - a generalizable FOSS sandbox for chess-like variants";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -76,7 +76,7 @@
             CB_FONT_MONO = "${pkgs.jetbrains-mono}/share/fonts/truetype";
             shellHook = ''
               export CCACHE_DIR="$PWD/.cache/ccache"
-              echo "ChessBox dev shell. See AGENTS.md. Presets: dev asan tsan release coverage bench"
+              echo "EndspielZero dev shell. See AGENTS.md. Presets: dev asan tsan release coverage bench"
             '';
           };
         in {
@@ -86,7 +86,7 @@
 
       packages = forAll (pkgs: {
         default = pkgs.stdenv.mkDerivation {
-          pname = "chessbox";
+          pname = "endspielzero";
           version = "0.0.0";
           src = self;
           nativeBuildInputs = with pkgs; [ cmake ninja ];

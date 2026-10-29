@@ -1,4 +1,4 @@
-# ChessBox game v1
+# EndspielZero game v1
 variant torus
 variant_id 0
 start 8/8/8/rnbqkbnr/pppppppp/8/PPPPPPPP/RNBQKBNR w - - 0 1

@@ -1,4 +1,4 @@
-# AGENTS.md — ChessBox
+# AGENTS.md — EndspielZero
 
 Read this first. It is the map. Design rationale is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the plan is in
@@ -123,43 +123,43 @@ nix flake check                  # THE gate: both compilers, sanitizers, coverag
 tools/package.sh                 # a self-contained release prefix + a headless smoke test (M16.2)
 tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID + credentials)
 
-./build/dev/src/cli/chessbox                          # interactive
-./build/dev/src/cli/chessbox "load torus" board moves  # batch; nonzero exit on error
-./build/release/bench/chessbox_bench                   # release only
+./build/dev/src/cli/endspielzero                          # interactive
+./build/dev/src/cli/endspielzero "load torus" board moves  # batch; nonzero exit on error
+./build/release/bench/endspielzero_bench                   # release only
 
 # The game. Needs the gfx shell; run from the repo root so variants/ resolves.
-./build/dev/src/gui/chessbox_gui                       # standard chess
-./build/dev/src/gui/chessbox_gui klein                 # any variant in variants/
-./build/dev/src/gui/chessbox_gui cube5 --shot out.ppm --script "click c1"
-./build/dev/src/gui/chessbox_gui --shot out.ppm --screen settings   # any screen
-./build/dev/src/gui/chessbox_gui --shot o.ppm --screen menu --t 3.0   # the main-menu attract
+./build/dev/src/gui/endspielzero_gui                       # standard chess
+./build/dev/src/gui/endspielzero_gui klein                 # any variant in variants/
+./build/dev/src/gui/endspielzero_gui cube5 --shot out.ppm --script "click c1"
+./build/dev/src/gui/endspielzero_gui --shot out.ppm --screen settings   # any screen
+./build/dev/src/gui/endspielzero_gui --shot o.ppm --screen menu --t 3.0   # the main-menu attract
                                  # sequence (M13.9), 3s into its loop
-./build/dev/src/gui/chessbox_gui --trailer-clip out/ --user-settings   # the whole trailer to
+./build/dev/src/gui/endspielzero_gui --trailer-clip out/ --user-settings   # the whole trailer to
                                  # out/trailer.mp4, one lap, fixed step, no interface; add
                                  # --trailer-frames for PPMs (diff them to find discontinuities)
-./build/dev/src/gui/chessbox_gui --shot o.ppm --screen menu --t 14 --trailer-edit
+./build/dev/src/gui/endspielzero_gui --shot o.ppm --screen menu --t 14 --trailer-edit
                                  # the trailer in its camera-edit mode (PLY/BEAT, REC KEY, shape buttons)
-./build/dev/src/gui/chessbox_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture
-./build/dev/src/gui/chessbox_gui torus --clip frames/ --screen newgame       # a frame sequence
+./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --screen newgame --t 0.6  # an overture
+./build/dev/src/gui/endspielzero_gui torus --clip frames/ --screen newgame       # a frame sequence
                                  # (--frames N --t0 a --t1 b; mux with ffmpeg externally)
-./build/dev/src/gui/chessbox_gui standard --script $'click e2\nclick e4' \
+./build/dev/src/gui/endspielzero_gui standard --script $'click e2\nclick e4' \
                                  --follow route --move-t 0.5 --cinema --shot m.ppm
                                  # a gameplay shot: the move camera, no interface
-./build/dev/src/gui/chessbox_gui torus --geometry --cinema --follow route \
+./build/dev/src/gui/endspielzero_gui torus --geometry --cinema --follow route \
                                  --shape-follow chase --script $'click a1\nclick a5' \
                                  --clip frames/            # shape follow: chase or turntable
-./build/dev/src/gui/chessbox_gui --play game.cbgame --geometry --cinema --follow route \
+./build/dev/src/gui/endspielzero_gui --play game.cbgame --geometry --cinema --follow route \
                                  --shape-follow chase --clip frames/   # M12.6: play a saved game
                                  # --dwell S, --fps N, --play-at S, --width W --height H
-./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen body   # the designer tabs
-./build/dev/src/gui/chessbox_gui standard --shot o.ppm --screen designer --dims 4
-./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry        # the board as its shape
-./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
-./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --slide 2.5  # ...slid round it
-./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --ghost 0.4  # ...translucent, you see through it
-./build/dev/src/gui/chessbox_gui torus --shot o.ppm --geometry --formed 0.5  # ...half-way formed
-./build/dev/src/gui/chessbox_gui klein --shot o.ppm --geometry --piece-cylinders  # icon-faced pucks
-./build/dev/src/gui/chessbox_gui torus --shot o.ppm --flat             # the 2D token view
+./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen body   # the designer tabs
+./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen designer --dims 4
+./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry        # the board as its shape
+./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
+./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry --slide 2.5  # ...slid round it
+./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry --ghost 0.4  # ...translucent, you see through it
+./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry --formed 0.5  # ...half-way formed
+./build/dev/src/gui/endspielzero_gui klein --shot o.ppm --geometry --piece-cylinders  # icon-faced pucks
+./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --flat             # the 2D token view
 ```
 
 **A build directory remembers which shell configured it.** One configured under
@@ -208,7 +208,7 @@ inner loop.
 3. **Never "update" a golden to make a build pass.** Investigate.
 4. **The naive oracle in `tests/oracle/` is sacred.** Every optimisation is proven
    equal to it by differential test. See ADR-0009.
-5. **No floats in `chessbox_base` or `chessbox_core`.** Determinism. Enforced by a test.
+5. **No floats in `endspielzero_base` or `endspielzero_core`.** Determinism. Enforced by a test.
 6. **No allocation in movegen.** Enforced by the allocation tripwire.
 7. **Architectural decisions get an ADR.** Immutable once merged; supersede, never edit.
 8. **Update this file in the same commit** as anything that changes navigation or commands.

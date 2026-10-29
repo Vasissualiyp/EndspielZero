@@ -137,7 +137,7 @@ class OverturePlayer {
 
   /// Switch outright, with no unwind.
   ///
-  /// For `chessbox_gui --shot` only. A screenshot is not a player moving through the
+  /// For `endspielzero_gui --shot` only. A screenshot is not a player moving through the
   /// library, so the rule that a shape must unwind first does not apply to it - and
   /// making a capture sit through an unwind it will never draw would only make the
   /// render tests slower.
@@ -145,7 +145,7 @@ class OverturePlayer {
 
   /// Put the cycle at an exact point and hold it there.
   ///
-  /// For `chessbox_gui --shot`. The capture path feeds a fixed timestep on purpose so
+  /// For `endspielzero_gui --shot`. The capture path feeds a fixed timestep on purpose so
   /// that a screenshot is the same picture every time it is taken - which means a
   /// capture has to be able to *state* its `t`, and have it stay stated: the interface
   /// hands that same synthetic timestep to the overture as its dt, so pinning without

@@ -15,4 +15,4 @@ with the files glued, "between the king and the rook" is ambiguous.
 adjacent, so the standard array puts the two back rows in contact and White begins in
 an inescapable check. The armies are placed four ranks apart instead.
 
-**Rules:** ChessBox's own. Perft: 54 and 2535.
+**Rules:** EndspielZero's own. Perft: 54 and 2535.

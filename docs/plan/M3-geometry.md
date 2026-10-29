@@ -140,7 +140,7 @@ castling and en passant on exotic surfaces. What exists instead:
   **Done.**
 - Pawn direction across an orientation-reversing seam has **no policy**: the
   non-orientable variants field no oriented pieces at all, and a test asserts that.
-  This is honest rather than complete - it means ChessBox cannot yet express "pawns on
+  This is honest rather than complete - it means EndspielZero cannot yet express "pawns on
   a Klein bottle", and the options are still written up in §3.4 above for whoever
   needs them.
 

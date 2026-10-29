@@ -1,6 +1,6 @@
 ---
 name: cb-new-piece
-description: Add a piece type to a ChessBox variant by declaring its vector-move atoms. Use when asked to add a piece, a custom mover, or to express how something moves.
+description: Add a piece type to a EndspielZero variant by declaring its vector-move atoms. Use when asked to add a piece, a custom mover, or to express how something moves.
 ---
 
 # Add a piece
@@ -49,7 +49,7 @@ Two consequences worth knowing before you declare anything:
 ## Verify
 
 ```bash
-./build/dev/src/cli/chessbox "load <variant>" info
+./build/dev/src/cli/endspielzero "load <variant>" info
 ```
 
 `info` prints every piece's atoms as the engine canonicalised them - which is how you

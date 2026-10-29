@@ -54,7 +54,7 @@ int main() {
   }
   const MoveGen gen(*standard);
 
-  std::printf("ChessBox benchmarks\n");
+  std::printf("EndspielZero benchmarks\n");
   std::printf("%-34s %12s       %10s  %12s\n", "benchmark", "work", "best", "rate");
 
   {

@@ -52,7 +52,7 @@ image with the swapchain's usages, both frame slots, validation-clean; all `rend
 
 **Needs a run on a real display before it is trusted.** `vkAcquireNextImageKHR` and
 `vkQueuePresentKHR` need a surface, so the acquire/present sequence is the one part not
-covered by a test. Run `./build/dev/src/gui/chessbox_gui standard` and check: the board
+covered by a test. Run `./build/dev/src/gui/endspielzero_gui standard` and check: the board
 draws, the interface lays out, resizing works, pause (the defocus pass, now into the
 swapchain image) looks right, and the validation layers stay silent.
 
@@ -191,7 +191,7 @@ The derived path only triggers for a variant whose name is in no C++ table. To s
 1. Write `variants/_demo.toml` (any name, e.g. a 2-D torus or a 4×4×4 box). A worked example
    is in `tests/render/test_overture_scene.cpp` ("a data-only variant gets a derived
    overture") and the two structures are in `variants/standard.toml`.
-2. `./build/dev/src/gui/chessbox_gui _demo --shot out.ppm --screen newgame --t 1.0`. The
+2. `./build/dev/src/gui/endspielzero_gui _demo --shot out.ppm --screen newgame --t 1.0`. The
    capture forces the library picker to the named variant, so the derived scene is what is
    drawn.
 3. **Delete the file before committing** - `tests/golden/test_shipped_variants.cpp` scans

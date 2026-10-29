@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-cb_layer(chessbox_cli LEVEL 110 DEPS chessbox_io chessbox_app)
+cb_layer(endspielzero_cli LEVEL 110 DEPS endspielzero_io endspielzero_app)
 
-add_executable(chessbox main.cpp)
-target_link_libraries(chessbox PRIVATE chessbox_io chessbox_view chessbox_app cb_flags)
+add_executable(endspielzero main.cpp)
+target_link_libraries(endspielzero PRIVATE endspielzero_io endspielzero_view endspielzero_app cb_flags)
 
-install(TARGETS chessbox RUNTIME DESTINATION bin)
+install(TARGETS endspielzero RUNTIME DESTINATION bin)

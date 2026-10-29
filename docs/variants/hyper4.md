@@ -12,5 +12,5 @@ from the same one-line atom declarations that give 8 and 4 in two dimensions.
 a black pawn covers them *through the level and aeon axes*, which is the sort of thing
 only a genuine 4-D check test finds. 39 in total. Perft: 39 and 1380.
 
-**Rules:** ChessBox's own, fully stated in the variant file. The board is deliberately
+**Rules:** EndspielZero's own, fully stated in the variant file. The board is deliberately
 small: 256 cells keeps perft depths meaningful.

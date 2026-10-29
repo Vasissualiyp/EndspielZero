@@ -15,7 +15,7 @@ reasoning that a cube diagonal belonged to the unicorn. The project owner's rule
 the queen goes in a straight line in every dimension, so she now includes the triagonals;
 the unicorn is the piece that has *only* them.
 
-**The pawn rules and promotion are ChessBox's own choice, not a reconstruction.** A
+**The pawn rules and promotion are EndspielZero's own choice, not a reconstruction.** A
 pawn moves one step along the rank axis and captures on the forward diagonals - which
 in three dimensions means four capture directions, two inside the level and two
 between levels, from the same single `[1,1]` atom. A faithful Raumschach needs its

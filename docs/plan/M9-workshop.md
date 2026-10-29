@@ -15,7 +15,7 @@ design (ADR-0005) is what makes this tractable — there is no code to sandbox.
 
 ## M9.2 Validator (the security boundary) **[INVARIANT]**
 
-A single `chessbox validate <package>` used by the publish flow, the client on
+A single `endspielzero validate <package>` used by the publish flow, the client on
 install, and CI. Checks: schema validity, typed rule signatures, resource budgets
 (cells, directions, timelines, rule step budget, memory estimate), asset
 whitelist, path-traversal safety, and a smoke play-out of N random games to prove

@@ -4,6 +4,6 @@
 # see a move generator: anything needing one (such as "does this piece have a capture")
 # is asked through a callback the orchestrating layer supplies, which keeps the
 # dependency pointing down.
-cb_layer(chessbox_rules LEVEL 45
+cb_layer(endspielzero_rules LEVEL 45
   SOURCES expr.cpp rule.cpp vm.cpp validate.cpp
-  DEPS chessbox_position)
+  DEPS endspielzero_position)

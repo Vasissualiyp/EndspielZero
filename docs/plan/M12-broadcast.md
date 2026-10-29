@@ -668,7 +668,7 @@ touch the board and two ways out at any time.
   watching and prints "move N of M — Esc leaves the game". Esc on a watched board calls
   `stopWatching` instead of pause. The HUD is the ordinary one; cinema stays `--cinema`'s
   job, as the spec required.
-- **Content.** Two real games live in `games/`, installed to `share/chessbox/games`:
+- **Content.** Two real games live in `games/`, installed to `share/endspielzero/games`:
   `opera.cbgame` — Morphy's Opera Game (Paris 1858), 17 moves ending in the classic
   back-rank mate, chosen for the flat-board showcase because it is short, legible and
   decisive — and `torus-wrap.cbgame` — a 14-ply torus melee whose every move crosses a

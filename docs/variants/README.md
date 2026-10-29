@@ -37,7 +37,7 @@ level; an unrecognised word is a load error rather than a silent fall back.
 
 ## What every variant page records
 
-The rules, where they came from, and - importantly - **which rules are ChessBox's own
+The rules, where they came from, and - importantly - **which rules are EndspielZero's own
 choice rather than an established definition**. Node counts in these pages and in the
 goldens are this engine's own output except for standard chess; they are validated
 against the naive oracle, and their job is to notice change rather than to prove

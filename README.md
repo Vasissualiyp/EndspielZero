@@ -1,4 +1,4 @@
-# ChessBox
+# EndspielZero
 
 A FOSS sandbox for chess-like games of essentially arbitrary shape.
 

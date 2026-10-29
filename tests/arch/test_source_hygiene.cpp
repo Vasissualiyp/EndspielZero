@@ -172,7 +172,7 @@ TEST_CASE("the declared layer graph is acyclic and bottom-up", "[arch]") {
   std::set<int> levels;
   int count = 0;
   while (in >> name >> level) {
-    REQUIRE(name.starts_with("chessbox_"));
+    REQUIRE(name.starts_with("endspielzero_"));
     REQUIRE(levels.insert(level).second);  // one layer per level
     ++count;
   }

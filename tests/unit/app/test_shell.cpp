@@ -36,7 +36,7 @@ std::unique_ptr<Shell> makeShell(const std::filesystem::path& settings = {}) {
 }
 
 std::filesystem::path tempSettings(const char* name) {
-  const auto dir = std::filesystem::temp_directory_path() / "chessbox-tests";
+  const auto dir = std::filesystem::temp_directory_path() / "endspielzero-tests";
   std::filesystem::create_directories(dir);
   const auto path = dir / name;
   std::filesystem::remove(path);
@@ -447,7 +447,7 @@ TEST_CASE("the editor opens the current variant and saves it back", "[unit][app]
     ss << in.rdbuf();
     return ss.str();
   });
-  const auto out = std::filesystem::temp_directory_path() / "chessbox-shell-editor.toml";
+  const auto out = std::filesystem::temp_directory_path() / "endspielzero-shell-editor.toml";
   shell->setVariantPathResolver([&](const std::string&) { return out; });
 
   // Opening the editor screen with nothing loaded edits the current variant (standard,

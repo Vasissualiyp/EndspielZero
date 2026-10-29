@@ -1,6 +1,6 @@
 ---
 name: cb-gate
-description: Run the ChessBox milestone exit gate (both compilers, sanitizers, coverage, goldens, bench) and interpret failures. Use before finishing a milestone, opening a PR, or when asked whether the build is green.
+description: Run the EndspielZero milestone exit gate (both compilers, sanitizers, coverage, goldens, bench) and interpret failures. Use before finishing a milestone, opening a PR, or when asked whether the build is green.
 ---
 
 # The gate

@@ -12,5 +12,5 @@ defined here: crossing the seam would reverse its forward direction, and any ans
 that is a design choice rather than a rule. Rather than bake one in silently, this
 variant has no oriented pieces at all.
 
-**Rules:** ChessBox's own. Perft: 69 and 4003 - higher than standard chess, because
+**Rules:** EndspielZero's own. Perft: 69 and 4003 - higher than standard chess, because
 the twist connects White's first rank directly to Black's eighth.

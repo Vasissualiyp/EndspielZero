@@ -10,4 +10,4 @@ cells and the surface remains orientable, so pawns and promotion are kept. The f
 transform does reverse handedness, which is why the engine tracks "the surface is
 orientable" and "a face reverses handedness" as two separate properties.
 
-**Rules:** ChessBox's own. Perft: 20 and 396.
+**Rules:** EndspielZero's own. Perft: 20 and 396.

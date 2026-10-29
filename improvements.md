@@ -147,11 +147,11 @@ item 8.
 
 ### 10. Window is anonymous and forgets itself
 
-`src/gui/main.cpp:295` opens `"ChessBox"` at a fixed 1440×900 forever. The title
+`src/gui/main.cpp:295` opens `"EndspielZero"` at a fixed 1440×900 forever. The title
 never names the variant or whose move it is; the size and position are not
 persisted; there is no window icon.
 
-**Fix:** `SDL_SetWindowTitle` on every variant change (`ChessBox — klein`) is
+**Fix:** `SDL_SetWindowTitle` on every variant change (`EndspielZero — klein`) is
 two lines. Persisting `windowWidth` / `windowHeight` / `maximized` in `Settings`
 is the same shape as `fullscreen`, which is already there and already honoured
 at `main.cpp` startup.

@@ -145,7 +145,7 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   const PaneMove move = paneMove();
   beginPane("##mainmenu", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
             !ghosting_);
-  screenTitle("CHESSBOX", t, display, scale_, 2.4f);
+  screenTitle("ENDSPIELZERO", t, display, scale_, 2.4f);
   ImGui::Dummy(ImVec2(0, px(14)));
 
   const float width = ImGui::GetContentRegionAvail().x;

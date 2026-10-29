@@ -964,7 +964,7 @@ silent, never fatal, when no audio device is present.
   `app`/`render` - the public surface is the `Sound` enum, the pure synthesis functions and a
   `Sink`/`play` pair. A build without SDL3 (the `nix flake check` package) compiles the layer
   with `CB_HAVE_SDL_AUDIO` undefined and `Mixer::create` then returns null: silence, not a
-  build error. Verified by compiling `chessbox_audio`/`chessbox_app` in a no-SDL tree.
+  build error. Verified by compiling `endspielzero_audio`/`endspielzero_app` in a no-SDL tree.
 - **The sounds.** Four buffers, 40-190 ms, generated once at startup and cached: `Click` (a
   soft 1.4 kHz blip), `Move` (a 300 Hz body with a short noise knock), `Capture` (170 Hz plus
   more noise - lower and sharper than a landing), `Check` (two rising notes, 700 then
@@ -990,7 +990,7 @@ silent, never fatal, when no audio device is present.
   never touch SDL audio. When there *is* a device it is opened, but `create` logs and returns
   null on any failure (no device, no stream, no resume) and `play` with no sink is a no-op -
   the state every unit test runs in. A new `gui-capture-no-audio` CTest runs a capture with
-  `SDL_AUDIODRIVER=chessbox-does-not-exist` as the regression guard.
+  `SDL_AUDIODRIVER=endspielzero-does-not-exist` as the regression guard.
 - **Tests.** Five `[unit][audio]` cases: the four buffers are correctly sized (< 200 ms),
   non-silent and below full scale, deterministic and pairwise distinct; `effectsGain` and
   `applyGain` make either slider at zero literal silence while full gain is identity and half
@@ -1239,7 +1239,7 @@ M18.6's shipped pacing.
   speed below the clamp, the way back paces identically, and at `1.0` it equals the old inline
   `min(1, formed + dt * 2)` math frame for frame (bit-identical default). `[unit][app]` adds
   `geometryFormSpeed` to the settings round-trip and to the clamp test (0 -> 0.25).
-- **Verification.** `build/dev/tests/chessbox_tests '[render]'` 111 cases / 4.82M assertions
+- **Verification.** `build/dev/tests/endspielzero_tests '[render]'` 111 cases / 4.82M assertions
   green; `'[app]'` 59 cases green; `tools/precommit.sh` green (format, build, arch, unit,
   property). The settings screen was captured at 1000x2400 (`build/m18_form_check/`) and the
   new slider and caption render validation-clean next to `Morph speed`.

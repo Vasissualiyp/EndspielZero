@@ -95,7 +95,7 @@ const CameraKeyframe* CameraTrack::find(const CameraCue& cue) const noexcept {
 
 std::string cameraTrackText(const CameraTrack& track) {
   std::ostringstream out;
-  out << "# ChessBox camera track v1\n";
+  out << "# EndspielZero camera track v1\n";
   for (const CameraKeyframe& kf : track.keyframes()) {
     out << "keyframe"
         << " variant=" << kf.cue.variant;

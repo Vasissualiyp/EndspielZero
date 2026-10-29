@@ -23,7 +23,7 @@ struct BoardKey {
   }
 };
 
-/// The multiverse's board bookkeeping, from the ChessBox 5D policy worked out with the
+/// The multiverse's board bookkeeping, from the EndspielZero 5D policy worked out with the
 /// project owner. It knows which boards exist, whose move each one is, where the present
 /// is, and what a move does to the multiverse. It holds no positions and generates no
 /// moves: the game layer copies board state according to the plan this returns.

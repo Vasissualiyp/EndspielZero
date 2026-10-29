@@ -1,6 +1,6 @@
 ---
 name: cb-adr
-description: Create the next numbered ChessBox ADR from the template. Use when a decision constrains future code - a data structure choice, a dependency, a rules policy, a performance trade-off.
+description: Create the next numbered EndspielZero ADR from the template. Use when a decision constrains future code - a data structure choice, a dependency, a rules policy, a performance trade-off.
 ---
 
 # Write an ADR

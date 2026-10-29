@@ -11,7 +11,7 @@ both play and, later, AI search. The data structures are unusual enough
 or entity model helps, and several would actively obstruct them.
 
 ## Decision
-Raw C++23. Engine core (`chessbox_base`, `chessbox_core`) depends on nothing but
+Raw C++23. Engine core (`endspielzero_base`, `endspielzero_core`) depends on nothing but
 the standard library. No game engine, no ECS framework, no scripting runtime in
 the core.
 

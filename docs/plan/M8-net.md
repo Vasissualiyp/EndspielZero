@@ -65,7 +65,7 @@ link, with server-side validation and full replay reproduction.
 
 Recorded 2026-09-29.
 
-The `chessbox_net` layer (L105) ships a versioned, length-prefixed protocol whose decoder
+The `endspielzero_net` layer (L105) ships a versioned, length-prefixed protocol whose decoder
 refuses a truncated frame, trailing bytes and an unknown tag rather than guessing; an
 in-process transport (`makeLoopback`); an authoritative `Server` that owns the `Game`,
 plays only intents that are among the engine's own legal moves, and answers with the

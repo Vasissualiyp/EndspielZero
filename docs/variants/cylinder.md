@@ -11,6 +11,6 @@ depends on "forward" or on "the last rank" carries over untouched: pawns, promot
 en passant and castling all work exactly as in standard chess. That makes this the
 cleanest demonstration that a topology change is a single data block.
 
-**Rules:** ChessBox's own reading of a common variant idea. Perft: 20 and 392 at
+**Rules:** EndspielZero's own reading of a common variant idea. Perft: 20 and 392 at
 depths 1 and 2 - note that the wrap makes some moves illegal that are legal in
 standard chess, so the depth-2 count is *lower* than 400.

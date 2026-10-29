@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Standard chess, expressed entirely in ChessBox's general primitives. Nothing in
+# Standard chess, expressed entirely in EndspielZero's general primitives. Nothing in
 # this file is special-cased by the engine: a rook is a repeated unit step, a
 # knight is the magnitudes {1,2} on any two distinct axes, castling is a
 # displacement template, and "forward" is a declared orientation axis.

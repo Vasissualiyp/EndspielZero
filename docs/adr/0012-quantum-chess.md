@@ -56,7 +56,7 @@ is cheaper than discovering it at the end. Everything else the spec lists in the
 sentence - explosive chess, regional variants, draughts-like capture rules - *is*
 covered by fields and rules, and ships.
 
-The honest summary for anyone reading the variant catalogue: ChessBox can express games
+The honest summary for anyone reading the variant catalogue: EndspielZero can express games
 whose state is a board. It cannot yet express games whose state is a distribution over
 boards.
 

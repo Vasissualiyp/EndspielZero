@@ -738,7 +738,7 @@ topology changes.**
   must never drop one" cannot hold). Making `klein` declare pawns would change a catalogue
   variant's identity and its documented "no forward direction" design.
 - **Topology changes reject the running position outright.** Setting the ordinary standard
-  army on `torus` gives **0 legal moves** (`chessbox "load torus" "fen
+  army on `torus` gives **0 legal moves** (`endspielzero "load torus" "fen
   rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1" moves` -> 0; `torus`'s own,
   designed opening has 54). The pawnless army on `klein` also has 0, and `klein` cannot
   even parse a pawn FEN. A torus with the black queen removed still has only 1 legal move.
@@ -1189,7 +1189,7 @@ obvious way to write it) corrupts the embedded position the instant the move hap
 caught by a crash, not a logic check. Fixed by building the new session first and
 embedding against its own stable, final address; `Shell::startAttractStep` and
 `test_attract.cpp`'s own continuity check both follow the same order for the same reason.
-`chessbox_cli`'s layer now depends on `chessbox_app` (moved after it in `src/CMakeLists.txt`,
+`endspielzero_cli`'s layer now depends on `endspielzero_app` (moved after it in `src/CMakeLists.txt`,
 layers are added bottom-up) to reach `embedOnto` at all.
 
 **Where continuity landed.** Cylinder and torus carry one real game between themselves -
@@ -1252,7 +1252,7 @@ fast to ease into it is left entirely to whoever plays the game and presses reco
 is no in-game keyframe list or editor yet - the saved file is plain text and is meant to
 be hand-edited too, the same spirit `GameFile` already has.
 
-**Data model** (`src/app/camera_track.hpp`/`.cpp`, new, added to `chessbox_app`).
+**Data model** (`src/app/camera_track.hpp`/`.cpp`, new, added to `endspielzero_app`).
 `CameraCue` is where a keyframe is pinned: a variant name and a ply count into it - the
 same two numbers `Shell` already tracks for any running game, attract beat or not.
 `CameraKeyframe` is a saved `view::OrbitCamera` plus the shape pose the M13.9 attract work

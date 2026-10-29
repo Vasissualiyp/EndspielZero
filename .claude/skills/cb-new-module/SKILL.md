@@ -1,6 +1,6 @@
 ---
 name: cb-new-module
-description: Scaffold a new module (header/source pair) inside a ChessBox architectural layer, with its CMake wiring, test file and docs row. Use when adding a new file to src/, or a whole new layer.
+description: Scaffold a new module (header/source pair) inside a EndspielZero architectural layer, with its CMake wiring, test file and docs row. Use when adding a new file to src/, or a whole new layer.
 ---
 
 # Add a module to a layer
@@ -38,9 +38,9 @@ For a whole new layer:
 
 ```cmake
 # src/<layer>/CMakeLists.txt
-cb_layer(chessbox_<layer> LEVEL <n>
+cb_layer(endspielzero_<layer> LEVEL <n>
   SOURCES <files>.cpp
-  DEPS chessbox_<lower> ...)
+  DEPS endspielzero_<lower> ...)
 ```
 
 Levels are spaced out and **must be unique** - an arch test asserts it, because two

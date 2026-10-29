@@ -7,7 +7,7 @@
 # entirely. A knight here has 48 destinations rather than 8, and a rook has eight
 # directions rather than four, all from the same one-line atom declarations.
 #
-# Rules are ChessBox's own and fully stated here. The board is deliberately small:
+# Rules are EndspielZero's own and fully stated here. The board is deliberately small:
 # 256 cells keeps perft depths meaningful.
 
 name = "hyper4"

@@ -30,7 +30,7 @@ GameFile toGameFile(const VariantSpec& variant, const Game& game) {
 
 std::string gameFileText(const GameFile& file) {
   std::ostringstream out;
-  out << "# ChessBox game v1\n";
+  out << "# EndspielZero game v1\n";
   out << "variant " << file.variant << '\n';
   out << "variant_id " << file.variantId << '\n';
   out << "start " << file.startFen << '\n';

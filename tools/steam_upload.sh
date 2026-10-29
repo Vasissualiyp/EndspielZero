@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-prefix="${1:-dist/chessbox}"
+prefix="${1:-dist/endspielzero}"
 : "${STEAM_APPID:?set STEAM_APPID (from Steamworks)}"
 : "${STEAM_DEPOTID:?set STEAM_DEPOTID (from Steamworks)}"
 : "${STEAM_USER:?set STEAM_USER (a Steamworks account with build rights)}"
@@ -24,7 +24,7 @@ setlive="${STEAM_SETLIVE:-}"   # "" the default branch, "beta", ...
 preview="${STEAM_PREVIEW:-0}"  # 1 to validate without uploading
 desc="${STEAM_DESC:-}"
 
-test -f "$prefix/bin/chessbox_gui" || {
+test -f "$prefix/bin/endspielzero_gui" || {
   echo "steam_upload: no package at '$prefix'; run tools/package.sh first" >&2
   exit 1
 }

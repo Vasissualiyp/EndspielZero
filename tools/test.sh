@@ -46,8 +46,8 @@ for tag in "$@"; do
   [[ -n "$filter" ]] && filter+=","
   filter+="[$tag]"
 done
-if [[ ! -x build/dev/tests/chessbox_tests ]]; then
-  echo "test.sh: build/dev/tests/chessbox_tests not found; build first (cmake --preset dev && cmake --build build/dev)" >&2
+if [[ ! -x build/dev/tests/endspielzero_tests ]]; then
+  echo "test.sh: build/dev/tests/endspielzero_tests not found; build first (cmake --preset dev && cmake --build build/dev)" >&2
   exit 2
 fi
-exec build/dev/tests/chessbox_tests "$filter"
+exec build/dev/tests/endspielzero_tests "$filter"

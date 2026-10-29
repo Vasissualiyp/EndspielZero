@@ -21,7 +21,7 @@ enum class BranchOwner : std::uint8_t { Original, White, Black };
 ///
 /// None of these are universal. Which way a player's timelines grow, how far a new
 /// timeline advances relative to the board it branches from, and whether a forward step
-/// stays on the mover's own future are all ChessBox choices a variant may make
+/// stays on the mover's own future are all EndspielZero choices a variant may make
 /// differently - so they are parameters, not constants (ADR-0007 and the M6 plan's
 /// "configuration, not code" rule).
 struct TemporalPolicy {

@@ -146,7 +146,7 @@ assets and M14 for the demo scope; it is independent of M9 and must not absorb i
 ### As built (2026-09-30)
 
 M16.2's pipeline is in: `tools/package.sh` installs a self-contained prefix
-(`bin/` + `share/chessbox/{variants,fonts}`) with `cmake --install` and smoke-tests it by
+(`bin/` + `share/endspielzero/{variants,fonts}`) with `cmake --install` and smoke-tests it by
 running the packaged game headlessly from the package root - the CI shape of "a downloaded
 build launches and renders a frame". `tools/steam_upload.sh` fills the SteamPipe scripts in
 `packaging/steam/` from `STEAM_APPID`/`STEAM_DEPOTID`/`STEAM_USER` and runs `steamcmd` (or

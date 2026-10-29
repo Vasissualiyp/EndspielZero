@@ -91,7 +91,7 @@ TEST_CASE("the editor saves to a file and reopens it", "[unit][app]") {
   CHECK(editor->dirty());
 
   const auto path =
-      std::filesystem::temp_directory_path() / "chessbox-editor-roundtrip.toml";
+      std::filesystem::temp_directory_path() / "endspielzero-editor-roundtrip.toml";
   REQUIRE(editor->saveFile(path).has_value());
   CHECK_FALSE(editor->dirty());
 

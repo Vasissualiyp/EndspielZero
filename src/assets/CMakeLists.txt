@@ -4,6 +4,6 @@
 # Integer-only and dependency-free on purpose - a model is saved, shared and eventually
 # signed, so two machines have to agree on it byte for byte. It sits below the editor and
 # below the renderer because both need it, and above nothing but base.
-cb_layer(chessbox_assets LEVEL 25
+cb_layer(endspielzero_assets LEVEL 25
   SOURCES piece_model.cpp
-  DEPS chessbox_base)
+  DEPS endspielzero_base)

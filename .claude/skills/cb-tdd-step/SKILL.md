@@ -1,9 +1,9 @@
 ---
 name: cb-tdd-step
-description: Add one behaviour to ChessBox test-first. Use for any engine change - new function, bug fix, new rule - to get the red/green/gate/commit loop and the right preset for each stage.
+description: Add one behaviour to EndspielZero test-first. Use for any engine change - new function, bug fix, new rule - to get the red/green/gate/commit loop and the right preset for each stage.
 ---
 
-# One TDD step in ChessBox
+# One TDD step in EndspielZero
 
 The loop is not optional here (AGENTS.md rule 1-2): no production line before a
 failing test, and a red suite blocks the next step.
@@ -33,7 +33,7 @@ Tag every test case with both its label and its area, e.g.
 Run it and **watch it fail for the reason you expect**:
 
 ```bash
-cmake --build build/dev && ./build/dev/tests/chessbox_tests "[unit][geometry]"
+cmake --build build/dev && ./build/dev/tests/endspielzero_tests "[unit][geometry]"
 ```
 
 A test that passes before the implementation exists is testing nothing.
@@ -55,7 +55,7 @@ tools/precommit.sh          # format, tidy, full dev suite
 If the change touches a hot path (geometry step, movegen, position mutation), also:
 
 ```bash
-cmake --build --preset release && ./build/release/bench/chessbox_bench
+cmake --build --preset release && ./build/release/bench/endspielzero_bench
 ```
 
 and compare against `bench/baselines/`. Use the `cb-bench-baseline` skill to record.

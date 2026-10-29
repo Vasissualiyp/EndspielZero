@@ -46,7 +46,7 @@ namespace {
 /// Where the variants live, whether running from the build tree or an install.
 std::filesystem::path variantDir() {
   for (const char* base : {"variants", "../variants", "../../variants",
-                           "share/chessbox/variants", "/usr/share/chessbox/variants"}) {
+                           "share/endspielzero/variants", "/usr/share/endspielzero/variants"}) {
     if (std::filesystem::is_directory(base)) return base;
   }
   return "variants";
@@ -67,8 +67,8 @@ std::vector<std::string> variantLibrary() {
 /// Where the bundled showcase games live (M12.8), resolved the way the variants are:
 /// beside the binary in an install, or in the working tree during development.
 std::filesystem::path gameDir() {
-  for (const char* base : {"games", "../games", "../../games", "share/chessbox/games",
-                           "/usr/share/chessbox/games"}) {
+  for (const char* base : {"games", "../games", "../../games", "share/endspielzero/games",
+                           "/usr/share/endspielzero/games"}) {
     if (std::filesystem::is_directory(base)) return base;
   }
   return "games";
@@ -511,7 +511,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
   auto shell = makeShell(gUseUserSettings ? app::Settings::defaultPath()
                                           : std::filesystem::temp_directory_path() /
-                                                "chessbox-capture-defaults.conf");
+                                                "endspielzero-capture-defaults.conf");
   // M12.6: a game file names its own variant and start position, and its moves are then
   // played one at a time below rather than through the bulk `applyGameFile`.
   GameFile gameFile;
@@ -664,7 +664,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
     return 1;
   }
-  SDL_Window* window = SDL_CreateWindow("ChessBox", width, height, SDL_WINDOW_HIDDEN);
+  SDL_Window* window = SDL_CreateWindow("EndspielZero", width, height, SDL_WINDOW_HIDDEN);
   if (window == nullptr) {
     std::fprintf(stderr, "cannot create a hidden window: %s\n", SDL_GetError());
     return 1;
@@ -1156,7 +1156,7 @@ int main(int argc, char** argv) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
       std::printf(
-          "chessbox_gui [variant] [--shot FILE [--screen NAME]] [--script TEXT]\n\n"
+          "endspielzero_gui [variant] [--shot FILE [--screen NAME]] [--script TEXT]\n\n"
           "  left click    select a piece, then a lit cell to move it\n"
           "  right drag    orbit     wheel  zoom\n"
           "  g             the board as its own shape; middle drag slides it round\n"
@@ -1310,7 +1310,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  auto window = render::Window::create("ChessBox", static_cast<std::uint32_t>(width),
+  auto window = render::Window::create("EndspielZero", static_cast<std::uint32_t>(width),
                                        static_cast<std::uint32_t>(height));
   if (!window.has_value()) {
     std::fprintf(stderr, "cannot open a window: %s\n", window.error().format().c_str());
@@ -1660,7 +1660,7 @@ int main(int argc, char** argv) {
 
     // The title names the game: the variant, and whose move it is.
     {
-      std::string title = "ChessBox";
+      std::string title = "EndspielZero";
       if (!shell->currentVariant().empty()) title += " - " + shell->currentVariant();
       if (shell->hasGame()) {
         title += shell->session()->game().position().sideToMove() == Color::White
@@ -1861,7 +1861,7 @@ int main(int argc, char** argv) {
       const std::string dirText = renderDir.string();
       const pid_t pid = fork();
       if (pid == 0) {
-        execl("/proc/self/exe", "chessbox_gui", "--trailer-clip", dirText.c_str(),
+        execl("/proc/self/exe", "endspielzero_gui", "--trailer-clip", dirText.c_str(),
               "--user-settings", "--fps", "30", "--width", "1920", "--height", "1080",
               static_cast<char*>(nullptr));
         _exit(127);

@@ -8,7 +8,7 @@
 # do not inherit the unicorn's cube diagonals. A line mover is the same piece in every
 # dimension (see straightLineAtoms in src/pieces/atom.hpp); the historical Raumschach
 # queen does combine rook, bishop and unicorn, and this variant deliberately does not.
-# The *pawn* rules and promotion conditions are ChessBox's own choice too, plainly
+# The *pawn* rules and promotion conditions are EndspielZero's own choice too, plainly
 # stated rather than presented as a reconstruction - see docs/variants/cube5.md. A
 # faithful Raumschach needs its pawn rules taken from a primary source first.
 #

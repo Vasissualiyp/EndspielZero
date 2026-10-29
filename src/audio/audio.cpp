@@ -203,7 +203,7 @@ Mixer::~Mixer() {
 std::unique_ptr<Mixer> Mixer::create() {
 #ifdef CB_HAVE_SDL_AUDIO
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-    std::fprintf(stderr, "chessbox: audio unavailable (%s); continuing silent\n",
+    std::fprintf(stderr, "endspielzero: audio unavailable (%s); continuing silent\n",
                  SDL_GetError());
     return nullptr;
   }
@@ -215,13 +215,13 @@ std::unique_ptr<Mixer> Mixer::create() {
   SDL_AudioStream* stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
                                                       &spec, nullptr, nullptr);
   if (stream == nullptr) {
-    std::fprintf(stderr, "chessbox: no audio device (%s); continuing silent\n",
+    std::fprintf(stderr, "endspielzero: no audio device (%s); continuing silent\n",
                  SDL_GetError());
     return nullptr;
   }
   // `SDL_OpenAudioDeviceStream` opens paused.
   if (!SDL_ResumeAudioStreamDevice(stream)) {
-    std::fprintf(stderr, "chessbox: cannot start audio (%s); continuing silent\n",
+    std::fprintf(stderr, "endspielzero: cannot start audio (%s); continuing silent\n",
                  SDL_GetError());
     SDL_DestroyAudioStream(stream);
     return nullptr;

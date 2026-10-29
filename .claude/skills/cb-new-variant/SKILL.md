@@ -1,6 +1,6 @@
 ---
 name: cb-new-variant
-description: Add a new ChessBox variant as a data file - board, pieces, geometry, starting position, goldens and docs. Use when asked to add, define or port a chess variant, or to turn a description of a game into something playable.
+description: Add a new EndspielZero variant as a data file - board, pieces, geometry, starting position, goldens and docs. Use when asked to add, define or port a chess variant, or to turn a description of a game into something playable.
 ---
 
 # Add a variant
@@ -38,7 +38,7 @@ board, then let the engine print the canonical form:
 
 ```bash
 cmake --build build/dev
-./build/dev/src/cli/chessbox "load <name>" fen board info
+./build/dev/src/cli/endspielzero "load <name>" fen board info
 ```
 
 `fen` gives you the exact string to paste back, and `board` shows the slices so you can
@@ -47,7 +47,7 @@ see what you actually declared.
 ## 3. Sanity-check the opening position
 
 ```bash
-./build/dev/src/cli/chessbox "load <name>" board "moves" "perft 2"
+./build/dev/src/cli/endspielzero "load <name>" board "moves" "perft 2"
 ```
 
 **A glued board changes what a sensible starting position is.** On a torus rank 1 and

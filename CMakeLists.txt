@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.28)
-project(ChessBox VERSION 0.0.0 LANGUAGES CXX)
+project(EndspielZero VERSION 0.0.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
-include(ChessBoxLayer)
+include(EndspielZeroLayer)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,10 +54,10 @@ cb_write_layer_manifest(${CMAKE_BINARY_DIR}/layers.manifest)
 # alongside it. Without an install rule at all, `nix flake check` fails at the install
 # phase even though every test passed - which is exactly what happened.
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/variants/
-        DESTINATION share/chessbox/variants
+        DESTINATION share/endspielzero/variants
         FILES_MATCHING PATTERN "*.toml")
 # The bundled showcase games for the "Watch a game" action (M12.8) are content too: the
 # menu reads them at startup, so an install that left them behind would ship a dead row.
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/games/
-        DESTINATION share/chessbox/games
+        DESTINATION share/endspielzero/games
         FILES_MATCHING PATTERN "*.cbgame")

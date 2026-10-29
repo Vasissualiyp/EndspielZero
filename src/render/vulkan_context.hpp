@@ -29,7 +29,7 @@ struct ContextOptions {
   /// Prefer a real GPU, but fall back to whatever is present (llvmpipe, typically) so a
   /// machine with no GPU still exercises the entire path.
   bool preferDiscrete{true};
-  std::string applicationName{"ChessBox"};
+  std::string applicationName{"EndspielZero"};
   /// Extra instance extensions, which is how a window system asks for what it needs
   /// (SDL reports these). Empty for the headless path.
   std::vector<std::string> instanceExtensions;

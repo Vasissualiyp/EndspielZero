@@ -216,7 +216,7 @@ struct Settings {
   float volumeMusic{0.6f};
   float volumeEffects{0.9f};
 
-  /// Where settings live: /chessbox/settings.conf, or the platform's
+  /// Where settings live: /endspielzero/settings.conf, or the platform's
   /// equivalent.
   static std::filesystem::path defaultPath();
 

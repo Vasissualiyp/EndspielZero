@@ -1,4 +1,4 @@
-# ChessBox Roadmap
+# EndspielZero Roadmap
 
 High-level plan. Every milestone has its own detailed plan file in this
 directory. Read `docs/ARCHITECTURE.md` first.

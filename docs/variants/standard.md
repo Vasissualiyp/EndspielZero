@@ -2,7 +2,7 @@
 
 Definition: [`variants/standard.toml`](../../variants/standard.toml)
 
-The reference implementation target, defined entirely in ChessBox's general
+The reference implementation target, defined entirely in EndspielZero's general
 primitives: a rook is `[1]^inf` sliding, a knight is the magnitudes `{1,2}` on any two
 distinct axes, castling is a displacement template with cell lists, and "forward" is a
 declared orientation axis.

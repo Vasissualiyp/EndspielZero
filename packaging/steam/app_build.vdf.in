@@ -8,7 +8,7 @@
 "appbuild"
 {
   "appid"       "@APPID@"
-  "desc"        "ChessBox@DESC@"
+  "desc"        "EndspielZero@DESC@"
   "buildoutput" "@BUILDOUT@"
   "contentroot" "@CONTENT@"
   "setlive"     "@SETLIVE@"

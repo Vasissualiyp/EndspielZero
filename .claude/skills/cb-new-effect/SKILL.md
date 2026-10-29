@@ -1,6 +1,6 @@
 ---
 name: cb-new-effect
-description: Add a primitive to the ChessBox rule VM - a new effect opcode or expression - when no existing one can express a variant's mechanic. Use when a variant needs something the rule catalogue cannot say.
+description: Add a primitive to the EndspielZero rule VM - a new effect opcode or expression - when no existing one can express a variant's mechanic. Use when a variant needs something the rule catalogue cannot say.
 ---
 
 # Add a rule primitive

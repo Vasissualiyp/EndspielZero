@@ -60,18 +60,18 @@ if(SDL3_FOUND)
   endif()
 endif()
 
-cb_layer(chessbox_render LEVEL 100
+cb_layer(endspielzero_render LEVEL 100
   SOURCES ${CB_RENDER_SOURCES}
-  DEPS chessbox_view chessbox_app chessbox_assets chessbox_audio
+  DEPS endspielzero_view endspielzero_app endspielzero_assets endspielzero_audio
   SYSTEM_DEPS Vulkan::Vulkan)
-target_include_directories(chessbox_render PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_include_directories(endspielzero_render PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 if(SDL3_FOUND)
-  target_link_libraries(chessbox_render PUBLIC SDL3::SDL3)
-  target_compile_definitions(chessbox_render PUBLIC CB_HAVE_SDL=1)
+  target_link_libraries(endspielzero_render PUBLIC SDL3::SDL3)
+  target_compile_definitions(endspielzero_render PUBLIC CB_HAVE_SDL=1)
 endif()
 if(SDL3_FOUND AND imgui_FOUND)
-  target_link_libraries(chessbox_render PUBLIC imgui::imgui)
-  target_compile_definitions(chessbox_render PUBLIC CB_HAVE_IMGUI=1)
+  target_link_libraries(endspielzero_render PUBLIC imgui::imgui)
+  target_compile_definitions(endspielzero_render PUBLIC CB_HAVE_IMGUI=1)
 endif()
 
 # The game installs its own typefaces so it looks the same on every machine rather than
@@ -95,7 +95,7 @@ foreach(spec
 endforeach()
 if(CB_FONT_FILES)
   file(COPY ${CB_FONT_FILES} DESTINATION ${CMAKE_BINARY_DIR}/fonts)
-  install(FILES ${CB_FONT_FILES} DESTINATION share/chessbox/fonts)
+  install(FILES ${CB_FONT_FILES} DESTINATION share/endspielzero/fonts)
 endif()
 
 set(CB_HAVE_VULKAN ON CACHE INTERNAL "")

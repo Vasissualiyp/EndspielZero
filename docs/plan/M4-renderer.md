@@ -222,7 +222,7 @@ come.
 
 ### How the interface is verified
 
-`chessbox_gui --shot FILE` renders one frame - board, rails, ledger, promotion state -
+`endspielzero_gui --shot FILE` renders one frame - board, rails, ledger, promotion state -
 into an image with **no display present**, using SDL's dummy video driver for the window
 the interface needs and the same offscreen target the headless tests use. It exits
 nonzero if the validation layers said anything, and `ctest -R gui-frame` runs it. That
@@ -276,7 +276,7 @@ work.
   depth; the board and backdrop pipelines render into it and the pass resolves into the
   one-sample image the blur and `readPixels` use. The interface keeps rendering
   single-sample into the resolved image. Validation-clean across every `gui-*` capture.
-- **A frame-time benchmark.** `chessbox_gui --bench-frame N` times N headless frames of the
+- **A frame-time benchmark.** `endspielzero_gui --bench-frame N` times N headless frames of the
   chosen screen and prints ms/frame and fps - a number rather than an opinion.
 - **A frame cap.** `Settings::frameCap` (0 = uncapped) sleeps out the target period when
   vsync is off, so the ever-animating menus do not spin a core.
@@ -310,7 +310,7 @@ pass, and a new headless test drives the exact interactive recording path into a
 with the swapchain's usages (both frame slots, validation-clean). But
 `vkAcquireNextImageKHR`/`vkQueuePresentKHR` need a surface, so the acquire/present sequence
 is verified only by running the game on a real compositor. Run
-`./build/dev/src/gui/chessbox_gui standard` and confirm: the board draws, the interface
+`./build/dev/src/gui/endspielzero_gui standard` and confirm: the board draws, the interface
 lays out, no validation messages, resizing works, and pause (which exercises the defocus
 pass into the swapchain image) looks right.
 

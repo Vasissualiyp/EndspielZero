@@ -1,6 +1,6 @@
 ---
 name: cb-new-geometry
-description: Add a boundary topology to ChessBox - cylinder, torus, Mobius, Klein, mirrors, or a higher-dimensional analogue. Use when asked to make a board wrap, glue, reflect, or take a non-trivial shape.
+description: Add a boundary topology to EndspielZero - cylinder, torus, Mobius, Klein, mirrors, or a higher-dimensional analogue. Use when asked to make a board wrap, glue, reflect, or take a non-trivial shape.
 ---
 
 # Add a topology

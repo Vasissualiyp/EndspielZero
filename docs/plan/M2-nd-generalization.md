@@ -113,7 +113,7 @@ dispatch layer to pay for, and `bench/baselines/x86_64/M1.md` remains the refere
 
 M2.4 named Raumschach as the first 3-D variant. What ships is `cube5`, which uses
 Raumschach's historically settled *piece movement* but states plainly that its pawn
-rules and promotion are ChessBox's own. Shipping a file labelled "Raumschach" whose
+rules and promotion are EndspielZero's own. Shipping a file labelled "Raumschach" whose
 pawn rules were reconstructed from memory would be a worse outcome than shipping an
 honestly named variant: the label would imply an authority the content does not have.
 

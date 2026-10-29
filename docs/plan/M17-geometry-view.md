@@ -97,7 +97,7 @@ the lattice: `torus3d` as nested shells, `hyper4` as a hypercube, `t6` as the qu
   the flat-layout picking tests are unchanged.
 - **The position is not touched:** toggling the view changes nothing in `VariantId`, the
   hash, the move list, or the FEN; it is presentation, like `shape`/`height`.
-- **`--shot`:** `chessbox_gui torus --shot t.ppm --geometry surface` renders the board as a
+- **`--shot`:** `endspielzero_gui torus --shot t.ppm --geometry surface` renders the board as a
   torus, validation-clean, and `--clip` morphs it.
 
 ### Acceptance facts
@@ -296,7 +296,7 @@ breaks it is a picture, not a board, and must be labelled as one.
 cell under the cursor, and the adjacency invariant above holds for every pair the geometry
 glues. A `--geometry` capture per variant, validation-clean.
 
-**Acceptance.** `chessbox_gui torus3d --geometry` plays on four nested shells;
+**Acceptance.** `endspielzero_gui torus3d --geometry` plays on four nested shells;
 `hyper4 --geometry` on a hypercube; `t6 --geometry` either on the quintic, or on the
 extruded lattice with the reason stated in the interface.
 
@@ -304,7 +304,7 @@ extruded lattice with the reason stated in the interface.
 
 The M17.12 first pass shipped and immediately showed two bugs, both diagnosed below by
 reading `PlaySurface::buildStacked` (`src/render/play_surface.cpp:254-345`) and confirmed
-by printing real seat data (see **Evidence**). `chessbox_gui torus3d --geometry` draws a
+by printing real seat data (see **Evidence**). `endspielzero_gui torus3d --geometry` draws a
 fan of thin, wildly-angled slabs with no visible tube or ring; `hyper4 --geometry` draws a
 chaotic cloud of small squares with no visible cube-in-a-cube.
 
@@ -416,8 +416,8 @@ axis 1 (V):
 - Keep the existing patch/picking tests passing unchanged - the patch and pick-ray
   construction do not change, only the tangent inputs they are built from.
 
-**Acceptance.** `chessbox_gui torus3d --shot t.ppm --geometry` shows four continuous,
-smoothly nested rings with no isolated radiating slabs; `chessbox_gui hyper4 --shot h.ppm
+**Acceptance.** `endspielzero_gui torus3d --shot t.ppm --geometry` shows four continuous,
+smoothly nested rings with no isolated radiating slabs; `endspielzero_gui hyper4 --shot h.ppm
 --geometry` shows two legible, roughly cube-shaped clusters of squares rather than a
 scattered fan. Both stay validation-clean.
 
@@ -660,7 +660,7 @@ there is nothing to open a doorway between.
   (`anim.setProgress(0.5f)`) on `torus` shows the moving piece displaced from both its
   start and end seats, and neither the start nor end seat double-draws it.
 
-**Acceptance.** `chessbox_gui torus --script "click a1\nclick a2" --geometry --move-t 0.5
+**Acceptance.** `endspielzero_gui torus --script "click a1\nclick a2" --geometry --move-t 0.5
 --shot mid.ppm` shows the pawn part-way along the surface between a1 and a2, not sitting
 statically at a2. A scripted knight move shows a visible arc clear of the surface at
 `--move-t 0.5`. `--geometry` renders without the flag are unaffected (progress defaults to
@@ -981,7 +981,7 @@ walk stops propagating - which can be chosen to be the file axis's own wrap, by 
   shape in the catalogue whose cross-section is a self-crossing curve) - the existing
   continuity/frame tests for those three must keep passing unchanged.
 
-**Acceptance.** `chessbox_gui klein --geometry --shot k.ppm` at several `--slide` values
+**Acceptance.** `endspielzero_gui klein --geometry --shot k.ppm` at several `--slide` values
 shows one continuous shape at every value - no captured frame shows a lit/shaded band that
 reads as a second, differently-oriented object glued to the first. Dragging the middle
 button through a full slide shows the squares and the pieces on them turning smoothly;
@@ -1268,7 +1268,7 @@ camera clipping by **turning the board**; a strong GUI-less test was wanted for 
   the repaired third-person camera that follows behind the piece; `"turntable"` keeps the
   player's camera angle and turns the **board** - the shape-slide the middle-drag uses -
   so the followed piece comes round to the near side. The settings screen's `Follow shape`
-  row toggles them, and `chessbox_gui ... --shape-follow chase|turntable` states it for a
+  row toggles them, and `endspielzero_gui ... --shape-follow chase|turntable` states it for a
   capture. `main::chaseEyeDistance` (0.7 * span) is used for both the chase camera and its
   anti-clip search. `render::alignSlideToFace` is the turntable anti-clip (a fixed eye
   direction rather than the chase's travel), built on the same offset search as
@@ -1412,7 +1412,7 @@ the camera and the piece - i.e. the anti-clip (M17.16/17) is not actually anti-c
 **Repro (no display needed):**
 
 ```
-chessbox_gui torus --script $'click a1\nclick a5' --follow route --shape-follow chase \
+endspielzero_gui torus --script $'click a1\nclick a5' --follow route --shape-follow chase \
   --cinema --geometry --clip DIR --frames 12 --t0 0 --t1 1
 ```
 

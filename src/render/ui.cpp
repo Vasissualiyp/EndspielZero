@@ -68,10 +68,10 @@ std::filesystem::path findFont(const char* name) {
     roots.push_back(exe / "fonts");
     roots.push_back(exe / ".." / "fonts");
     roots.push_back(exe / ".." / ".." / "fonts");
-    roots.push_back(exe / ".." / "share" / "chessbox" / "fonts");
+    roots.push_back(exe / ".." / "share" / "endspielzero" / "fonts");
   }
-  for (const char* rel : {"fonts", "../fonts", "build/dev/fonts", "share/chessbox/fonts",
-                          "/usr/share/chessbox/fonts"}) {
+  for (const char* rel : {"fonts", "../fonts", "build/dev/fonts", "share/endspielzero/fonts",
+                          "/usr/share/endspielzero/fonts"}) {
     roots.emplace_back(rel);
   }
   for (const auto& root : roots) {
