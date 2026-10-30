@@ -46,11 +46,44 @@ class Evaluator {
   /// Per pseudo-legal move of difference. Small beside material: a pawn is ~80.
   static constexpr int kMobilityWeight = 3;
 
+  /// The mop-up term's weights: per royal move the lone royal is short of the best cell,
+  /// and per royal step of distance between the two royals beyond the nearest. Together
+  /// they stay well under a minor piece but far above the mobility term, so the search
+  /// always has a gradient to climb: edge the lone king, bring the own king up.
+  static constexpr int kMopEdgeWeight = 18;
+  static constexpr int kMopDistWeight = 9;
+
+  /// Whether the mop-up term has what it needs: exactly one royal piece type, and a
+  /// board small enough to tabulate. Exposed for tests.
+  [[nodiscard]] bool hasMopUp() const noexcept { return royalType_ != kNoPiece; }
+  /// The number of pseudo-legal moves of a lone royal on `c` of an empty board; 0 when
+  /// there is no mop-up table.
+  [[nodiscard]] int royalMobility(CellId c) const noexcept {
+    return c < royalMobility_.size() ? royalMobility_[c] : 0;
+  }
+
  private:
+  /// The mop-up score for the side to move `us`, or 0 when the position does not call
+  /// for it (see eval.cpp). The materials are each colour's non-royal total.
+  [[nodiscard]] bool mopUp(const Position& p, Color us, int ourMaterial,
+                           int theirMaterial, int& out) const;
+  void buildRoyalTables();
+
   const VariantSpec* v_;
   MoveGen gen_;
   std::vector<int> values_;
   std::vector<int> mobility_;
+  /// The sole royal piece type, or kNoPiece when the variant has none or several (no
+  /// mop-up then).
+  PieceTypeId royalType_{kNoPiece};
+  std::vector<std::uint8_t> royalMobility_;  ///< per cell, lone royal on an empty board
+  int maxRoyalMobility_{0};
+  /// dist_[a * cells + b]: royal moves from a to b, 255 when unreachable. Empty when the
+  /// board has more than kMaxDistCells cells.
+  std::vector<std::uint8_t> dist_;
+  int maxDist_{0};
+  /// The material gap at which a side is "winning on material" for the mop-up term.
+  int mopGap_{0};
 };
 
 }  // namespace cb::ai

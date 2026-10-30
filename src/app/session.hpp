@@ -151,6 +151,12 @@ class Session {
   [[nodiscard]] std::optional<Color> engineSide() const noexcept { return engineSide_; }
   /// How hard it looks (ai::SearchOptions); the shipped default is the demo floor.
   void setEngineOptions(const ai::SearchOptions& o) noexcept { engineOptions_ = o; }
+  /// The difficulty, 1 to 5 (ai::optionsForLevel). Applies from the next engine move; a
+  /// search already running finishes at its old strength.
+  void setEngineLevel(int level) noexcept { engineOptions_ = ai::optionsForLevel(level); }
+  [[nodiscard]] const ai::SearchOptions& engineOptions() const noexcept {
+    return engineOptions_;
+  }
   /// The game is in progress and it is the computer's turn.
   [[nodiscard]] bool engineToMove() const noexcept;
   /// A search is running on the worker.
@@ -376,7 +382,7 @@ class Session {
   /// The opponent: its side, its options, the derived evaluator (built on first use,
   /// per variant), the search in flight and the position it was asked about.
   std::optional<Color> engineSide_;
-  ai::SearchOptions engineOptions_{};
+  ai::SearchOptions engineOptions_{ai::optionsForLevel(ai::kDefaultLevel)};
   std::unique_ptr<ai::Evaluator> engineEval_;
   std::future<ai::SearchResult> engineJob_;
   std::shared_ptr<std::atomic<bool>> engineStop_;

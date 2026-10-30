@@ -162,6 +162,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.vsComputer = asBool(value);
     else if (key == "computer_plays_white")
       s.computerPlaysWhite = asBool(value);
+    else if (key == "computer_level")
+      s.computerLevel = asInt(value, s.computerLevel);
     else if (key == "auto_promote_to")
       s.autoPromoteTo = value;
     else if (key == "last_variant")
@@ -242,6 +244,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "hot_seat = " << boolText(hotSeat) << '\n';
   out << "vs_computer = " << boolText(vsComputer) << '\n';
   out << "computer_plays_white = " << boolText(computerPlaysWhite) << '\n';
+  out << "computer_level = " << computerLevel << '\n';
   out << "auto_promote_to = " << autoPromoteTo << '\n';
   out << "last_variant = " << lastVariant << '\n';
   out << "watch_dwell = " << watchDwell << '\n';
@@ -259,6 +262,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
 void Settings::sanitize() {
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
   frameCap = std::clamp(frameCap, 0, 360);
+  computerLevel = std::clamp(computerLevel, 1, 5);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
   geometryEvert = std::clamp(geometryEvert, 0.0f, 1.0f);
   geometryFormed = std::clamp(geometryFormed, 0.0f, 1.0f);

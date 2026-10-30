@@ -323,6 +323,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().showSeams = false;
     shell->settings().invertOrbitY = true;
     shell->settings().autoPromoteTo = "knight";
+    shell->settings().computerLevel = 5;
     shell->settings().volumeMusic = 0.25f;
     shell->settings().overtureSpeed = 1.75f;
     shell->settings().cameraMode = "route";
@@ -338,6 +339,8 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().frameCap = 60;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
+    // The session takes the level from the setting, for its next move.
+    REQUIRE(shell->session()->engineOptions().level == 5);
   }
   {
     auto shell = makeShell(path);
@@ -345,6 +348,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE_FALSE(shell->settings().showSeams);
     REQUIRE(shell->settings().invertOrbitY);
     REQUIRE(shell->settings().autoPromoteTo == "knight");
+    REQUIRE(shell->settings().computerLevel == 5);
     REQUIRE(shell->settings().volumeMusic == 0.25f);
     REQUIRE(shell->currentVariant() == "klein");
     // The library overture's speed is a setting, and it reaches its player on apply.
@@ -398,7 +402,12 @@ TEST_CASE("settings are clamped to usable values", "[unit][app]") {
   s.geometryFormSpeed = 0.0f;
   s.animationSpeed = 0.001f;
   s.lastVariant.clear();
+  s.computerLevel = 42;
   s.sanitize();
+  REQUIRE(s.computerLevel == 5);
+  s.computerLevel = -1;
+  s.sanitize();
+  REQUIRE(s.computerLevel == 1);
   REQUIRE(s.guiScale <= 3.0f);
   REQUIRE(s.orbitSensitivity >= 0.1f);
   REQUIRE(s.volumeMaster <= 1.0f);
@@ -447,7 +456,8 @@ TEST_CASE("the editor opens the current variant and saves it back", "[unit][app]
     ss << in.rdbuf();
     return ss.str();
   });
-  const auto out = std::filesystem::temp_directory_path() / "endspielzero-shell-editor.toml";
+  const auto out =
+      std::filesystem::temp_directory_path() / "endspielzero-shell-editor.toml";
   shell->setVariantPathResolver([&](const std::string&) { return out; });
 
   // Opening the editor screen with nothing loaded edits the current variant (standard,

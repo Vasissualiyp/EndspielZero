@@ -197,6 +197,8 @@ struct Settings {
   /// `computerPlaysWhite` is set. Off is a game between people at one screen.
   bool vsComputer{false};
   bool computerPlaysWhite{false};
+  /// How hard it plays, 1 (Easy) to 5 (Expert): ai::optionsForLevel. 3 is Normal.
+  int computerLevel{3};
   /// Piece name to promote to without asking; empty means always ask.
   std::string autoPromoteTo;
   std::string lastVariant{"standard"};

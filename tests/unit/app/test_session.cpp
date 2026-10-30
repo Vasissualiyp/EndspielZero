@@ -379,6 +379,7 @@ TEST_CASE("a move waiting for confirmation can be cancelled", "[unit][app]") {
 TEST_CASE("against the computer, it answers and the board is locked on its turn",
           "[unit][app]") {
   auto s = open("standard");
+  s->setEngineLevel(1);  // the sweep is about turns, not strength; Debug is slow
   s->setEngineSide(Color::Black);
   CHECK_FALSE(s->engineToMove());
   REQUIRE(s->applyScript("click e2\nclick e4").has_value());
@@ -402,6 +403,7 @@ TEST_CASE("against the computer, it answers and the board is locked on its turn"
 TEST_CASE("the frame loop drives the computer on a worker without blocking",
           "[unit][app]") {
   auto s = open("standard");
+  s->setEngineLevel(1);
   s->setEngineSide(Color::White);
   // White is the computer and moves first; give the clock long enough to start, then
   // wait for the worker by ticking (each tick returns at once).
@@ -416,6 +418,26 @@ TEST_CASE("the frame loop drives the computer on a worker without blocking",
 
 TEST_CASE("a script can ask the computer for a move", "[unit][app]") {
   auto s = open("standard");
+  s->setEngineLevel(1);
   REQUIRE(s->applyScript("engine\nengine").has_value());
   CHECK(s->game().plyCount() == 2);
+}
+
+TEST_CASE("the computer's level sets how hard it looks, from the next move on",
+          "[unit][app]") {
+  auto s = open("standard");
+  CHECK(s->engineOptions().level == ai::kDefaultLevel);
+  for (int level = ai::kMinLevel; level <= ai::kMaxLevel; ++level) {
+    s->setEngineLevel(level);
+    const ai::SearchOptions want = ai::optionsForLevel(level);
+    CHECK(s->engineOptions().level == level);
+    CHECK(s->engineOptions().depth == want.depth);
+    CHECK(s->engineOptions().maxNodes == want.maxNodes);
+    CHECK(s->engineOptions().noise == want.noise);
+  }
+  // Out of range is clamped rather than refused.
+  s->setEngineLevel(99);
+  CHECK(s->engineOptions().level == ai::kMaxLevel);
+  s->setEngineLevel(-3);
+  CHECK(s->engineOptions().level == ai::kMinLevel);
 }

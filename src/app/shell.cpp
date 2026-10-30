@@ -248,7 +248,8 @@ void Shell::discardEditorChanges() {
 }
 
 void Shell::back() {
-  if (screen_ == Screen::Editor && editor_ != nullptr && editor_->dirty() && !forceLeaveEditor_) {
+  if (screen_ == Screen::Editor && editor_ != nullptr && editor_->dirty() &&
+      !forceLeaveEditor_) {
     editorLeaveRequested_ = true;
     return;
   }
@@ -576,8 +577,8 @@ Result<void> Shell::startAttractStep(std::size_t index) {
     return fail(ErrorCode::OutOfRange, "attract step out of range");
   }
   const AttractStep step = attract_[index];
-  // The trailer plays the variants as they ship: swapped in for this call, put back on every
-  // way out.
+  // The trailer plays the variants as they ship: swapped in for this call, put back on
+  // every way out.
   struct LoaderSwap {
     VariantLoader& slot;
     VariantLoader saved;
@@ -1346,6 +1347,7 @@ void Shell::applySettings() {
                                                            ? Color::White
                                                            : Color::Black)
                                 : std::nullopt);
+    session_->setEngineLevel(settings_.computerLevel);
     session_->setConfirmMoves(settings_.confirmMoves);
     session_->setCameraMode(settings_.cameraMode);
     session_->setFollowStrength(settings_.followStrength);

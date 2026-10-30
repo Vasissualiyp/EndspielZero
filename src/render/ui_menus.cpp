@@ -25,6 +25,17 @@
 namespace cb::render {
 namespace {
 
+/// The computer's difficulty as a 1..5 slider whose value reads as a word. True when an
+/// edit has just been let go of (so the caller saves once, not on every drag step).
+bool computerLevelSlider(int& level) {
+  static const char* const kNames[] = {"1 - Easy", "2 - Casual", "3 - Normal", "4 - Hard",
+                                       "5 - Expert"};
+  level = std::clamp(level, 1, 5);
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
+  ImGui::SliderInt("Computer level", &level, 1, 5, kNames[level - 1]);
+  return ImGui::IsItemDeactivatedAfterEdit();
+}
+
 using namespace widgets;
 
 /// The colour a difficulty is advertised with. A switch, not an array lookup, so that
@@ -598,6 +609,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImGui::TextUnformatted("each player types their own half of the keyboard");
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  if (computerLevelSlider(shell.settings().computerLevel)) request.settingsChanged = true;
   ImGui::Dummy(ImVec2(0, px(6)));
   // Enter starts whatever the list has selected. The library is a list of things to
   // play, so the key that means "yes, this one" should work without reaching for the
@@ -732,8 +744,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
   eyebrow("editor", t, mono, scale_);
 
-  // Leaving with unsaved changes is asked about, never assumed: `Shell::back` (a BACK or Esc
-  // anywhere) raises a request instead of leaving, and this is where it is answered.
+  // Leaving with unsaved changes is asked about, never assumed: `Shell::back` (a BACK or
+  // Esc anywhere) raises a request instead of leaving, and this is where it is answered.
   if (shell.editorLeaveRequested()) {
     leaveTarget_ = 2;
     shell.clearEditorLeaveRequest();
@@ -974,8 +986,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     const Result<void> ok = editor->validate();
     validateNote_ = ok.has_value() ? std::string{} : ok.error().format();
     validatedRevision_ = editor->revision();
-    // Is a move row somewhere one the engine refuses? Then the rows say so, in red, and the
-    // sentence stays out of the header.
+    // Is a move row somewhere one the engine refuses? Then the rows say so, in red, and
+    // the sentence stays out of the header.
     movesInvalid_ = false;
     for (const std::string& name : editor->pieceNames()) {
       const auto atoms = editor->pieceAtoms(name);
@@ -1061,7 +1073,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     // like leaving the piece behind.
     designTab_ = std::clamp(designTab_, 0, 7);
     ImGui::BeginDisabled(locked);
-    tabRow({"MOVES", "BODY", "FLAT ICON", "IDENTITY", "CASTLING", "MARKS", "FIELDS", "RULES"},
+    tabRow({"MOVES", "BODY", "FLAT ICON", "IDENTITY", "CASTLING", "MARKS", "FIELDS",
+            "RULES"},
            designTab_, t, fontDisplay_, scale_);
     ImGui::EndDisabled();
 
@@ -1303,6 +1316,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       "p1 types qwertasdfgzxcvb, p2 the other half; a square is one key per axis");
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  computerLevelSlider(s.computerLevel);
   {
     // The promotion list belongs to the variant, so the choices are read from it rather
     // than hardcoded; with no game loaded there is nothing to promote to yet. A press

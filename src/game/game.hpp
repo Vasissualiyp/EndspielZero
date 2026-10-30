@@ -77,6 +77,13 @@ class Game {
   [[nodiscard]] EndReason endReason() const;
   [[nodiscard]] bool inCheck() const;
 
+  /// How many times the current position (side to move included) has occurred in this
+  /// game, counting now. The search treats a second occurrence as a draw.
+  [[nodiscard]] int repetitionCount() const;
+  /// The current position's hash: cells, side to move, castling, marks, fields. It does
+  /// not cover a temporal variant's board bookkeeping.
+  [[nodiscard]] std::uint64_t currentHash() const noexcept { return pos_.hash(); }
+
   /// The variant's rule engine. Empty for variants that declare no rules, in which case
   /// nothing in the play path touches it at all.
   [[nodiscard]] const rules::RuleEngine& ruleEngine() const noexcept { return engine_; }
@@ -104,7 +111,6 @@ class Game {
 
  private:
   void invalidate();
-  [[nodiscard]] int repetitionCount() const;
 
   // ---- temporal (M6) ------------------------------------------------------
   void initTemporal();
