@@ -187,8 +187,8 @@ struct Theme {
 /// The palette a settings file names. An unknown name is the shipped one, because a
 /// settings file from a newer build - or a typo - must never stop the game starting.
 [[nodiscard]] inline Theme themeFromName(std::string_view name) {
-  if (name == "console") return Theme::console();
-  return Theme::manifold();
+  if (name == "manifold") return Theme::manifold();
+  return Theme::console();
 }
 
 }  // namespace cb::view

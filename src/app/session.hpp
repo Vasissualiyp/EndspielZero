@@ -365,7 +365,7 @@ class Session {
   view::OrbitCamera camera_;
   std::vector<view::Placement> placements_;
   view::SeamMap seams_;
-  view::Theme theme_{view::Theme::manifold()};
+  view::Theme theme_{view::Theme::console()};
   view::MoveAnimation anim_;
   /// The route the running animation is following, kept so `camera()` can plan a shot
   /// from the same trace the animation draws. Valid only while `anim_` is active.

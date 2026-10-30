@@ -312,7 +312,7 @@ void Settings::sanitize() {
   if (shapeFollow != "chase" && shapeFollow != "turntable") shapeFollow = "chase";
   if (lastVariant.empty()) lastVariant = "standard";
   if (pieceIcons != "faceted" && pieceIcons != "primitive") pieceIcons = "faceted";
-  if (theme != "manifold" && theme != "console") theme = "manifold";
+  if (theme != "manifold" && theme != "console") theme = "console";
 }
 
 }  // namespace cb::app

@@ -179,7 +179,7 @@ struct Settings {
   /// Which palette to draw with: "manifold" (the shipped look) or "console". A name for
   /// the same reason as `pieceIcons` - this layer is below the renderer, and a settings
   /// file should stay readable.
-  std::string theme{"manifold"};
+  std::string theme{"console"};
   /// Slide pieces along the route they actually took, through portals and off walls.
   bool animateMoves{true};
   /// Multiplier on how fast that happens. Higher is faster.

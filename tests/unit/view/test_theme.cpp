@@ -121,5 +121,5 @@ TEST_CASE("a palette is chosen by name, and an unknown name is the shipped one",
   CHECK(themeFromName("manifold").light);
   CHECK_FALSE(themeFromName("console").light);
   // A settings file from a newer build, or a typo, still produces a usable palette.
-  CHECK(themeFromName("tesseract").light == themeFromName("manifold").light);
+  CHECK(themeFromName("tesseract").light == themeFromName("console").light);
 }
