@@ -158,6 +158,22 @@ IconStyle iconStyleFromName(std::string_view name) noexcept {
   return name == "primitive" ? IconStyle::Primitive : IconStyle::Faceted;
 }
 
+OwnedIcon::OwnedIcon(const assets::IconModel& model) {
+  const auto convert = [](const assets::Outline& o) {
+    std::vector<IconPoint> pts;
+    pts.reserve(o.points.size());
+    for (const assets::ModelPoint& p : o.points) {
+      pts.push_back(IconPoint{static_cast<float>(p.x) / 10.0f, static_cast<float>(p.y) / 10.0f});
+    }
+    return pts;
+  };
+  for (const assets::Outline& o : model.fills) fillPoints_.push_back(convert(o));
+  for (const assets::Outline& o : model.cuts) cutPoints_.push_back(convert(o));
+  // Spans only once the outer vectors have stopped growing, so none of them dangles.
+  for (const auto& pts : fillPoints_) fills_.push_back(IconPoly{pts});
+  for (const auto& pts : cutPoints_) cuts_.push_back(IconPoly{pts});
+}
+
 PieceIcon pieceIcon(IconStyle style, Archetype shape) {
   const bool plain = style == IconStyle::Primitive;
   switch (shape) {
@@ -187,55 +203,5 @@ PieceIcon pieceIcon(IconStyle style, Archetype shape) {
   return plain ? PieceIcon{kPSlabSet, {}} : PieceIcon{kFSlab, {}};
 }
 
-namespace {
-
-/// An authored icon in the table's own float form, owning its points.
-struct OwnedIcon {
-  std::vector<std::vector<IconPoint>> fillPts, cutPts;
-  std::vector<IconPoly> fills, cuts;
-};
-
-}  // namespace
-
-PieceIcon pieceIconFor(IconStyle style, const PieceTypeDef& piece) {
-  if (!piece.icon) return pieceIcon(style, archetypeFor(piece));
-  // Keyed by content rather than by the spec's address: a variant reloaded after a save
-  // is a new object with, usually, the same icon.
-  std::string key;
-  const auto addKey = [&](const std::vector<assets::Outline>& os, char tag) {
-    key += tag;
-    for (const assets::Outline& o : os) {
-      key += '|';
-      for (const assets::ModelPoint& p : o.points) {
-        key += std::to_string(p.x) + ',' + std::to_string(p.y) + ';';
-      }
-    }
-  };
-  addKey(piece.icon->fills, 'f');
-  addKey(piece.icon->cuts, 'c');
-  static std::map<std::string, std::unique_ptr<OwnedIcon>> cache;
-  auto it = cache.find(key);
-  if (it == cache.end()) {
-    auto owned = std::make_unique<OwnedIcon>();
-    // Permille of the box to the table's 100-unit box.
-    const auto convert = [](const std::vector<assets::Outline>& os,
-                            std::vector<std::vector<IconPoint>>& pts,
-                            std::vector<IconPoly>& polys) {
-      for (const assets::Outline& o : os) {
-        std::vector<IconPoint> poly;
-        for (const assets::ModelPoint& p : o.points) {
-          poly.push_back(IconPoint{static_cast<float>(p.x) / 10.0f,
-                                   static_cast<float>(p.y) / 10.0f});
-        }
-        pts.push_back(std::move(poly));
-      }
-      for (const auto& poly : pts) polys.emplace_back(poly.data(), poly.size());
-    };
-    convert(piece.icon->fills, owned->fillPts, owned->fills);
-    convert(piece.icon->cuts, owned->cutPts, owned->cuts);
-    it = cache.emplace(std::move(key), std::move(owned)).first;
-  }
-  return PieceIcon{it->second->fills, it->second->cuts};
-}
 
 }  // namespace cb::render

@@ -209,6 +209,10 @@ class Shell {
   /// name. The order can only be computed here, because a difficulty lives in the
   /// variant's own file rather than in the name list the shell is handed at startup.
   void setVariantLoader(VariantLoader loader);
+  /// The loader the attract trailer uses: the variants as they ship, whatever the player has
+  /// saved over them. The trailer is a fixed showcase - its scripted moves are only known to
+  /// be legal on the shipped rules - so a variant edited in the designer must not break it.
+  void setShippedVariantLoader(VariantLoader loader) { shippedLoader_ = std::move(loader); }
   Result<void> startGame(const std::string& variantName);
 
   /// Saved games live in a `games` folder beside the settings file.
@@ -251,6 +255,8 @@ class Shell {
   /// main menu.
   void stopAttract();
   [[nodiscard]] bool attracting() const noexcept { return !attract_.empty(); }
+  /// Which beat of the sequence is playing.
+  [[nodiscard]] std::size_t attractIndex() const noexcept { return attractIndex_; }
   /// Which beat of the sequence is playing, for a status line or a test.
   [[nodiscard]] std::size_t attractStep() const noexcept { return attractIndex_; }
   [[nodiscard]] std::size_t attractCount() const noexcept { return attract_.size(); }
@@ -404,6 +410,20 @@ class Shell {
   /// Write the open document back to its file. Fails when nothing is open or no path
   /// resolver is installed.
   Result<void> saveEditor();
+  /// Leaving the editor with unsaved changes asks first: `back()` stays put and raises this
+  /// request, which the editor screen answers with its own dialog (save, leave without saving,
+  /// or stay). Nothing is lost to an Esc.
+  [[nodiscard]] bool editorLeaveRequested() const noexcept { return editorLeaveRequested_; }
+  void clearEditorLeaveRequest() noexcept { editorLeaveRequested_ = false; }
+  /// Throw away the editor's unsaved changes by reopening the file it was opened from.
+  void discardEditorChanges();
+  /// Leave the editor now, whatever its state: the dialog's answer.
+  void leaveEditor() {
+    editorLeaveRequested_ = false;
+    forceLeaveEditor_ = true;
+    back();
+    forceLeaveEditor_ = false;
+  }
 
   /// The document being edited, or nullptr when the editor has nothing open.
   [[nodiscard]] Editor* editor() noexcept { return editor_.get(); }
@@ -505,12 +525,15 @@ class Shell {
   Screen previous_{Screen::MainMenu};
   bool quit_{false};
   VariantLoader loader_;
+  VariantLoader shippedLoader_;
   VariantSourceLoader sourceLoader_;
   VariantPathResolver pathResolver_;
   OverturePlayer overtures_;
   /// Where "Surprise me" is in the library, so repeated presses move on (M14.2).
   std::size_t surpriseCursor_{0};
   std::unique_ptr<Editor> editor_;
+  bool editorLeaveRequested_{false};
+  bool forceLeaveEditor_{false};
   std::string editorVariant_;
   std::filesystem::path editorPath_;
   mutable std::unique_ptr<VariantSpec> preview_;

@@ -3,11 +3,12 @@
 
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <optional>
 
 #include "assets/piece_model.hpp"
 #include "base/result.hpp"
@@ -50,26 +51,83 @@ class VariantDoc {
   /// A piece's atoms as they are authored. Fails when no piece has that name.
   [[nodiscard]] Result<std::vector<MoveAtom>> pieceAtoms(std::string_view piece) const;
 
+  /// A compound move (M19), as the file spells it: the mover (a piece) makes an exact step
+  /// (`vector`, one signed entry per axis), the partner is found along it, and the `safe`
+  /// cells (`from`, `path`, `to`) must not be attacked. Castling is two of these.
+  struct CompoundInfo {
+    std::string name;
+    std::string fen;  ///< the castling-field letter, upper case; empty for none
+    std::string piece;
+    std::vector<int> vector;
+    bool flip{false};
+    bool moverUnmoved{true};
+    std::vector<std::string> partners;
+    bool partnerUnmoved{true};
+    std::vector<std::string> safe;
+    friend bool operator==(const CompoundInfo&, const CompoundInfo&) = default;
+  };
+  [[nodiscard]] std::vector<CompoundInfo> compounds() const;
+  [[nodiscard]] Result<void> setCompounds(const std::vector<CompoundInfo>& list);
+
+  /// The variant's own mark tags (M19), in file order; "ep" is always tag 0 and not listed.
+  /// A tag that `blocks` makes the cells it marks impassable.
+  struct MarkTagInfo {
+    std::string name;
+    bool blocks{false};
+    friend bool operator==(const MarkTagInfo&, const MarkTagInfo&) = default;
+  };
+  [[nodiscard]] std::vector<MarkTagInfo> markTags() const;
+  [[nodiscard]] Result<void> setMarkTags(const std::vector<MarkTagInfo>& tags);
+
+  /// A piece's moves as moveset text (M19): the text it was written as, if it has one, else
+  /// the moves it has, spelled out. `setPieceMovesText` checks the text against this
+  /// variant's board and stores it as written - `U r in 1..D : [1 x r]^k` stays symbolic -
+  /// replacing the piece's move list; a failed parse changes nothing and says where.
+  [[nodiscard]] Result<std::string> pieceMovesText(std::string_view piece) const;
+  [[nodiscard]] Result<void> setPieceMovesText(std::string_view piece, std::string_view text);
+
   /// Replace a piece's atoms, writing the `[[piece.move]]` list back. Fails when no
   /// piece has that name.
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,
                                            const std::vector<MoveAtom>& atoms);
 
-  /// A piece's authored body and icon (`[piece.model]`, `[piece.icon]`), or nothing when
-  /// it has none and the renderer assembles one from its archetype. Setting `nullopt`
-  /// removes the table. Fails when no piece has that name; the setters also refuse a
-  /// model `assets::validate` refuses, with its message.
-  [[nodiscard]] Result<std::optional<assets::PieceModel>> pieceModel(
+  /// A piece's identity: everything about it that is not a move. `heightPermille` 0 means
+  /// "let the game decide"; `shape` empty means the archetype is read off the moves.
+  struct PieceInfo {
+    std::string name;
+    std::string symbol;
+    bool royal{false};
+    bool resetsDrawClock{false};
+    std::string shape;
+    int heightPermille{0};
+    std::vector<std::string> promotesTo;
+  };
+  [[nodiscard]] Result<PieceInfo> pieceInfo(std::string_view piece) const;
+  /// Rewrite a piece's identity (its name is not touched; see `renamePiece`).
+  [[nodiscard]] Result<void> setPieceInfo(std::string_view piece, const PieceInfo& info);
+  /// Rename a piece, and every `promotes_to` that names it.
+  [[nodiscard]] Result<void> renamePiece(std::string_view piece, std::string_view to);
+  /// Append a piece: a copy of `base` (its moves, identity, body and icon) under a new
+  /// name and symbol, or a plain one-step piece when `base` is empty. The order of
+  /// pieces is the order of their ids, so a new one goes last and nothing is renumbered.
+  [[nodiscard]] Result<void> addPiece(std::string_view name, std::string_view symbol,
+                                      std::string_view base);
+  /// Remove a piece and every promotion that names it. A variant keeps at least one.
+  [[nodiscard]] Result<void> removePiece(std::string_view piece);
+
+  /// A piece's authored 3-D body and flat icon, when it has any. Cosmetic: neither is
+  /// part of `VariantId`, and the loader ignores them. `nullopt` clears.
+  [[nodiscard]] Result<std::optional<assets::PieceModel>> pieceBody(
       std::string_view piece) const;
+  [[nodiscard]] Result<void> setPieceBody(std::string_view piece,
+                                          const std::optional<assets::PieceModel>& body);
   [[nodiscard]] Result<std::optional<assets::IconModel>> pieceIcon(
       std::string_view piece) const;
-  [[nodiscard]] Result<void> setPieceModel(std::string_view piece,
-                                           const std::optional<assets::PieceModel>& m);
   [[nodiscard]] Result<void> setPieceIcon(std::string_view piece,
-                                          const std::optional<assets::IconModel>& m);
+                                          const std::optional<assets::IconModel>& icon);
 
-  /// A custom data field as the editor shows it (M7.2.1): a `[[piece_field]]` or a
-  /// `[[cell_field]]`. Validation is the loader's, through the editor's `validate()`.
+  /// A custom data field: a named integer column carried by every piece (or every cell).
+  /// Part of the variant's identity, and of the position hash when `hashed`.
   struct FieldInfo {
     std::string name;
     int defaultValue{0};
@@ -78,14 +136,13 @@ class VariantDoc {
     bool hashed{true};
     friend bool operator==(const FieldInfo&, const FieldInfo&) = default;
   };
-  [[nodiscard]] std::vector<FieldInfo> fields(bool cellFields) const;
-  void setFields(bool cellFields, const std::vector<FieldInfo>& fields);
+  [[nodiscard]] std::vector<FieldInfo> fields(bool pieceFields) const;
+  [[nodiscard]] Result<void> setFields(bool pieceFields, const std::vector<FieldInfo>& list);
 
-  /// A rule as the editor's form holds it (M7.2.2): its trigger word, its condition as
-  /// the S-expression text the file stores, and its ordered effects, each an op word and
-  /// the op's keys as text (rule_catalogue.hpp says which keys an op takes). Kept as
-  /// text, so a form can hold a half-typed expression and the loader - the one parser -
-  /// is what says whether it means anything.
+  /// A rule, spelled the way the file spells it: a trigger, an optional S-expression
+  /// condition, and ordered effects whose arguments are the file's own strings (`at`,
+  /// `value`, `piece`, `field`, `radius`, `affects`, `color`, `outcome`). The editor keeps
+  /// them as text so that the one parser that reads the file is the one that judges them.
   struct EffectInfo {
     std::string op;
     std::vector<std::pair<std::string, std::string>> args;
@@ -99,7 +156,7 @@ class VariantDoc {
     friend bool operator==(const RuleInfo&, const RuleInfo&) = default;
   };
   [[nodiscard]] std::vector<RuleInfo> rules() const;
-  void setRules(const std::vector<RuleInfo>& rules);
+  [[nodiscard]] Result<void> setRules(const std::vector<RuleInfo>& list);
 
   /// The author's one-line pitch. Cosmetic: not part of `VariantId`.
   [[nodiscard]] std::string description() const;

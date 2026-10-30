@@ -21,7 +21,7 @@ name = "torus3d_8x8"
 description = "An eight-by-eight-by-four cube with every face glued - the same board as the 2-D shapes, one dimension up."
 difficulty = "hard"
 side_to_move = "white"
-en_passant = true
+en_passant = false
 stalemate = "draw"
 halfmove_draw_limit = 100
 orientation_axis = "rank"
@@ -69,8 +69,8 @@ resets_draw_clock = true
   mode = "slide"
   capture = "cannot"
   forward = true
-  from_rank = 1
-  leaves_en_passant = true
+  unmoved = true
+  marks = [{ tag = "ep", where = "passed", duration = 1 }]
 
   [[piece.move]]
   vector = [1, 1]
@@ -78,6 +78,18 @@ resets_draw_clock = true
   mode = "leap"
   capture = "must"
   forward = true
+
+  # En passant: capture-only, landing on the cell a double step passed over and taking the
+  # pawn that passed it - a capture at an offset, allowed only onto an "ep" mark.
+  [[piece.move]]
+  vector = [1]
+  pin = ["rank:+1"]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  flip = true
+  captures_at = ["rank:-1"]
+  needs_mark = "ep"
 
 [[piece]]
 name = "knight"
@@ -109,36 +121,13 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 # Full standard armies now (M13.9 Part F revision), not just king/rook/knight: the
 # geometry is what made the restricted roster seem necessary, and this geometry does not
@@ -147,5 +136,6 @@ royal = true
 # two apart on a 4-level wrap, so neither army's own back rank sits level-adjacent to the
 # other's. Black's back rank sits one rank off its pawns' far edge the same way white's
 # does, mirrored: pawns toward the centre, king row toward its own level's rank seam.
+
 [start]
 board = "8/8/8/8/8/8/PPPPPPPP/RNBQKBNR|8/8/8/8/8/8/8/8|8/8/8/8/8/8/rnbqkbnr/pppppppp|8/8/8/8/8/8/8/8"

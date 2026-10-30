@@ -166,7 +166,8 @@ struct InstanceSet {
   std::array<Batch, kShapeSlots> flourishBatches{};
   /// M17.26: the flourish's token discs, ahead of its icon decals in the same batch -
   /// `flourishBatches[s]`'s first `flourishDiscCounts[s]` draw from `discRanges[s]`.
-  std::array<std::uint32_t, kShapeSlots> flourishDiscCounts{};
+  std::array<std::uint32_t, kShapeSlots>
+      flourishDiscCounts{};
 
   /// The contact shadows (M18.2): one soft, dark decal under each occupied cell, flat or
   /// on a shape. Kept apart from `instances` for the same reason as the flourish - their
@@ -184,11 +185,6 @@ struct InstanceSet {
   /// edges should dim is a separate judgement call. It never enters picking.
   std::vector<Instance> scaffold;
   std::array<Batch, kShapeSlots> scaffoldBatches{};
-
-  /// The variant these instances were built for, so `record` can make sure its authored
-  /// bodies (M7.3.4) are in the mesh library before a slot past `Archetype::Count` is
-  /// drawn. Null for a set built by hand.
-  const VariantSpec* variant{nullptr};
 
   [[nodiscard]] std::size_t size() const noexcept { return instances.size(); }
 };
@@ -231,6 +227,12 @@ class BoardRenderer {
     lastFrom_ = from;
     lastTo_ = to;
   }
+  /// Give the variant's authored piece bodies and icons slots in the mesh library and
+  /// upload them. Cheap when nothing changed (a signature compare), and a rebuild only
+  /// when a body was edited or another variant's pieces arrived. Call it before
+  /// `buildInstances`; pieces whose bodies are not synced are drawn from their
+  /// archetype, so skipping it is safe, just plain.
+  Result<void> syncBodies(const VariantSpec& v);
   /// Royal cell to mark as under attack, or kInvalidCell.
   void setCheckCell(CellId c) noexcept { checkCell_ = c; }
 
@@ -284,9 +286,6 @@ class BoardRenderer {
   /// while the previous frame of the same slot may still have been reading them.
   Result<void> bindBlurTarget(const OffscreenTarget& target, std::uint32_t frame);
   Result<void> uploadGeometry();
-  /// Rebuild and re-upload the mesh library when `v`'s authored bodies differ from the
-  /// ones it holds. Waits for the device, so it is only ever paid on a change.
-  Result<void> ensureAuthored(const VariantSpec& v);
   Result<void> ensureInstanceCapacity(std::uint32_t frame, std::size_t count);
   Result<void> ensureSurfaceCapacity(std::uint32_t frame, std::size_t vertices,
                                      std::size_t indices);
@@ -296,8 +295,10 @@ class BoardRenderer {
   view::Theme theme_{view::Theme::manifold()};
   BoardOptions options_{};
   MeshLibrary meshes_;
-  /// `authoredKey` of the variant whose bodies `meshes_` holds; 0 for none.
-  std::uint64_t meshesKey_{0};
+  /// Which custom slot each piece type of the synced variant draws from (-1 for none),
+  /// and the signature of the bodies that built them.
+  std::vector<int> customSlot_;
+  std::uint64_t bodiesSig_{0};
   CellId lastFrom_{kInvalidCell};
   CellId lastTo_{kInvalidCell};
   CellId checkCell_{kInvalidCell};

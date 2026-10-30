@@ -120,51 +120,13 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1, 1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1, 1, 1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 # A small army a side - king, rook, knight - with the two armies close enough to
 # block one another. A full array is unplayable here for the reason it is on any
@@ -172,5 +134,6 @@ royal = true
 # search as well: every extra piece multiplies a branching factor that is already in
 # the hundreds. Bishop, queen and pawn are declared so an edited position can still
 # contain them; only the knight's atom is needed to see how far a leap reaches here.
+
 [start]
 board = "7r1R2K1k13N1n4065"

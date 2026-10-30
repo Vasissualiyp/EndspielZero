@@ -3,18 +3,19 @@
 
 #include <array>
 #include <cstdint>
-#include <map>
 #include <memory>
-#include <optional>
+#include <map>
 #include <string>
 #include <vector>
 
+#include "app/debug_console.hpp"
 #include "app/session.hpp"
 #include "app/shell.hpp"
 #include "assets/piece_model.hpp"
 #include "render/deco.hpp"
 #include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
+#include "render/piece_mesh.hpp"
 #include "render/vulkan_context.hpp"
 #include "view/theme.hpp"
 
@@ -22,6 +23,13 @@ struct SDL_Window;
 union SDL_Event;
 
 namespace cb::render {
+
+/// The window of the authoring plane an outline editor shows, in permille. The body's
+/// profile uses the whole box; an element is drawn about its own origin, so its window
+/// reaches to both sides of zero.
+struct DesignBox {
+  float xMin{0.0f}, xMax{1000.0f}, yMin{0.0f}, yMax{1000.0f};
+};
 
 /// What the interface is asking the application to do next.
 ///
@@ -145,12 +153,18 @@ class Ui {
   /// reviewable without a mouse.
   void setPreviewDims(int dims) noexcept { previewDims_ = dims; }
   /// The piece the designer opens on, by name. For `--shot --piece`.
-  /// Drive the pointer without a display, for `--shot --ui-click`: where it is and
-  /// whether the left button is down on the next frame.
-  void injectMouse(float x, float y, bool down) noexcept {
+  /// Drive the pointer without a display, for `--shot --ui-click`: where it is and whether
+  /// the left button is down on the next frame.
+  void injectMouse(float x, float y, bool down, int button = 0) noexcept {
     inject_ = true;
     injectPos_ = ImVec2(x, y);
     injectDown_ = down;
+    injectButton_ = button;
+  }
+  /// A key event for the next frame (ImGuiKey), for `--ui-click "key:delete"`.
+  void injectKey(int key, bool down) noexcept {
+    injectKey_ = key;
+    injectKeyDown_ = down;
   }
   void openEditorPiece(std::string name) { pendingPiece_ = std::move(name); }
 
@@ -185,6 +199,14 @@ class Ui {
   /// Wrap a standalone draw list in a minimal ImDrawData and submit it with the field's
   /// multisample-matched pipeline.
   void recordDrawList(VkCommandBuffer cmd, ImDrawList* list);
+
+  /// The debug window (F12 or backtick): scrollback and a command line, nothing pretty.
+  void drawDebugConsole(app::Shell& shell);
+  app::DebugConsole console_;
+  bool consoleOpen_{false};
+  bool consoleFocus_{false};
+  std::array<char, 512> consoleInput_{};
+  int consoleHistoryPos_{-1};
 
   UiRequest buildGameHud(app::Shell& shell, float fps);
   /// The two-pane frame every menu screen sits in: the drifting field, the screen's
@@ -268,21 +290,26 @@ class Ui {
   void drawBodyTab(app::Shell& shell);
   /// The flat outline the board draws when it is drawn flat (M7.3.5).
   void drawIconTab(app::Shell& shell);
-  /// M7.2: the variant's custom fields and its rules, as a form over the rule catalogue.
+  void drawIdentityTab(app::Shell& shell, const std::string& piece);
+  void drawFieldsTab(app::Shell& shell);
   void drawRulesTab(app::Shell& shell);
+  void drawMarksTab(app::Shell& shell);
+  void drawCompoundTab(app::Shell& shell);
+  /// Write the author's finished edit to the document. Held back while the pointer is
+  /// down, so a drag is one undo entry, and refused while the shape is invalid.
+  void commitDesign(app::Shell& shell, const std::string& piece);
   /// Load the working model and icon for whichever piece is selected, once per
   /// selection. Seeded from the shipped archetype, so "start from the queen" always
   /// gives something editable rather than an empty canvas.
   void syncDesignAssets(app::Shell& shell);
-  /// Write the working body and icon into the editor's document when they changed.
-  void commitDesignAssets(app::Shell& shell);
   /// One editable closed outline on a grid. Returns true when the author changed it.
   ///
   /// Shared by both designers because they are the same job on different axes - which
   /// is also why the spec asks for one drawing surface rather than two.
   bool outlineEditor(const char* id, ImVec2 min, ImVec2 max, assets::Outline& outline,
-                     int& selected, bool yUp, const char* xLabel, const char* yLabel);
-  /// The profile swept, drawn as a wireframe by the same rule the mesh would use.
+                     int& selected, bool yUp, const char* xLabel, const char* yLabel,
+                     const DesignBox& box = DesignBox{});
+  /// The body as the game draws it: the real assembled mesh, shaded, turning.
   void drawRevolvePreview(ImDrawList* dl, ImVec2 min, ImVec2 max,
                           const assets::PieceModel& model, float spin);
 
@@ -321,44 +348,58 @@ class Ui {
   int editorPage_{0};
 
   /// The piece body and flat icon being designed, and which piece they were loaded for.
-  /// A working copy of what the editor's document holds (`[piece.model]`/`[piece.icon]`),
-  /// or of the archetype seed when it holds nothing; committed back to the document -
-  /// one undo step - whenever it differs and the mouse is up (commitDesignAssets).
+  /// Editing state, like `editorPiece_`: the document the shell owns is the variant, and
+  /// these are not part of it until they are saved.
   assets::PieceModel designModel_{};
   assets::IconModel designIcon_{};
   std::string designFor_;
   int designProfilePoint_{-1};
-  /// The element the body tab's element tool is editing, and the point selected in its
-  /// outline; -1 for none.
-  /// The fields and rules tab's working copy, and what the document held when it was
-  /// loaded or last committed - the same discipline as the body and icon above.
-  std::vector<app::Editor::FieldInfo> formPieceFields_, formCellFields_;
-  std::vector<app::Editor::RuleInfo> formRules_;
-  std::vector<app::Editor::FieldInfo> formPieceFieldsSeen_, formCellFieldsSeen_;
-  std::vector<app::Editor::RuleInfo> formRulesSeen_;
-  bool formLoaded_{false};
-  int designElement_{-1};
-  int designElementPoint_{-1};
   int designIconPoint_{-1};
   std::size_t designIconPoly_{0};
   /// Draw the right half and mirror it: an authoring aid, not a model operation. What
   /// is stored is always the finished outline, so an icon stays as dumb as the shipped
   /// tables.
   bool designIconMirror_{false};
-  /// What the document held when the working copy was last loaded or committed, so a
-  /// change made underneath it - undo, redo, reset - reloads the working copy instead of
-  /// being overwritten by it.
-  std::optional<assets::PieceModel> designModelSeen_;
-  std::optional<assets::IconModel> designIconSeen_;
-  /// The working copy as loaded, so only a real edit is committed: opening a piece that
-  /// has no model must not write the archetype seed into the file.
-  assets::PieceModel designModelBase_{};
-  assets::IconModel designIconBase_{};
+  /// The revision of the document the design state below was last read from, and the
+  /// last values that match it. The document is the store: a change the author makes is
+  /// written to it (one undo entry) when it settles, and an undo or a switch of piece
+  /// reloads from it.
+  std::uint64_t designSyncedRevision_{~0ull};
+  assets::PieceModel loadedModel_{};
+  assets::IconModel loadedIcon_{};
+  int designElement_{-1};
+  int designElementPoint_{-1};
+  /// The 3-D preview's mesh and the model it was built from, rebuilt only on a change.
+  ModelMesh previewMesh_{};
+  assets::PieceModel previewMeshModel_{};
+  bool previewMeshValid_{false};
   /// A note from the last move edit that did not take, shown in red under the list.
+  /// The rest of the piece, drawn faintly behind the outline being edited (the flat icon's
+  /// other fills and its cut-outs), set by the caller around `outlineEditor`.
+  std::vector<const assets::Outline*> outlineGhostFills_;
+  std::vector<const assets::Outline*> outlineGhostCuts_;
+  /// Where the "unsaved changes" dialog would leave to: 0 no dialog, 1 the editor's home, 2
+  /// out of the editor altogether.
+  int leaveTarget_{0};
+  /// The piece's move rows are invalid (set while drawing them): they are shown red, and the
+  /// header stays quiet rather than repeating the loader's sentence.
+  bool movesInvalid_{false};
   std::string moveNote_;
+  /// The move row whose detail (steps, home rank, en passant, reach) is open.
+  int selectedAtom_{-1};
+  /// The piece designer's identity form: text buffers and which piece they were filled for.
+  std::string identityFor_;
+  std::array<char, 64> nameBuf_{};
+  std::array<char, 4> symbolBuf_{};
+  /// The loader's verdict on the document, cached per revision.
+  std::uint64_t validatedRevision_{~0ull};
+  std::string validateNote_;
   std::string pendingPiece_;
   bool inject_{false};
   bool injectDown_{false};
+  int injectButton_{0};
+  int injectKey_{0};
+  bool injectKeyDown_{false};
   ImVec2 injectPos_{0, 0};
   /// Which of the piece designer's three tabs is showing.
   int designTab_{0};
@@ -367,14 +408,14 @@ class Ui {
   /// do on a 4-D board" is a question the designer has to be able to answer.
   int previewDims_{2};
 
-  /// The piece preview's board: the size, where it was drawn, and what the player has
-  /// placed on it (0 empty, 1 black, 2 white). The selected piece is white and stands at
-  /// the centre; the rest is a scratch board for trying captures.
-  static constexpr int kPreviewN = 10;
-  ImVec2 previewOrigin_{0.0f, 0.0f};
-  float previewCell_{0.0f};
-  bool previewValid_{false};
-  std::array<std::array<std::uint8_t, kPreviewN>, kPreviewN> previewCells_{};
+  /// What the player has placed on the piece preview's board, per dimension count, by
+  /// cell (0 empty, 1 black, 2 white). The selected piece is white and stands at the
+  /// centre; the rest is a scratch board for trying captures and blocks.
+  std::array<std::vector<std::uint8_t>, 5> previewOcc_{};
+  /// What a left click puts down: 0 clears, 1 an enemy (capturable), 2 a friend (blocks).
+  int previewTool_{1};
+  /// The cell under the pointer on the preview board, for the hover outline.
+  std::int64_t previewHover_{-1};
   /// The screen being left, kept as a number so its own build can be re-run as a ghost,
   /// and the screen being built now, so `paneMove` knows whether this is a menu move.
   int leavingScreen_{-1};

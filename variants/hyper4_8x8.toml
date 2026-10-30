@@ -93,45 +93,18 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 # Ranks are separated by "/", levels by "|", and the fourth axis by "||". The canonical
 # opening is the ordinary 8x8 army on the first level of the first aeon; every other cell
 # is empty. The trailer never uses this start - it overwrites it with the carried
 # position - but a board has to open somewhere, and here it opens like chess.
+
 [start]
 board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8||8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8|8/8/8/8/8/8/8/8"

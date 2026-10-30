@@ -82,7 +82,7 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "slide"
   capture = "cannot"
   forward = true
-  from_rank = 1
+  unmoved = true
 
   [[piece.move]]
   vector = [1, 1]
@@ -121,26 +121,7 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1, 1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "unicorn"
@@ -155,18 +136,10 @@ symbol = "U"
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 # The opening board. The multiverse starts as a single board at (turn 0, line 0); later
 # boards are created as the game is played, so only the origin needs writing here.
+
 [start]
 origin = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"

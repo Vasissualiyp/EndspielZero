@@ -208,6 +208,7 @@ rules::RuleEnv Game::makeEnv(const Move* m, Color mover) const {
   env.move = m;
   env.mover = mover;
   env.hasCaptureFrom = [this](CellId c) { return hasCaptureFrom(c); };
+  env.isAttacked = [this](CellId c, Color by) { return gen_.isAttacked(pos_, c, by); };
   return env;
 }
 

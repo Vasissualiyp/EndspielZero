@@ -65,10 +65,22 @@ struct Outline {
 /// A part that is not radially symmetric, placed in the piece's frame and then repeated
 /// by the symmetry group. One ear, mirrored, is two ears.
 struct Element {
+  /// The part's shape in a vertical plane through the axis: `x` runs along the radial
+  /// direction (or, when `tangent`, round the piece), `y` is height above the anchor.
+  /// `x` may be negative - a knight's head reaches both sides of the axis.
   Outline outline;
-  /// Where the element sits, in the same permille frame as the profile.
+  /// Where the element's origin sits, in the same permille frame as the profile.
   std::int16_t radius{0};
   std::int16_t height{0};
+  /// Sideways offset of the origin, round the piece. With a `Mirror` symmetry a nonzero
+  /// offset gives the reflected pair (a knight's two ears); with `KFold` every copy has
+  /// it. Zero puts the part on the symmetry plane.
+  std::int16_t lateral{0};
+  /// How thick the part is, extruded both ways from its plane, in permille.
+  std::int16_t thickness{120};
+  /// The outline spans the tangent direction instead of the radial one: a crown's
+  /// points are broad round the rim, a knight's head is long outward.
+  bool tangent{false};
 
   friend bool operator==(const Element&, const Element&) = default;
 };

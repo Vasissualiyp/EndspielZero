@@ -27,6 +27,24 @@ class Zobrist {
   [[nodiscard]] std::uint64_t castleRights(std::uint32_t mask) const {
     return castleKeys_[mask & 0xFFu];
   }
+  /// Key for "the piece on this cell has moved" - the last extra slot, so it can never
+  /// collide with a field's. Contributes only when the bit is set.
+  [[nodiscard]] std::uint64_t moved(std::uint32_t cell) const {
+    std::uint64_t z = extraKeys_.back() ^ (static_cast<std::uint64_t>(cell) * 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+  }
+  /// Key for "this cell carries a mark of this tag with this many plies left" - the
+  /// second-to-last extra slot. A position with no marks contributes nothing.
+  [[nodiscard]] std::uint64_t mark(std::uint32_t cell, std::uint32_t tag, std::uint32_t ttl) const {
+    std::uint64_t z = extraKeys_[extraKeys_.size() - 2] ^
+                      (static_cast<std::uint64_t>(cell) * 0x9E3779B97F4A7C15ULL) ^
+                      (static_cast<std::uint64_t>(tag * 65536u + ttl) * 0xBF58476D1CE4E5B9ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+  }
   /// Generic slot, used by hashed custom field columns (M5).
   [[nodiscard]] std::uint64_t extra(std::uint32_t slot) const { return extraKeys_[slot]; }
 

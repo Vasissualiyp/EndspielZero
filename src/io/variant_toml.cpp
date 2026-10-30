@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "io/variant_toml.hpp"
 
+#include "io/atom_toml.hpp"
+#include "io/model_toml.hpp"
+#include "io/moveset_library.hpp"
+
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -11,10 +15,12 @@
 
 #include "io/fen_order.hpp"
 #include "io/notation.hpp"
-#include "io/piece_model_toml.hpp"
 #include "io/rule_parse.hpp"
 
 namespace cb {
+namespace {
+const toml::array kNoMoves{};
+}  // namespace
 namespace {
 
 int lineOf(const toml::node& n) {
@@ -305,6 +311,27 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     return fail(r.error().code, r.error().message, r.error().line);
   }
 
+  // ---- mark tags -------------------------------------------------------------
+  // "ep" is tag 0 always; the variant's own follow. Parsed before pieces, which name them.
+  std::vector<std::string> markTagNames{"ep"};
+  v.markTags.clear();
+  v.markTags.push_back(VariantSpec::MarkTag{"ep", false});
+  if (const auto* tags = tbl["mark"].as_array()) {
+    for (const auto& node : *tags) {
+      const auto* t = node.as_table();
+      if (t == nullptr) {
+        return fail(ErrorCode::ValidationError, "[[mark]] must be a table", lineOf(node));
+      }
+      const std::string name = (*t)["name"].value_or(std::string{});
+      if (name.empty()) {
+        return fail(ErrorCode::ValidationError, "every [[mark]] needs a name", lineOf(node));
+      }
+      if (name == "ep") continue;  // always declared
+      markTagNames.push_back(name);
+      v.markTags.push_back(VariantSpec::MarkTag{name, (*t)["blocks"].value_or(false)});
+    }
+  }
+
   // ---- pieces --------------------------------------------------------------
   v.pieces.clear();
   v.pieces.emplace_back();  // the reserved empty entry
@@ -343,32 +370,39 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                     lineOf(node));
       }
     }
-    if (const auto* mt = (*t)["model"].as_table()) {
-      auto model = pieceModelFromToml(*mt);
-      if (!model.has_value()) {
-        return fail(ErrorCode::ValidationError,
-                    "piece '" + p.name + "': " + model.error().message, lineOf(*mt));
-      }
-      p.model = std::move(*model);
+    // An authored body and icon are cosmetic: one that does not build is dropped, and the
+    // piece is drawn from its archetype instead - a variant is never unplayable for want
+    // of a model.
+    if (const auto* bt = (*t)["body"].as_table()) {
+      auto body = bodyFromToml(*bt);
+      if (body.has_value() && assets::validate(*body).has_value()) p.body = std::move(body);
     }
     if (const auto* it = (*t)["icon"].as_table()) {
-      auto icon = pieceIconFromToml(*it);
-      if (!icon.has_value()) {
-        return fail(ErrorCode::ValidationError,
-                    "piece '" + p.name + "': " + icon.error().message, lineOf(*it));
-      }
-      p.icon = std::move(*icon);
+      auto icon = iconFromToml(*it);
+      if (icon.has_value() && assets::validate(*icon).has_value()) p.icon = std::move(icon);
     }
     if (const auto* pr = (*t)["promotes_to"].as_array()) {
       for (const auto& x : *pr) promotesTo[p.name].push_back(x.value_or(std::string{}));
     }
 
+    // A moveset written as text (the symbolic form), or by name from the library, comes
+    // first; any [[piece.move]] entries follow it.
+    if (const auto movesText = (*t)["moves"].value<std::string>()) {
+      const MovesetContext ctx = movesetContextFor(tbl);
+      auto atoms = evalMoveset(*movesText, ctx);
+      if (!atoms.has_value()) {
+        return fail(atoms.error().code,
+                    "piece '" + p.name + "' moves: " + atoms.error().message, lineOf(node));
+      }
+      for (const MoveAtom& a : *atoms) p.atoms.push_back(a);
+    }
     const auto* movesNode = (*t)["move"].as_array();
-    if (movesNode == nullptr || movesNode->empty()) {
+    if ((movesNode == nullptr || movesNode->empty()) && p.atoms.empty()) {
       return fail(ErrorCode::ValidationError,
-                  "piece '" + p.name + "' needs at least one [[piece.move]]",
+                  "piece '" + p.name + "' needs moves = \"...\" or at least one [[piece.move]]",
                   lineOf(node));
     }
+    if (movesNode == nullptr) movesNode = &kNoMoves;
     for (const auto& mnode : *movesNode) {
       const auto* mt = mnode.as_table();
       if (mt == nullptr) {
@@ -376,27 +410,14 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                     lineOf(mnode));
       }
       MoveAtom atom;
-      const auto* vec = (*mt)["vector"].as_array();
-      if (vec == nullptr || vec->empty()) {
-        return fail(ErrorCode::ValidationError,
-                    "piece '" + p.name +
-                        "': a move needs a 'vector' of magnitudes, e.g. vector = [1, 2]",
-                    lineOf(mnode));
-      }
-      for (const auto& m : *vec) {
-        const auto value = m.value<std::int64_t>();
-        if (!value.has_value()) {
-          return fail(ErrorCode::ValidationError,
-                      "piece '" + p.name + "': move vector entries must be integers",
+      {
+        std::vector<std::string> axisNames;
+        for (std::size_t i = 0; i < v.dims.dims(); ++i) axisNames.push_back(v.dims.name(i));
+        std::string why;
+        if (!readAtomKind(*mt, axisNames, v.orientationAxis, markTagNames, atom, why)) {
+          return fail(ErrorCode::ValidationError, "piece '" + p.name + "': " + why,
                       lineOf(mnode));
         }
-        if (atom.mags.size() >= kMaxDims) {
-          return fail(ErrorCode::BudgetExceeded,
-                      "piece '" + p.name + "': a move vector cannot have more than " +
-                          std::to_string(kMaxDims) + " magnitudes",
-                      lineOf(mnode));
-        }
-        atom.mags.push(static_cast<std::int16_t>(*value));
       }
 
       const std::string maxText = (*mt)["max"].value_or(std::string{});
@@ -433,6 +454,7 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                     lineOf(mnode));
       }
       atom.leavesEnPassant = (*mt)["leaves_en_passant"].value_or(false);
+      atom.unmoved = (*mt)["unmoved"].value_or(false);
       if (const auto home = (*mt)["from_rank"].value<std::int64_t>()) {
         if (v.orientationAxis < 0) {
           return fail(
@@ -565,6 +587,68 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
       ct.rightsBit =
           static_cast<std::uint8_t>((*t)["rights_bit"].value_or<std::int64_t>(0));
       v.castles.push_back(std::move(ct));
+    }
+  }
+
+  // ---- compound moves ----------------------------------------------------------
+  if (const auto* comps = tbl["compound"].as_array()) {
+    std::vector<std::string> axisNames;
+    for (std::size_t i = 0; i < v.dims.dims(); ++i) axisNames.push_back(v.dims.name(i));
+    for (const auto& node : *comps) {
+      const auto* t = node.as_table();
+      if (t == nullptr) {
+        return fail(ErrorCode::ValidationError, "[[compound]] must be a table", lineOf(node));
+      }
+      CompoundMove cm;
+      cm.name = (*t)["name"].value_or(std::string{});
+      const std::string letter = (*t)["fen"].value_or(std::string{});
+      if (!letter.empty()) cm.fenLetter = letter[0];
+      const std::string mover = (*t)["piece"].value_or(std::string{});
+      cm.mover = v.findPiece(mover);
+      if (cm.mover == kNoPiece) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "': no piece is called '" + mover + "'",
+                    lineOf(node));
+      }
+      // The mover's step is an exact move, spelled like any other.
+      toml::table asMove = *t;
+      asMove.insert_or_assign("type", std::string("exact"));
+      std::string why;
+      if (!readAtomKind(asMove, axisNames, v.orientationAxis, markTagNames, cm.step, why)) {
+        return fail(ErrorCode::ValidationError, "compound move '" + cm.name + "': " + why,
+                    lineOf(node));
+      }
+      cm.moverUnmoved = (*t)["unmoved"].value_or(true);
+      cm.partnerUnmoved = (*t)["partner_unmoved"].value_or(true);
+      if (const auto* partners = (*t)["partner"].as_array()) {
+        for (const auto& x : *partners) {
+          const std::string pn = x.value_or(std::string{});
+          const PieceTypeId id = v.findPiece(pn);
+          if (id == kNoPiece) {
+            return fail(ErrorCode::ValidationError,
+                        "compound move '" + cm.name + "': no partner piece is called '" + pn + "'",
+                        lineOf(node));
+          }
+          cm.partners.push_back(id);
+        }
+      }
+      if (const auto* safe = (*t)["safe"].as_array()) {
+        for (const auto& x : *safe) {
+          const std::string sc = x.value_or(std::string{});
+          if (sc == "from") {
+            cm.safe.push_back(CompoundMove::SafeCell::From);
+          } else if (sc == "path") {
+            cm.safe.push_back(CompoundMove::SafeCell::Path);
+          } else if (sc == "to") {
+            cm.safe.push_back(CompoundMove::SafeCell::To);
+          } else {
+            return fail(ErrorCode::ValidationError,
+                        "compound move '" + cm.name + "': 'safe' lists from, path and to - not '" + sc + "'",
+                        lineOf(node));
+          }
+        }
+      }
+      v.compounds.push_back(std::move(cm));
     }
   }
 

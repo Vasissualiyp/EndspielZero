@@ -107,6 +107,16 @@ std::int64_t RuleEngine::eval(const Expr& e, const RuleEnv& env,
       // kInvalidCell asks "anywhere", which is what a forced-capture rule needs.
       return env.hasCaptureFrom && env.hasCaptureFrom(kInvalidCell) ? 1 : 0;
 
+    case ExprOp::Attacked: {
+      const CellId c = cellOf(0);
+      if (c == kInvalidCell || !env.isAttacked) return 0;
+      return env.isAttacked(c, opponent(env.mover)) ? 1 : 0;
+    }
+    case ExprOp::Marked: {
+      const CellId c = cellOf(0);
+      if (c == kInvalidCell) return 0;
+      return p.markAt(c, static_cast<std::uint16_t>(e.imm)) != nullptr ? 1 : 0;
+    }
     case ExprOp::HasCaptureFrom: {
       const CellId c = cellOf(0);
       if (c == kInvalidCell || !env.hasCaptureFrom) return 0;

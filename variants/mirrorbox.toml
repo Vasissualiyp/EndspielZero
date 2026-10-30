@@ -11,7 +11,7 @@ name = "mirrorbox"
 description = "The file walls reflect instead of joining. Rays bounce, and nothing ever teleports."
 difficulty = "easy"
 side_to_move = "white"
-en_passant = true
+en_passant = false
 stalemate = "draw"
 halfmove_draw_limit = 100
 orientation_axis = "rank"
@@ -57,8 +57,8 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "slide"
   capture = "cannot"
   forward = true
-  from_rank = 1
-  leaves_en_passant = true
+  unmoved = true
+  marks = [{ tag = "ep", where = "passed", duration = 1 }]
 
   [[piece.move]]
   vector = [1, 1]
@@ -66,6 +66,18 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "leap"
   capture = "must"
   forward = true
+
+  # En passant: capture-only, landing on the cell a double step passed over and taking the
+  # pawn that passed it - a capture at an offset, allowed only onto an "ep" mark.
+  [[piece.move]]
+  vector = [1]
+  pin = ["rank:+1"]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  flip = true
+  captures_at = ["rank:-1"]
+  needs_mark = "ep"
 
 [[piece]]
 name = "knight"
@@ -97,31 +109,13 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 [start]
 board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"

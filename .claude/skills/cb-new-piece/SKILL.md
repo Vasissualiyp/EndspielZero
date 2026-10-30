@@ -26,8 +26,8 @@ symbol = "S"
 
 A piece with any `forward = true` atom turns round on crossing a seam that reverses the
 orientation axis (ADR-0020); put `flips_on_mirror = false` on the `[[piece]]` to keep its
-forward fixed instead. Its look is `[piece.model]` / `[piece.icon]` (M7.3.4, see
-`src/io/piece_model_toml.hpp`) - cosmetic, outside `VariantId`.
+forward fixed instead. Its look is `[piece.body]` / `[piece.icon]` (M7.3, see
+`src/io/model_toml.hpp`) - cosmetic, outside `VariantId`.
 
 Familiar pieces: rook `[1]` inf slide; bishop `[1,1]` inf slide; knight `[1,2]` max 1
 leap; king `[1]` + `[1,1]` at max 1; queen `[1]` + `[1,1]` inf.

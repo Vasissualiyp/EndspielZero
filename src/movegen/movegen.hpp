@@ -87,6 +87,9 @@ class MoveGen {
   void emit(const Position& p, Move m, PieceTypeId type, Color orient, bool reorient,
             const Coord& toCoord, MoveList& out) const;
   void generateCastles(const Position& p, Color side, MoveList& out) const;
+  /// The variant's compound moves (castling and kin): the mover's step, the partner found
+  /// along it, the cells that must not be attacked.
+  void generateCompounds(const Position& p, Color side, MoveList& out) const;
 
   /// The slow, always-correct attack test: generate everything `by` could do and
   /// look for a capture of the target.

@@ -241,7 +241,17 @@ void Shell::go(Screen s) {
   screen_ = s;
 }
 
+void Shell::discardEditorChanges() {
+  if (editor_ == nullptr) return;
+  const std::string name = editorVariant_;
+  (void)openEditor(name);
+}
+
 void Shell::back() {
+  if (screen_ == Screen::Editor && editor_ != nullptr && editor_->dirty() && !forceLeaveEditor_) {
+    editorLeaveRequested_ = true;
+    return;
+  }
   switch (screen_) {
     case Screen::Settings:
     case Screen::Editor:
@@ -320,6 +330,11 @@ Result<void> Shell::saveEditor() {
   }
   if (editorPath_.empty()) {
     return fail(ErrorCode::Internal, "no save path is installed for the editor");
+  }
+  // One validator: the file is written only if the loader would accept it.
+  if (auto ok = editor_->validate(); !ok.has_value()) {
+    message_ = ok.error().format();
+    return ok;
   }
   if (auto ok = editor_->saveFile(editorPath_); !ok.has_value()) return ok;
   // The file on disk changed under the cached preview; the next look loads it afresh.
@@ -561,6 +576,16 @@ Result<void> Shell::startAttractStep(std::size_t index) {
     return fail(ErrorCode::OutOfRange, "attract step out of range");
   }
   const AttractStep step = attract_[index];
+  // The trailer plays the variants as they ship: swapped in for this call, put back on every
+  // way out.
+  struct LoaderSwap {
+    VariantLoader& slot;
+    VariantLoader saved;
+    LoaderSwap(VariantLoader& s, const VariantLoader& shipped) : slot(s), saved(s) {
+      if (shipped) slot = shipped;
+    }
+    ~LoaderSwap() { slot = std::move(saved); }
+  } loaderSwap(loader_, shippedLoader_);
   // Continuity (M13.9 Part F): carry the previous beat's own end-of-game position onto
   // this beat's board. Computed - FEN and all - entirely *before* `startGame` below
   // replaces `session_`, and against a freshly loaded `VariantSpec` of our own rather
@@ -870,8 +895,13 @@ bool Shell::advanceAttract(float dt) {
   const std::size_t next = attractIndex_ + 1 < attract_.size() ? attractIndex_ + 1 : 0;
   const float before = trailerTime();
   if (auto ok = startAttractStep(next); !ok.has_value()) {
-    attract_.clear();
-    return false;
+    // A beat that cannot start must not turn the trailer into an ordinary game: begin the
+    // sequence again from its opener, and give up only if that fails too.
+    if (auto again = startAttractStep(0); !again.has_value()) {
+      attract_.clear();
+      return false;
+    }
+    return true;
   }
   // Keep the timeline position continuous through the cut; the loop's wrap is a hard cut.
   if (next != 0) trailerShift_ = before - trailerTime();

@@ -254,3 +254,106 @@ TEST_CASE("a queen with triagonals is still a queen, and only a unicorn is a hor
   const VariantSpec cube = test::loadVariant("cube5");
   CHECK(archetypeFor(cube.pieces[cube.findPiece("unicorn")]) == Archetype::Horn);
 }
+
+TEST_CASE("an authored body assembles into a sound, deterministic mesh", "[render][model]") {
+  for (const char* name : {"dome", "tower", "wedge", "spire", "crown", "monolith", "horn"}) {
+    INFO(name);
+    const assets::PieceModel m = assets::archetypeModel(name);
+    const ModelMesh a = assembleModel(m);
+    const ModelMesh b = assembleModel(m);
+    REQUIRE_FALSE(a.vertices.empty());
+    REQUIRE(a.indices.size() % 3 == 0);
+    CHECK(a.vertices.size() < 65536);
+    CHECK(a.indices == b.indices);
+    CHECK(a.height > 0.5f);
+    for (const std::uint16_t i : a.indices) REQUIRE(i < a.vertices.size());
+    // Every triangle faces the way its vertices say it does: nothing is inside out.
+    for (std::size_t t = 0; t + 2 < a.indices.size(); t += 3) {
+      const auto& p = a.vertices[a.indices[t]];
+      const auto& q = a.vertices[a.indices[t + 1]];
+      const auto& r = a.vertices[a.indices[t + 2]];
+      const float ux = q.pos[0] - p.pos[0], uy = q.pos[1] - p.pos[1], uz = q.pos[2] - p.pos[2];
+      const float vx = r.pos[0] - p.pos[0], vy = r.pos[1] - p.pos[1], vz = r.pos[2] - p.pos[2];
+      const float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const float agree = nx * (p.normal[0] + q.normal[0] + r.normal[0]) +
+                          ny * (p.normal[1] + q.normal[1] + r.normal[1]) +
+                          nz * (p.normal[2] + q.normal[2] + r.normal[2]);
+      REQUIRE(agree >= 0.0f);
+    }
+  }
+
+  SECTION("a k-fold symmetry places k copies, and a mirror places a reflected pair") {
+    assets::PieceModel rook = assets::archetypeModel("tower");
+    const std::size_t bare = [&] {
+      assets::PieceModel p = rook;
+      p.elements.clear();
+      return assembleModel(p).vertices.size();
+    }();
+    const std::size_t four = assembleModel(rook).vertices.size() - bare;
+    rook.symmetry.k = 8;
+    const std::size_t eight = assembleModel(rook).vertices.size() - bare;
+    CHECK(eight == four * 2);
+
+    assets::PieceModel knight = assets::archetypeModel("wedge");
+    const std::size_t one = assembleModel(knight).vertices.size();
+    knight.elements[0].lateral = 100;
+    const ModelMesh pair = assembleModel(knight);
+    CHECK(pair.vertices.size() > one);
+    // The pair really is a reflection: every point has a partner across the plane y = 0.
+    for (const MeshVertex& v : pair.vertices) {
+      bool found = false;
+      for (const MeshVertex& w : pair.vertices) {
+        if (std::abs(w.pos[0] - v.pos[0]) < 1e-4f && std::abs(w.pos[1] + v.pos[1]) < 1e-4f &&
+            std::abs(w.pos[2] - v.pos[2]) < 1e-4f) {
+          found = true;
+          break;
+        }
+      }
+      REQUIRE(found);
+    }
+  }
+}
+
+TEST_CASE("authored bodies take custom slots after the archetypes", "[render][model]") {
+  const MeshLibrary plain = MeshLibrary::build();
+  CustomBody knight;
+  knight.slot = 2;
+  knight.fallback = Archetype::Wedge;
+  knight.body = assets::archetypeModel("wedge");
+  const MeshLibrary with = MeshLibrary::build({knight});
+
+  // The shipped shapes are exactly what they were: nothing is renumbered or rebuilt.
+  for (std::size_t i = 0; i < static_cast<std::size_t>(Archetype::Count); ++i) {
+    CHECK(with.ranges[i].firstIndex == plain.ranges[i].firstIndex);
+    CHECK(with.ranges[i].indexCount == plain.ranges[i].indexCount);
+    CHECK(with.ranges[i].vertexOffset == plain.ranges[i].vertexOffset);
+  }
+  const std::size_t at = static_cast<std::size_t>(customShape(2));
+  CHECK(with.ranges[at].indexCount > 0);
+  CHECK(with.cylinderRanges[at].indexCount > 0);  // its puck, from the fallback icon
+  CHECK(with.discRanges[at].indexCount > 0);
+  // An unused slot draws nothing.
+  CHECK(with.ranges[static_cast<std::size_t>(customShape(0))].indexCount == 0);
+  CHECK(with.vertices.size() > plain.vertices.size());
+  for (const std::uint16_t i : with.indices) REQUIRE(i < 65535);
+}
+
+TEST_CASE("an authored icon becomes a drawable table", "[render][model]") {
+  assets::IconModel model;
+  assets::Outline fill;
+  fill.points = {{100, 100}, {900, 100}, {900, 900}, {100, 900}};
+  assets::Outline cut;
+  cut.points = {{400, 400}, {600, 400}, {600, 600}, {400, 600}};
+  model.fills.push_back(fill);
+  model.cuts.push_back(cut);
+  const OwnedIcon icon(model);
+  const PieceIcon view = icon.view();
+  REQUIRE(view.fills.size() == 1);
+  REQUIRE(view.cuts.size() == 1);
+  CHECK(view.fills[0][0].x == 10.0f);  // permille to the 100-unit glyph box
+  CHECK(view.fills[0][2].y == 90.0f);
+  CHECK(view.cuts[0].size() == 4);
+  // Moving it keeps the points the spans refer to.
+  const OwnedIcon moved = OwnedIcon(model);
+  CHECK(moved.view().fills[0][1].x == 90.0f);
+}

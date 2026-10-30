@@ -102,6 +102,17 @@ std::string sanText(const VariantSpec& v, const Position& pos, const Move& m,
   const DimSpec& d = v.dims;
   const bool algebraic = d.dims() == 2 && d.extent(0) <= 26 && d.extent(1) <= 9;
 
+  if (m.isCastle() && (m.castleIndex & kCompoundBit) != 0) {
+    // A compound move: castling toward the higher files is O-O, toward the lower O-O-O, and
+    // anything else (another axis, another piece) is its own name.
+    const CompoundMove& cm = v.compounds[static_cast<std::size_t>(m.castleIndex & 0x7Fu)];
+    const Coord from = d.toCoord(m.from);
+    const Coord to = d.toCoord(m.to);
+    if (d.dims() >= 1 && from.c[1 % d.dims()] == to.c[1 % d.dims()] && d.dims() >= 2) {
+      return to.c[0] > from.c[0] ? "O-O" : "O-O-O";
+    }
+    return cm.name;
+  }
   if (m.isCastle() && !v.castles.empty()) {
     const CastleTemplate& ct = v.castles[m.castleIndex];
     const bool kingSide = d.toCoord(ct.kingTo).c[0] > d.toCoord(ct.kingFrom).c[0];

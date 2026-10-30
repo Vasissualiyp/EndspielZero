@@ -11,7 +11,7 @@ name = "atomic_torus"
 description = "Atomic chess on a torus, where the explosions meet geometry that wraps."
 difficulty = "medium"
 side_to_move = "white"
-en_passant = true
+en_passant = false
 stalemate = "draw"
 halfmove_draw_limit = 100
 orientation_axis = "rank"
@@ -48,8 +48,8 @@ resets_draw_clock = true
   mode = "slide"
   capture = "cannot"
   forward = true
-  from_rank = 1
-  leaves_en_passant = true
+  unmoved = true
+  marks = [{ tag = "ep", where = "passed", duration = 1 }]
 
   # The diagonal capture: magnitudes {1,1}, forward, capture-only.
   [[piece.move]]
@@ -58,6 +58,18 @@ resets_draw_clock = true
   mode = "leap"
   capture = "must"
   forward = true
+
+  # En passant: capture-only, landing on the cell a double step passed over and taking the
+  # pawn that passed it - a capture at an offset, allowed only onto an "ep" mark.
+  [[piece.move]]
+  vector = [1]
+  pin = ["rank:+1"]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  flip = true
+  captures_at = ["rank:-1"]
+  needs_mark = "ep"
 
 [[piece]]
 name = "knight"
@@ -89,31 +101,13 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 [[geometry.identify]]
 axis = "file"

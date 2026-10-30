@@ -10,7 +10,7 @@ name = "charged"
 description = "Pieces carry custom data fields that travel with them across the board."
 difficulty = "other"
 side_to_move = "white"
-en_passant = true
+en_passant = false
 stalemate = "draw"
 halfmove_draw_limit = 100
 orientation_axis = "rank"
@@ -57,8 +57,8 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "slide"
   capture = "cannot"
   forward = true
-  from_rank = 1
-  leaves_en_passant = true
+  unmoved = true
+  marks = [{ tag = "ep", where = "passed", duration = 1 }]
 
   # The diagonal capture: magnitudes {1,1}, forward, capture-only.
   [[piece.move]]
@@ -67,6 +67,18 @@ promotes_to = ["knight", "bishop", "rook", "queen"]
   mode = "leap"
   capture = "must"
   forward = true
+
+  # En passant: capture-only, landing on the cell a double step passed over and taking the
+  # pawn that passed it - a capture at an offset, allowed only onto an "ep" mark.
+  [[piece.move]]
+  vector = [1]
+  pin = ["rank:+1"]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  flip = true
+  captures_at = ["rank:-1"]
+  needs_mark = "ep"
 
 [[piece]]
 name = "knight"
@@ -98,80 +110,36 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 # ---------------------------------------------------------------------------
-# Castling: cell lists rather than "two squares to the right", so the same
-# template shape works in any dimension and on any topology.
+# Castling, as compound moves: the king steps two along the file, the rook is *found* beyond
+# it (the first rook along the way, unmoved), and the king's start, the cell it crosses and
+# the cell it lands on must not be attacked. No cell is named, so the same two definitions
+# castle on any board size, in any dimension.
 # ---------------------------------------------------------------------------
 
-[[castle]]
-name = "K"
-color = "white"
-king_from = "e1"
-king_to = "g1"
-rook_from = "h1"
-rook_to = "f1"
-empty = ["f1", "g1"]
-safe = ["e1", "f1", "g1"]
-rights_bit = 0
+[[compound]]
+name = "castle kingside"
+piece = "king"
+vector = [2, 0]
+partner = ["rook"]
+safe = ["from", "path", "to"]
+fen = "K"
 
-[[castle]]
-name = "Q"
-color = "white"
-king_from = "e1"
-king_to = "c1"
-rook_from = "a1"
-rook_to = "d1"
-empty = ["b1", "c1", "d1"]
-safe = ["e1", "d1", "c1"]
-rights_bit = 1
-
-[[castle]]
-name = "k"
-color = "black"
-king_from = "e8"
-king_to = "g8"
-rook_from = "h8"
-rook_to = "f8"
-empty = ["f8", "g8"]
-safe = ["e8", "f8", "g8"]
-rights_bit = 2
-
-[[castle]]
-name = "q"
-color = "black"
-king_from = "e8"
-king_to = "c8"
-rook_from = "a8"
-rook_to = "d8"
-empty = ["b8", "c8", "d8"]
-safe = ["e8", "d8", "c8"]
-rights_bit = 3
+[[compound]]
+name = "castle queenside"
+piece = "king"
+vector = [-2, 0]
+partner = ["rook"]
+safe = ["from", "path", "to"]
+fen = "Q"
 
 [start]
 board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"

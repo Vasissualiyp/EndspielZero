@@ -18,6 +18,9 @@ Position::Position(const VariantSpec& v)
     cellFields_[i].assign(v.dims.cellCount(), v.cellFields[i].defaultValue);
   }
   side_ = v.startSideToMove;
+  // Room for the marks a move or two leaves, so playing never allocates for them.
+  marks_.reserve(16);
+  markScratch_.reserve(16);
   hash_ = computeHash();
 }
 
@@ -84,8 +87,8 @@ void Position::clear() {
   for (Piece& c : cells_) c = Piece{};
   for (auto& o : occ_) o.clear();
   occAll_.clear();
-  ep_ = kInvalidCell;
-  epVictim_ = kInvalidCell;
+  marks_.clear();
+  rebuildBlocked();
   castleRights_ = 0;
   halfmove_ = 0;
   fullmove_ = 1;
@@ -97,12 +100,14 @@ void Position::addPiece(CellId c, Piece p) {
   occ_[p.color].set(c);
   occAll_.set(c);
   hash_ ^= v_->zob.piece(c, pieceCode(p.type, p.colorOf()));
+  if (p.hasMoved()) hash_ ^= v_->zob.moved(c);
   if (p.flipped()) hash_ ^= v_->zob.flipped(c);
 }
 
 void Position::removePiece(CellId c) {
   const Piece p = cells_[c];
   hash_ ^= v_->zob.piece(c, pieceCode(p.type, p.colorOf()));
+  if (p.hasMoved()) hash_ ^= v_->zob.moved(c);
   if (p.flipped()) hash_ ^= v_->zob.flipped(c);
   cells_[c] = Piece{};
   occ_[p.color].clearBit(c);
@@ -125,17 +130,78 @@ void Position::setSideToMove(Color c) {
   }
 }
 
+CellId Position::epTarget() const noexcept {
+  for (const Mark& m : marks_) {
+    if (m.tag == 0) return m.cell;
+  }
+  return kInvalidCell;
+}
+
+CellId Position::epVictim() const noexcept {
+  for (const Mark& m : marks_) {
+    if (m.tag == 0) return m.victim;
+  }
+  return kInvalidCell;
+}
+
+const Mark* Position::markAt(CellId c, std::uint16_t tag) const noexcept {
+  for (const Mark& m : marks_) {
+    if (m.cell == c && m.tag == tag) return &m;
+  }
+  return nullptr;
+}
+
+void Position::rebuildBlocked() {
+  anyBlocked_ = false;
+  if (!v_->hasBlockingMarks) return;
+  if (blocked_.size() != cellCount()) blocked_.reset(cellCount());
+  blocked_.clear();
+  for (const Mark& m : marks_) {
+    if (m.tag < v_->markTags.size() && v_->markTags[m.tag].blocks) {
+      blocked_.set(m.cell);
+      anyBlocked_ = true;
+    }
+  }
+}
+
+void Position::hashMarks(const std::vector<Mark>& marks) {
+  for (const Mark& m : marks) hash_ ^= v_->zob.mark(m.cell, m.tag, m.ttl);
+}
+
+void Position::addMark(const Mark& m) {
+  marks_.push_back(m);
+  hash_ ^= v_->zob.mark(m.cell, m.tag, m.ttl);
+  rebuildBlocked();
+}
+
 void Position::setEpTarget(CellId target, CellId victim) {
-  hash_ ^= v_->zob.epTarget(ep_ == kInvalidCell ? cellCount() : ep_);
-  ep_ = target;
-  epVictim_ = target == kInvalidCell ? kInvalidCell : victim;
-  hash_ ^= v_->zob.epTarget(ep_ == kInvalidCell ? cellCount() : ep_);
+  // The tag-0 mark is the en-passant target: replace whatever there was. Set up from FEN
+  // or a test, so the side to move is the one who may use it and the opponent made it.
+  for (std::size_t i = marks_.size(); i-- > 0;) {
+    if (marks_[i].tag == 0) {
+      hash_ ^= v_->zob.mark(marks_[i].cell, 0, marks_[i].ttl);
+      marks_.erase(marks_.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+  }
+  if (target != kInvalidCell) {
+    addMark(Mark{target, 0, 1, static_cast<std::uint8_t>(opponent(side_)), victim});
+  }
 }
 
 void Position::setCastleRights(std::uint8_t mask) {
   hash_ ^= v_->zob.castleRights(castleRights_);
   castleRights_ = mask;
   hash_ ^= v_->zob.castleRights(castleRights_);
+}
+
+void Position::setMoved(CellId c, bool moved) {
+  const Piece p = cells_[c];
+  if (p.empty() || !v_->pieces[p.type].tracksMoved) return;
+  if (p.hasMoved() == moved) return;
+  removePiece(c);
+  addPiece(c, Piece{p.type, p.color,
+                    moved ? static_cast<std::uint8_t>(p.flags | kPieceMoved)
+                          : static_cast<std::uint8_t>(p.flags & ~kPieceMoved)});
 }
 
 void Position::setClocks(std::int32_t halfmove, std::int32_t fullmove) {
@@ -166,25 +232,25 @@ std::uint64_t Position::computeHash() const {
     const Piece p = cells_[c];
     if (p.empty()) continue;
     h ^= v_->zob.piece(c, pieceCode(p.type, p.colorOf()));
+    if (p.hasMoved()) h ^= v_->zob.moved(c);
     if (p.flipped()) h ^= v_->zob.flipped(c);
   }
   if (side_ == Color::Black) h ^= v_->zob.side();
-  h ^= v_->zob.epTarget(ep_ == kInvalidCell ? cellCount() : ep_);
+  for (const Mark& m : marks_) h ^= v_->zob.mark(m.cell, m.tag, m.ttl);
   h ^= v_->zob.castleRights(castleRights_);
   return h;
 }
 
 void Position::make(const Move& m, Undo& u) {
   u.captured = Piece{};
-  u.epBefore = ep_;
-  u.epVictimBefore = epVictim_;
+  u.marksInlineCount = 0;
+  u.marksSpilled = false;
   u.castleRightsBefore = castleRights_;
   u.halfmoveBefore = halfmove_;
   u.hashBefore = hash_;
 
   const Piece mover = cells_[m.from];
   assert(!mover.empty() && "moving from an empty cell");
-  u.moverFlagsBefore = mover.flags;
 
   bool resetClock = false;
   if (m.captureCell != kInvalidCell) {
@@ -208,20 +274,29 @@ void Position::make(const Move& m, Undo& u) {
   removePiece(m.from);
   const PieceTypeId landing =
       has(m.flags, MoveFlag::Promotion) ? m.promoteTo : mover.type;
-  std::uint8_t landingFlags = mover.flags;
-  if (has(m.flags, MoveFlag::Reorient)) landingFlags ^= kPieceFlipped;
+  // The mover has now moved, if anything about its type cares.
+  u.moverFlags = mover.flags;
+  std::uint8_t landedFlags =
+      v_->pieces[landing].tracksMoved
+          ? static_cast<std::uint8_t>(mover.flags | kPieceMoved)
+          : static_cast<std::uint8_t>(mover.flags & ~kPieceMoved);
+  if (has(m.flags, MoveFlag::Reorient)) landedFlags ^= kPieceFlipped;
   // Only a piece that reorients carries the bit: a pawn promoting into a queen sheds
   // it, so two otherwise identical queens never hash differently.
   if (!v_->pieces[landing].reorients) {
-    landingFlags = static_cast<std::uint8_t>(landingFlags & ~kPieceFlipped);
+    landedFlags = static_cast<std::uint8_t>(landedFlags & ~kPieceFlipped);
   }
-  addPiece(m.to, Piece{landing, mover.color, landingFlags});
+  addPiece(m.to, Piece{landing, mover.color, landedFlags});
 
-  if (has(m.flags, MoveFlag::Castle)) {
-    const CastleTemplate& ct = v_->castles[m.castleIndex];
-    const Piece rook = cells_[ct.rookFrom];
-    removePiece(ct.rookFrom);
-    addPiece(ct.rookTo, rook);
+  // A two-piece move (castling, any compound move): the partner is carried too, and has moved.
+  if (m.partnerFrom != kInvalidCell) {
+    const Piece partner = cells_[m.partnerFrom];
+    u.partnerFlags = partner.flags;
+    removePiece(m.partnerFrom);
+    addPiece(m.partnerTo, Piece{partner.type, partner.color,
+                                v_->pieces[partner.type].tracksMoved
+                                    ? static_cast<std::uint8_t>(partner.flags | kPieceMoved)
+                                    : partner.flags});
   }
 
   if (v_->pieces[mover.type].resetsDrawClock) resetClock = true;
@@ -237,10 +312,60 @@ void Position::make(const Move& m, Undo& u) {
   }
   if (rights != castleRights_) setCastleRights(rights);
 
-  if (has(m.flags, MoveFlag::LeavesEnPassant)) {
-    setEpTarget(m.epTarget, m.epVictim);
-  } else {
-    setEpTarget(kInvalidCell);
+  // Marks: the ones already on the board age by a ply (and the last of them goes), then this
+  // move's own are left. En passant is the tag-0 mark; the move that made it is the mover's.
+  const bool leavesMarks =
+      has(m.flags, MoveFlag::LeavesEnPassant) ||
+      (m.atomIndex != 0xFF && !v_->pieces[mover.type].atoms[m.atomIndex].marks.empty());
+  if (!marks_.empty() || leavesMarks) {
+    u.saveMarks(marks_);
+    hashMarks(marks_);
+    std::vector<Mark>& kept = markScratch_;
+    kept.clear();
+    for (Mark mk : marks_) {
+      if (mk.ttl != 0) {
+        --mk.ttl;
+        if (mk.ttl == 0) continue;
+      }
+      kept.push_back(mk);
+    }
+    if (has(m.flags, MoveFlag::LeavesEnPassant) && m.epTarget != kInvalidCell) {
+      kept.push_back(Mark{m.epTarget, 0, 1, static_cast<std::uint8_t>(side_), m.epVictim});
+    }
+    if (m.atomIndex != 0xFF) {
+      for (const MarkSpec& spec : v_->pieces[mover.type].atoms[m.atomIndex].marks) {
+        const auto leave = [&](CellId cell) {
+          if (cell == kInvalidCell) return;
+          kept.push_back(Mark{cell, spec.tag, static_cast<std::uint16_t>(spec.duration),
+                              static_cast<std::uint8_t>(side_), kInvalidCell});
+        };
+        switch (spec.where) {
+          case MarkWhere::Passed:
+            leave(m.epTarget);
+            break;
+          case MarkWhere::Landed:
+            leave(m.to);
+            break;
+          case MarkWhere::Around: {
+            const Coord centre = v_->dims.toCoord(m.to);
+            for (CellId c = 0; c < v_->dims.cellCount(); ++c) {
+              if (c == m.to) continue;
+              const Coord at = v_->dims.toCoord(c);
+              bool near = true;
+              for (std::uint8_t a = 0; a < v_->dims.dims() && near; ++a) {
+                const int dd = at.c[a] - centre.c[a];
+                near = (dd < 0 ? -dd : dd) <= static_cast<int>(spec.radius);
+              }
+              if (near) leave(c);
+            }
+            break;
+          }
+        }
+      }
+    }
+    marks_.swap(kept);
+    hashMarks(marks_);
+    rebuildBlocked();
   }
 
   halfmove_ = resetClock ? 0 : halfmove_ + 1;
@@ -268,11 +393,10 @@ void Position::unmake(const Move& m, const Undo& u) {
   setSideToMove(opponent(side_));
   if (side_ == Color::Black) --fullmove_;
 
-  if (has(m.flags, MoveFlag::Castle)) {
-    const CastleTemplate& ct = v_->castles[m.castleIndex];
-    const Piece rook = cells_[ct.rookTo];
-    removePiece(ct.rookTo);
-    addPiece(ct.rookFrom, rook);
+  if (m.partnerFrom != kInvalidCell) {
+    const Piece partner = cells_[m.partnerTo];
+    removePiece(m.partnerTo);
+    addPiece(m.partnerFrom, Piece{partner.type, partner.color, u.partnerFlags});
   }
 
   const Piece landed = cells_[m.to];
@@ -288,14 +412,16 @@ void Position::unmake(const Move& m, const Undo& u) {
     return landed.type;
   }()
                                                                  : landed.type;
-  addPiece(m.from, Piece{original, landed.color, u.moverFlagsBefore});
+  addPiece(m.from, Piece{original, landed.color, u.moverFlags});
 
   if (m.captureCell != kInvalidCell) addPiece(m.captureCell, u.captured);
 
   // Restoring these directly (rather than re-deriving) is what makes unmake
   // exact: the hash is restored, not recomputed, so a mismatch is detectable.
-  ep_ = u.epBefore;
-  epVictim_ = u.epVictimBefore;
+  if (u.hadMarks() || !marks_.empty()) {
+    u.loadMarks(marks_);
+    rebuildBlocked();
+  }
   castleRights_ = u.castleRightsBefore;
   halfmove_ = u.halfmoveBefore;
   hash_ = u.hashBefore;

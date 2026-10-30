@@ -62,10 +62,13 @@ struct PieceTypeDef {
   /// deterministic core and may not contain floating point.
   std::string shape;
   int heightPermille{0};
-  /// An authored body and flat icon (M7.3.4, `[piece.model]` / `[piece.icon]`). Absent
-  /// means "assemble one from the archetype", which is every shipped piece until
-  /// someone draws it. Cosmetic: neither enters `VariantId`.
-  std::optional<assets::PieceModel> model;
+  /// Computed by finalize(): some move of this piece needs `unmoved`, so the engine keeps
+  /// its moved bit. A piece nothing asks about is never tracked.
+  bool tracksMoved{false};
+  /// An authored body and flat icon (M7.3), when the variant gives the piece them. Both
+  /// are cosmetic and outside the variant's identity: changing how a bishop looks must
+  /// not make a saved game unreplayable. Integer permille, like everything here.
+  std::optional<assets::PieceModel> body;
   std::optional<assets::IconModel> icon;
 };
 
@@ -82,6 +85,36 @@ struct CastleTemplate {
   std::vector<CellId> mustBeEmpty;
   std::vector<CellId> mustBeSafe;  ///< not attacked by the opponent
   std::uint8_t rightsBit{0};
+};
+
+/// A move of two pieces (M19): castling, and any move like it. The *mover* makes an exact
+/// step (the king's two cells); the *partner* is found, not named - the first piece along
+/// the mover's direction of travel, beyond where the mover lands - and is carried to the cell
+/// the mover crossed last. Nothing is a fixed coordinate, so the same definition castles on
+/// any board size, along any axis, on either side, in any dimension.
+///
+/// The conditions are the ones castling has: the mover (and the partner) unmoved, the cells
+/// between them empty (implied by "the first piece along the way"), and none of the named
+/// cells attacked by the other side.
+struct CompoundMove {
+  /// Which cells of the mover's travel must not be attacked: where it starts, the cells it
+  /// crosses (strictly between start and landing), and where it lands.
+  enum class SafeCell : std::uint8_t { From, Path, To };
+
+  std::string name;
+  /// The FEN castling letter - upper case for White, lower for Black - or 0 for none.
+  char fenLetter{0};
+  PieceTypeId mover{kNoPiece};
+  /// The mover's exact step. Its direction per colour is resolved by finalize().
+  MoveAtom step;
+  bool moverUnmoved{true};
+  std::vector<PieceTypeId> partners;
+  bool partnerUnmoved{true};
+  std::vector<SafeCell> safe;
+  /// Resolved by finalize(): the unit direction of the step per colour (an index into the
+  /// direction table) and how many of them make the whole step.
+  std::uint32_t unitDir[kNumColors]{};
+  std::uint32_t steps{1};
 };
 
 struct StartPiece {
@@ -122,6 +155,20 @@ class VariantSpec {
   /// Index 0 is the reserved empty entry, so a PieceTypeId indexes directly.
   std::vector<PieceTypeDef> pieces;
   std::vector<CastleTemplate> castles;
+  std::vector<CompoundMove> compounds;
+  /// The tags marks can carry (M19). Index 0 is always "ep", the en-passant target, which
+  /// blocks nothing; a variant adds its own, and a tag that `blocks` makes the cells it is
+  /// on impassable and un-enterable (a "destroyed" square).
+  struct MarkTag {
+    std::string name;
+    bool blocks{false};
+  };
+  std::vector<MarkTag> markTags;
+  /// Computed by finalize(): some tag blocks, or some move captures at an offset - the two
+  /// things movegen pays for only when a variant uses them.
+  bool hasBlockingMarks{false};
+  bool hasOffsetCaptures{false};
+  [[nodiscard]] int findMarkTag(std::string_view name) const;
   std::vector<StartPiece> start;
   Color startSideToMove{Color::White};
 

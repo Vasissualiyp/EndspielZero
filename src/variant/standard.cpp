@@ -39,12 +39,6 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   constexpr int kRankAxis = 1;
   v.orientationAxis = kRankAxis;
 
-  const auto cell = [&](int file, int rank) {
-    Coord p(v.dims.dims());
-    p.c[0] = static_cast<std::int16_t>(file);
-    p.c[1] = static_cast<std::int16_t>(rank);
-    return v.dims.toCell(p);
-  };
 
   // ---- piece types --------------------------------------------------------
   v.pieces.clear();
@@ -63,9 +57,8 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   dbl.minK = 2;
   dbl.oriented = true;
   dbl.capture = CapturePolicy::Cannot;
-  dbl.leavesEnPassant = true;
-  dbl.fromRegion[static_cast<std::size_t>(Color::White)] = Region{kRankAxis, 1};
-  dbl.fromRegion[static_cast<std::size_t>(Color::Black)] = Region{kRankAxis, 6};
+  dbl.unmoved = true;
+  dbl.marks.push_back(MarkSpec{0, MarkWhere::Passed, 1, 1});  // the "ep" tag, one ply
 
   MoveAtom pawnCapture = atom({1, 1}, 1, MoveMode::Leap);
   pawnCapture.oriented = true;
@@ -74,7 +67,15 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   PieceTypeDef pawn;
   pawn.name = "pawn";
   pawn.symbol = 'P';
-  pawn.atoms = {push, dbl, pawnCapture};
+  // En passant: land on the cell a double step passed over, take the pawn beside it.
+  MoveAtom passant = atom({1}, 1, MoveMode::Leap);
+  passant.pins.push(Pin{static_cast<std::uint8_t>(kRankAxis), 1});
+  passant.flip = true;
+  passant.capture = CapturePolicy::Must;
+  passant.captureAt.push(Pin{static_cast<std::uint8_t>(kRankAxis), -1});
+  passant.needsMark = 0;
+
+  pawn.atoms = {push, dbl, pawnCapture, passant};
   pawn.resetsDrawClock = true;
   v.pieces.push_back(pawn);
 
@@ -116,7 +117,7 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
 
   v.promotion[static_cast<std::size_t>(Color::White)] = Region{kRankAxis, 7};
   v.promotion[static_cast<std::size_t>(Color::Black)] = Region{kRankAxis, 0};
-  v.enPassant = true;
+  v.enPassant = false;
   v.stalemate = StalematePolicy::Draw;
   v.halfmoveDrawLimit = 100;
 
@@ -140,26 +141,23 @@ Result<VariantSpec> makeStandardChessLifted(int extraDims) {
   // ---- castling -----------------------------------------------------------
   // Cell lists rather than "two squares to the right", so the same template
   // shape works in any dimension and on any topology.
-  const auto makeCastle = [&](const char* fenLetter, Color c, int rank, int kingToFile,
-                              int rookFromFile, int rookToFile,
-                              std::initializer_list<int> empty,
-                              std::initializer_list<int> safe, std::uint8_t bit) {
-    CastleTemplate ct;
-    ct.name = fenLetter;
-    ct.color = c;
-    ct.kingFrom = cell(4, rank);
-    ct.kingTo = cell(kingToFile, rank);
-    ct.rookFrom = cell(rookFromFile, rank);
-    ct.rookTo = cell(rookToFile, rank);
-    for (int f : empty) ct.mustBeEmpty.push_back(cell(f, rank));
-    for (int f : safe) ct.mustBeSafe.push_back(cell(f, rank));
-    ct.rightsBit = bit;
-    return ct;
+  // Castling, as compound moves: the king steps two along the file, the rook is found
+  // beyond it, and the king's start, crossing and landing must not be attacked. One per wing,
+  // serving both colours; no cell is named.
+  const auto castle = [&](const char* name, char fenLetter, int step) {
+    CompoundMove cm;
+    cm.name = name;
+    cm.fenLetter = fenLetter;
+    cm.mover = kKing;
+    cm.step.kind = MoveKind::Exact;
+    cm.step.pins.push(Pin{0, static_cast<std::int16_t>(step)});
+    cm.partners = {kRook};
+    cm.safe = {CompoundMove::SafeCell::From, CompoundMove::SafeCell::Path,
+               CompoundMove::SafeCell::To};
+    return cm;
   };
-  v.castles.push_back(makeCastle("K", Color::White, 0, 6, 7, 5, {5, 6}, {4, 5, 6}, 0));
-  v.castles.push_back(makeCastle("Q", Color::White, 0, 2, 0, 3, {1, 2, 3}, {4, 3, 2}, 1));
-  v.castles.push_back(makeCastle("k", Color::Black, 7, 6, 7, 5, {5, 6}, {4, 5, 6}, 2));
-  v.castles.push_back(makeCastle("q", Color::Black, 7, 2, 0, 3, {1, 2, 3}, {4, 3, 2}, 3));
+  v.compounds.push_back(castle("castle kingside", 'K', 2));
+  v.compounds.push_back(castle("castle queenside", 'Q', -2));
 
   auto ok = v.finalize();
   if (!ok.has_value()) return fail(ok.error().code, ok.error().message, ok.error().line);

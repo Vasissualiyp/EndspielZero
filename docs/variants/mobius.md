@@ -18,6 +18,8 @@ flagged `Reorient`); FEN writes a flipped piece with a trailing `'` (`P'`). Any 
 with a `forward = true` atom behaves this way on any board with an orientation-reversing
 seam or wall unless it declares `flips_on_mirror = false`.
 
-**Rules:** EndspielZero's own; no castling, no en passant. Perft: 24, 576, 15690 - higher
-than standard chess, because the twist connects the h-file to the a-file with the ranks
-mirrored, so the edge pawns and knights already see across it.
+**Rules:** EndspielZero's own; no castling. En passant works as on any board, and the twist
+makes it stranger: a black pawn on h7 answers White's a2-a4, because h7's forward diagonal
+wraps across the file seam and lands on a3 - exactly the square the White pawn passed over.
+Perft: 24, 578, 15782 - higher than standard chess, because the twist connects the h-file
+to the a-file with the ranks mirrored, so the edge pawns and knights already see across it.

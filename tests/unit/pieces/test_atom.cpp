@@ -210,3 +210,112 @@ TEST_CASE("oriented expansion gives a pawn its direction in any dimension",
     for (const Direction& d : b) REQUIRE(negated.contains(d.toString()));
   }
 }
+
+namespace {
+
+MoveAtom exactAtom(std::initializer_list<Pin> pins, MoveMode mode = MoveMode::Leap) {
+  MoveAtom a;
+  a.kind = MoveKind::Exact;
+  for (const Pin& p : pins) a.pins.push(p);
+  a.mode = mode;
+  return a;
+}
+
+MoveAtom expandedAtom(std::initializer_list<Pin> pins, StepSign sign, std::uint32_t maxK) {
+  MoveAtom a;
+  a.kind = MoveKind::Expanded;
+  for (const Pin& p : pins) a.pins.push(p);
+  a.sign = sign;
+  a.maxK = maxK;
+  a.mode = MoveMode::Slide;
+  return a;
+}
+
+}  // namespace
+
+TEST_CASE("an exact move is one literal direction", "[unit][pieces]") {
+  // [1,0] on (file, rank): one cell along the file, and nothing else.
+  const MoveAtom right = *MoveAtom::canonicalize(exactAtom({Pin{0, 1}}));
+  const auto dirs = expandAtomFor(right, 2, -1, Color::White);
+  REQUIRE(dirs.size() == 1);
+  CHECK(dirs[0].v[0] == 1);
+  CHECK(dirs[0].v[1] == 0);
+  // Without flip, the other colour goes the same way.
+  const auto black = expandAtomFor(right, 2, 1, Color::Black);
+  REQUIRE(black.size() == 1);
+  CHECK(black[0].v[0] == 1);
+
+  // A two-cell exact slide is the unit step taken twice, so the cell between is checked.
+  const MoveAtom two = *MoveAtom::canonicalize(exactAtom({Pin{1, 2}}, MoveMode::Slide));
+  CHECK(exactSteps(two) == 2);
+  const auto step = expandAtomFor(two, 2, -1, Color::White);
+  REQUIRE(step.size() == 1);
+  CHECK(step[0].v[1] == 1);
+  CHECK(stepRange(two).lo == 2);
+  CHECK(stepRange(two).hi == 2);
+  // A leap of two is a single jump of two.
+  const MoveAtom jump = *MoveAtom::canonicalize(exactAtom({Pin{1, 2}}, MoveMode::Leap));
+  CHECK(expandAtomFor(jump, 2, -1, Color::White)[0].v[1] == 2);
+
+  // An exact move has no step range.
+  MoveAtom ranged = exactAtom({Pin{0, 1}});
+  ranged.maxK = 3;
+  CHECK_FALSE(MoveAtom::canonicalize(ranged).has_value());
+}
+
+TEST_CASE("an expanded move runs both ways unless told otherwise", "[unit][pieces]") {
+  const MoveAtom both =
+      *MoveAtom::canonicalize(expandedAtom({Pin{0, 1}}, StepSign::Both, kUnlimited));
+  CHECK(expandAtomFor(both, 2, -1, Color::White).size() == 2);  // right or left
+  const MoveAtom lance =
+      *MoveAtom::canonicalize(expandedAtom({Pin{1, 1}}, StepSign::Positive, kUnlimited));
+  const auto dirs = expandAtomFor(lance, 2, -1, Color::White);
+  REQUIRE(dirs.size() == 1);
+  CHECK(dirs[0].v[1] == 1);
+  // Five cells forward at most: the range is the step count, not the vector.
+  const MoveAtom five = *MoveAtom::canonicalize(expandedAtom({Pin{1, 1}}, StepSign::Positive, 5));
+  CHECK(five.maxK == 5);
+}
+
+TEST_CASE("flip turns the other side round on the orientation axis only", "[unit][pieces]") {
+  MoveAtom push = exactAtom({Pin{1, 1}});
+  push.flip = true;
+  const MoveAtom p = *MoveAtom::canonicalize(push);
+  CHECK(expandAtomFor(p, 2, 1, Color::White)[0].v[1] == 1);
+  CHECK(expandAtomFor(p, 2, 1, Color::Black)[0].v[1] == -1);
+  // A component on another axis is the same for both: sideways stays sideways.
+  MoveAtom diag = exactAtom({Pin{0, 1}, Pin{1, 1}});
+  diag.flip = true;
+  const MoveAtom d = *MoveAtom::canonicalize(diag);
+  const auto black = expandAtomFor(d, 2, 1, Color::Black);
+  CHECK(black[0].v[0] == 1);
+  CHECK(black[0].v[1] == -1);
+}
+
+TEST_CASE("a pinned component with a free one generalizes the pawn's capture", "[unit][pieces]") {
+  // Pin forward +1, one free magnitude 1: +/-1 on any other axis with +1 forward. That is
+  // two directions on a plane, four in three dimensions, six in four - 2(D-1).
+  MoveAtom capture;
+  capture.pins.push(Pin{1, 1});
+  capture.mags = mags({1});
+  capture.flip = true;
+  const MoveAtom c = *MoveAtom::canonicalize(capture);
+  CHECK(expandAtomFor(c, 2, 1, Color::White).size() == 2);
+  CHECK(expandAtomFor(c, 3, 1, Color::White).size() == 4);
+  CHECK(expandAtomFor(c, 4, 1, Color::White).size() == 6);
+  for (const Direction& d : expandAtomFor(c, 4, 1, Color::Black)) CHECK(d.v[1] == -1);
+  // More free magnitudes than free axes: nothing, the engine's deliberate rule.
+  capture.mags = mags({1, 1});
+  CHECK(expandAtomFor(*MoveAtom::canonicalize(capture), 2, 1, Color::White).empty());
+}
+
+TEST_CASE("pins are checked", "[unit][pieces]") {
+  CHECK_FALSE(MoveAtom::canonicalize(exactAtom({Pin{0, 0}})).has_value());
+  CHECK_FALSE(MoveAtom::canonicalize(exactAtom({Pin{0, 1}, Pin{0, 2}})).has_value());
+  MoveAtom none;
+  none.kind = MoveKind::Exact;
+  CHECK_FALSE(MoveAtom::canonicalize(none).has_value());
+  MoveAtom mixed = exactAtom({Pin{1, 1}});
+  mixed.oriented = true;
+  CHECK_FALSE(MoveAtom::canonicalize(mixed).has_value());
+}

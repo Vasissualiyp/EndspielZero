@@ -66,36 +66,19 @@ symbol = "R"
 [[piece]]
 name = "queen"
 symbol = "Q"
-
-  [[piece.move]]
-  vector = [1]
-  max = "inf"
-  mode = "slide"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = "inf"
-  mode = "slide"
+moves = "queen"
 
 [[piece]]
 name = "king"
 symbol = "K"
 royal = true
-
-  [[piece.move]]
-  vector = [1]
-  max = 1
-  mode = "leap"
-
-  [[piece.move]]
-  vector = [1, 1]
-  max = 1
-  mode = "leap"
+moves = "king"
 
 # A small army, offset in both rank and file. Two constraints force this. Gluing the
 # ranks puts the usual back rows in contact, and - because a bishop here reaches every
 # cell - any bishop or queen on the board gives check from almost anywhere, so this
 # variant fields only kings, rooks and knights. The bishop and queen remain declared
 # above so that a position can still contain them after a promotion or an edit.
+
 [start]
 board = "8/8/8/4rnkr/8/8/8/RNKR4"

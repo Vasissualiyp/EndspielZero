@@ -31,6 +31,8 @@ enum class ExprOp : std::uint8_t {
   HalfmoveClock,
   CoordOf,         ///< imm = axis, args[0] = cell
   HasCaptureFrom,  ///< args[0] = cell; answered by the orchestrating layer
+  Attacked,        ///< args[0] = cell; is it attacked by the side not the mover (answered by the orchestrating layer)
+  Marked,          ///< imm = mark tag, args[0] = cell; does the cell carry that mark
   AnyCapture,      ///< does the side to move have any capture at all
   Not,
   And,

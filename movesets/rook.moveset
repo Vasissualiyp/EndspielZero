@@ -1,0 +1,2 @@
+-- A rook: any number of steps along one axis.
+[1]^k

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -87,6 +88,17 @@ enum class Archetype : std::uint8_t {
   Count
 };
 
+/// A variant's own pieces can bring bodies of their own, and each takes one of these extra
+/// shape slots after the archetypes. A shape index at or above `Archetype::Count` is
+/// therefore a custom body; a variant with more custom pieces than slots draws the rest
+/// from their archetype, which is the fallback that keeps a variant playable.
+inline constexpr std::size_t kCustomShapes = 12;
+inline constexpr std::size_t kShapeSlots =
+    static_cast<std::size_t>(Archetype::Count) + kCustomShapes;
+[[nodiscard]] constexpr Archetype customShape(std::size_t slot) noexcept {
+  return static_cast<Archetype>(static_cast<std::size_t>(Archetype::Count) + slot);
+}
+
 /// Resolve a name from a variant file. An unknown name is not an error - it falls back
 /// to Tower, because a variant must never be unplayable for want of a model.
 Archetype archetypeFromName(std::string_view name);
@@ -100,28 +112,35 @@ std::string_view archetypeName(Archetype a);
 /// army that reads at a glance rather than seven identical blocks.
 Archetype archetypeFor(const PieceTypeDef& piece);
 
+/// A piece body built from an authored model: the profile swept about the axis, plus the
+/// elements the symmetry places. Local units as the archetypes use them - the foot's
+/// radius a third of a cell, z up, the model's permille divided by a thousand - and the
+/// same `MeshVertex` the shared buffers take, with indices relative to the first vertex.
+/// Deterministic: one model, one mesh.
+struct ModelMesh {
+  std::vector<MeshVertex> vertices;
+  std::vector<std::uint16_t> indices;
+  /// The highest point of the body, in local units.
+  float height{0.0f};
+};
+ModelMesh assembleModel(const assets::PieceModel& model);
+
 /// Relative height, with a pawn at 1.0. Encodes value, so the tallest piece on the
 /// board is the one that matters most even in an army you have never seen.
 float heightFor(const PieceTypeDef& piece);
 
-/// How many pieces of one variant can carry an authored body (M7.3.4). A shape slot is
-/// either an `Archetype` (below `Archetype::Count`) or `Archetype::Count + j` for the
-/// j-th authored model; a piece past the cap falls back to its archetype, exactly as a
-/// piece with no model does.
-inline constexpr std::size_t kAuthoredSlots = 32;
-inline constexpr std::size_t kShapeSlots =
-    static_cast<std::size_t>(Archetype::Count) + kAuthoredSlots;
-
-/// The shape slot each piece type of `v` draws with, indexed by `PieceTypeId` (entry 0,
-/// the empty piece, is Tower and unused). Pure: the renderer's instance building and its
-/// mesh library both derive from it, so they cannot disagree about which slot is whose.
-std::vector<std::size_t> shapeSlots(const VariantSpec& v);
-
-/// A fingerprint of every authored model and icon in `v`, in slot order - what decides
-/// whether the GPU mesh library has to be rebuilt. Zero for a variant with none.
-std::uint64_t authoredKey(const VariantSpec& v);
-
 /// Build every archetype into one vertex and index buffer, with a range per shape.
+/// A piece body to build into the library at a custom slot, with the icon its puck and
+/// token take - the authored one, or the shipped one for its archetype.
+struct CustomBody {
+  std::size_t slot{0};
+  /// The shipped shape the piece would otherwise be, whose icon a body with none of its
+  /// own keeps.
+  Archetype fallback{Archetype::Tower};
+  assets::PieceModel body;
+  std::optional<assets::IconModel> icon;
+};
+
 struct MeshLibrary {
   std::vector<MeshVertex> vertices;
   std::vector<std::uint16_t> indices;
@@ -138,16 +157,7 @@ struct MeshLibrary {
   /// icon mesh. Empty for the archetypes that are not pieces.
   MeshRange discRanges[kShapeSlots];
 
-  /// Every archetype, plus - when `v` is given - each of its authored bodies in its own
-  /// slot (see shapeSlots). An authored slot's puck and disc are its authored icon's when
-  /// it has one, otherwise its archetype's.
-  static MeshLibrary build(const VariantSpec* v = nullptr);
-
-  /// Sweep an authored model into the buffers and return its range: the profile revolved
-  /// about the height axis in `segments` steps, and each element extruded and placed by
-  /// the symmetry group. Permille map to local units at 1/1000, so a profile foot of 340
-  /// is the archetypes' shared foot radius.
-  MeshRange appendModel(const assets::PieceModel& model);
+  static MeshLibrary build(const std::vector<CustomBody>& custom = {});
 };
 
 }  // namespace cb::render

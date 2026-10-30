@@ -1,0 +1,2 @@
+-- A king: one step along a line of one or two axes.
+U r in 1..2 : [1 x r]^1

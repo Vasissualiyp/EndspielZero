@@ -60,8 +60,14 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
   const std::size_t ci = static_cast<std::size_t>(orient);
   const Region& gate = atom.fromRegion[ci];
   if (gate.active() && !gate.contains(fromCoord)) return;
+  if (atom.unmoved && p.at(from).hasMoved()) return;
 
   const Geometry& geom = v_->geom;
+  // Which of the piece's atoms this is, carried on the move so `make` can read the marks it
+  // leaves behind.
+  const auto atomIdx = static_cast<std::uint8_t>(&atom - v_->pieces[type].atoms.data());
+  bool leavesPassedMark = false;
+  for (const MarkSpec& m : atom.marks) leavesPassedMark = leavesPassedMark || m.where == MarkWhere::Passed;
   const std::uint32_t begin = atom.dirBegin[ci];
   const std::uint32_t end = atom.dirEnd[ci];
   const bool tracks = v_->pieces[type].reorients;
@@ -89,6 +95,14 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
       const CellId to = w.cell;
       // A directional piece whose frame came back reversed lands flipped.
       const bool flipNow = tracks && w.upReversed(orientAxis);
+      // A cell some blocking mark is on: a slider stops short of it, a leaper does not land.
+      if (v_->hasBlockingMarks && p.blockedAt(to)) {
+        if (atom.mode == MoveMode::Leap) {
+          prevCell = to;
+          continue;
+        }
+        break;
+      }
       // The origin still holds the moving piece, so a slider is blocked there and
       // a leaper passes over it - handled by the ordinary occupancy classification.
       const Occupant occ = classify(p, to, side);
@@ -104,13 +118,15 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
         }
         if (occ == Occupant::Own) break;
         if (occ == Occupant::Empty && atom.capture != CapturePolicy::Must) {
-          emit(p, Move{.from = from, .to = to}, type, orient, flipNow, w.coord, out);
+          emit(p, Move{.from = from, .to = to, .atomIndex = atomIdx}, type, orient, flipNow,
+               w.coord, out);
         } else if (occ == Occupant::Enemy && atom.capture != CapturePolicy::Cannot) {
           emit(p,
                Move{.from = from,
                     .to = to,
                     .captureCell = to,
-                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
+                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture),
+                    .atomIndex = atomIdx},
                type, orient, flipNow, w.coord, out);
         }
         break;
@@ -122,12 +138,14 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
       }
 
       if (occ == Occupant::Enemy) {
-        if (longEnough && atom.capture != CapturePolicy::Cannot) {
+        // A move that captures at an offset takes only that piece, never the one it lands on.
+        if (longEnough && atom.capture != CapturePolicy::Cannot && atom.captureAt.empty()) {
           emit(p,
                Move{.from = from,
                     .to = to,
                     .captureCell = to,
-                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
+                    .flags = static_cast<std::uint8_t>(MoveFlag::Capture),
+                    .atomIndex = atomIdx},
                type, orient, flipNow, w.coord, out);
         }
         if (atom.mode == MoveMode::Slide) break;
@@ -137,7 +155,8 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
       // The destination is empty.
       if (longEnough) {
         if (atom.capture != CapturePolicy::Must) {
-          Move m{.from = from, .to = to};
+          Move m{.from = from, .to = to, .atomIndex = atomIdx};
+          if (leavesPassedMark && !atom.leavesEnPassant) m.epTarget = prevCell;
           if (atom.leavesEnPassant && prevCell != kInvalidCell) {
             m.flags = static_cast<std::uint8_t>(
                 m.flags | static_cast<std::uint8_t>(MoveFlag::LeavesEnPassant));
@@ -145,6 +164,24 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
             m.epVictim = to;
           }
           emit(p, m, type, orient, flipNow, w.coord, out);
+        } else if (!atom.captureAt.empty()) {
+          // A capture-only move onto an empty cell that takes the piece beside it: en passant
+          // (the landing cell must carry the opponent's mark), a checkers jump (it need not).
+          const Mark* needed = atom.needsMark >= 0
+                                   ? p.markAt(to, static_cast<std::uint16_t>(atom.needsMark))
+                                   : nullptr;
+          if (atom.needsMark < 0 || (needed != nullptr && needed->owner != static_cast<std::uint8_t>(side))) {
+            Walker vw = geom.start(to, v_->dirTable[atom.captureDir[ci]]);
+            if (geom.step(vw)) {
+              const Piece victim = p.at(vw.cell);
+              if (!victim.empty() && victim.colorOf() != side) {
+                std::uint8_t flags = static_cast<std::uint8_t>(MoveFlag::Capture);
+                if (atom.needsMark >= 0) flags = static_cast<std::uint8_t>(flags | static_cast<std::uint8_t>(MoveFlag::EnPassant));
+                emit(p, Move{.from = from, .to = to, .captureCell = vw.cell, .flags = flags, .atomIndex = atomIdx},
+                     type, orient, flipNow, w.coord, out);
+              }
+            }
+          }
         } else if (v_->enPassant && to == p.epTarget() && p.epVictim() != kInvalidCell) {
           // A capture-only atom landing on the en-passant target takes the piece
           // that passed through, not the piece on the destination.
@@ -152,7 +189,8 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
                Move{.from = from,
                     .to = to,
                     .captureCell = p.epVictim(),
-                    .flags = MoveFlag::Capture | MoveFlag::EnPassant},
+                    .flags = MoveFlag::Capture | MoveFlag::EnPassant,
+                    .atomIndex = atomIdx},
                type, orient, flipNow, w.coord, out);
         }
       }
@@ -204,7 +242,75 @@ void MoveGen::generateCastles(const Position& p, Color side, MoveList& out) cons
     out.push(Move{.from = ct.kingFrom,
                   .to = ct.kingTo,
                   .flags = static_cast<std::uint8_t>(MoveFlag::Castle),
-                  .castleIndex = static_cast<std::uint8_t>(i)});
+                  .castleIndex = static_cast<std::uint8_t>(i),
+                  .partnerFrom = ct.rookFrom,
+                  .partnerTo = ct.rookTo});
+  }
+}
+
+void MoveGen::generateCompounds(const Position& p, Color side, MoveList& out) const {
+  const Geometry& geom = v_->geom;
+  const std::size_t ci = static_cast<std::size_t>(side);
+  for (std::size_t i = 0; i < v_->compounds.size(); ++i) {
+    const CompoundMove& cm = v_->compounds[i];
+    const Direction dir = v_->dirTable[cm.unitDir[ci]];
+    p.occupancy(side).forEach([&](std::size_t idx) {
+      const auto from = static_cast<CellId>(idx);
+      const Piece piece = p.at(from);
+      if (piece.type != cm.mover) return;
+      if (cm.moverUnmoved && piece.hasMoved()) return;
+
+      // Walk the mover's line, collecting the cells, until the first piece. That piece is
+      // the partner: found, never named, so no coordinate is written into the rule.
+      // The line the mover walks, on the stack: generation allocates nothing. A line longer
+      // than this holds no compound move (castling is a few cells).
+      constexpr std::size_t kLine = 128;
+      CellId cells[kLine];
+      std::size_t nCells = 0;
+      Walker w = geom.start(from, dir);
+      CellId partnerCell = kInvalidCell;
+      for (std::uint32_t k = 1; k <= rayCap_; ++k) {
+        if (!geom.step(w)) break;
+        if (rayClosed(w, from, dir)) break;
+        if (nCells == kLine) break;
+        cells[nCells++] = w.cell;
+        if (!p.isEmpty(w.cell)) {
+          partnerCell = w.cell;
+          break;
+        }
+      }
+      // The partner must lie beyond where the mover lands, so every cell it crosses and the
+      // one it lands on is empty.
+      if (partnerCell == kInvalidCell || nCells <= cm.steps) return;
+      const Piece partner = p.at(partnerCell);
+      if (partner.colorOf() != side) return;
+      if (std::find(cm.partners.begin(), cm.partners.end(), partner.type) == cm.partners.end()) return;
+      if (cm.partnerUnmoved && partner.hasMoved()) return;
+
+      const CellId dest = cells[cm.steps - 1];
+      const CellId crossed = cm.steps >= 2 ? cells[cm.steps - 2] : from;
+      for (const CompoundMove::SafeCell sc : cm.safe) {
+        switch (sc) {
+          case CompoundMove::SafeCell::From:
+            if (isAttacked(p, from, opponent(side))) return;
+            break;
+          case CompoundMove::SafeCell::Path:
+            for (std::uint32_t k = 0; k + 1 < cm.steps; ++k) {
+              if (isAttacked(p, cells[k], opponent(side))) return;
+            }
+            break;
+          case CompoundMove::SafeCell::To:
+            if (isAttacked(p, dest, opponent(side))) return;
+            break;
+        }
+      }
+      out.push(Move{.from = from,
+                    .to = dest,
+                    .flags = static_cast<std::uint8_t>(MoveFlag::Castle),
+                    .castleIndex = static_cast<std::uint8_t>(kCompoundBit | i),
+                    .partnerFrom = partnerCell,
+                    .partnerTo = crossed});
+    });
   }
 }
 
@@ -216,7 +322,10 @@ void MoveGen::generatePseudoLegalFor(const Position& p, Color side, bool include
                                      MoveList& out) const {
   p.occupancy(side).forEach(
       [&](std::size_t cell) { generateForPiece(p, static_cast<CellId>(cell), out); });
-  if (includeCastles) generateCastles(p, side, out);
+  if (includeCastles) {
+    generateCastles(p, side, out);
+    generateCompounds(p, side, out);
+  }
   // On a box board a move can only be discovered once, so this costs nothing
   // there and is skipped entirely.
   if (!v_->geom.isBox()) out.sortAndUnique();
@@ -254,6 +363,21 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
     for (const MoveAtom& atom : def.atoms) {
       if (atom.capture == CapturePolicy::Cannot) continue;  // cannot threaten anything
       const std::size_t ci = static_cast<std::size_t>(by);
+      // A move that captures at an offset does not threaten the cell it lands on but the
+      // one beside it: to threaten `target` it must land on the cell that offset away,
+      // which must be empty (and carry the opponent's mark, for en passant). The backward
+      // search then starts from there.
+      CellId anchor = target;
+      if (!atom.captureAt.empty()) {
+        Walker lw = geom.start(target, v_->dirTable[atom.captureDir[ci]].negated());
+        if (!geom.step(lw)) continue;
+        anchor = lw.cell;
+        if (!p.isEmpty(anchor)) continue;
+        if (atom.needsMark >= 0) {
+          const Mark* mk = p.markAt(anchor, static_cast<std::uint16_t>(atom.needsMark));
+          if (mk == nullptr || mk->owner == static_cast<std::uint8_t>(by)) continue;
+        }
+      }
       // Walk the threat span, not the move span: on a seam that reverses
       // orientation a forward direction is carried out of the move span, so
       // restricting the search to it would miss the threat (MoveAtom::threatBegin).
@@ -261,11 +385,11 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
         // Walk away from the target along the reverse of the attacking direction;
         // a piece found there attacks the target along it.
         const Direction startDir = v_->dirTable[di].negated();
-        Walker w = geom.start(target, startDir);
+        Walker w = geom.start(anchor, startDir);
         const std::uint32_t steps = atom.maxK == kUnlimited ? rayCap_ : atom.maxK;
         for (std::uint32_t k = 1; k <= steps; ++k) {
           if (!geom.step(w)) break;
-          if (rayClosed(w, target, startDir)) break;
+          if (rayClosed(w, anchor, startDir)) break;
           const Piece cand = p.at(w.cell);
           if (cand.empty()) continue;
           bool matches = cand.type == static_cast<PieceTypeId>(ti) &&
@@ -287,7 +411,8 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
           }
           if (matches) {
             const Region& gate = atom.fromRegion[ci];
-            if (!gate.active() || gate.contains(w.coord)) {
+            if ((!gate.active() || gate.contains(w.coord)) &&
+                !(atom.unmoved && cand.hasMoved())) {
               CB_COUNT(LegalityChecks);
               return true;
             }

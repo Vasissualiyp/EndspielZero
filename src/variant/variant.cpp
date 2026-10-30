@@ -61,6 +61,13 @@ int VariantSpec::findCellField(std::string_view n) const {
   return -1;
 }
 
+int VariantSpec::findMarkTag(std::string_view n) const {
+  for (std::size_t i = 0; i < markTags.size(); ++i) {
+    if (markTags[i].name == n) return static_cast<int>(i);
+  }
+  return -1;
+}
+
 PieceTypeId VariantSpec::findPieceBySymbol(char upper) const {
   for (std::size_t i = 1; i < pieces.size(); ++i) {
     if (pieces[i].symbol == upper) return static_cast<PieceTypeId>(i);
@@ -106,6 +113,24 @@ Result<void> VariantSpec::finalize() {
                     " does not exist on a " + std::to_string(nd) + "-axis board");
   }
 
+  // ---- mark tags ------------------------------------------------------------
+  // "ep" is always tag 0: the en-passant target is a mark like any other, and the engine's
+  // legacy `leaves_en_passant` / `en_passant` ride on it.
+  if (markTags.empty() || markTags[0].name != "ep") markTags.insert(markTags.begin(), MarkTag{"ep", false});
+  if (markTags[0].blocks) {
+    return fail(ErrorCode::ValidationError, "the en-passant tag 'ep' cannot block");
+  }
+  for (std::size_t i = 0; i < markTags.size(); ++i) {
+    if (markTags[i].name.empty()) return fail(ErrorCode::ValidationError, "a mark tag needs a name");
+    for (std::size_t j = i + 1; j < markTags.size(); ++j) {
+      if (markTags[i].name == markTags[j].name) {
+        return fail(ErrorCode::ValidationError, "two mark tags are called '" + markTags[i].name + "'");
+      }
+    }
+    if (markTags[i].blocks) hasBlockingMarks = true;
+  }
+  if (markTags.size() > 255) return fail(ErrorCode::BudgetExceeded, "a variant has at most 255 mark tags");
+
   // ---- expand atoms into the global direction table ----------------------
   // Each atom owns a contiguous span, so the table carries a few duplicate
   // vectors across atoms. That is deliberate: a contiguous span lets movegen walk
@@ -135,21 +160,62 @@ Result<void> VariantSpec::finalize() {
                         "' has a forward-only atom but the variant declares no "
                         "orientation axis");
       }
+      if (atom.flip && orientationAxis < 0) {
+        return fail(ErrorCode::ValidationError,
+                    "piece '" + p.name +
+                        "' has a move that flips for the other side but the variant "
+                        "declares no orientation axis");
+      }
+      for (const Pin& pin : atom.pins) {
+        if (pin.axis >= nd) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "' pins axis " + std::to_string(pin.axis) +
+                          ", which a " + std::to_string(nd) + "-axis board does not have");
+        }
+      }
+      // An exact slide of n cells is the unit step taken n times, so the cells it passes
+      // over are checked; the atom's own step range says so.
+      if (atom.kind == MoveKind::Exact) {
+        const StepRange r = stepRange(atom);
+        atom.minK = r.lo;
+        atom.maxK = r.hi;
+      }
+      if (atom.unmoved) p.tracksMoved = true;
+      for (const MarkSpec& m : atom.marks) {
+        if (m.tag >= markTags.size()) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "' leaves a mark with an undeclared tag");
+        }
+        if (m.where == MarkWhere::Around && m.radius == 0) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "': marks around a landing need a radius of at least 1");
+        }
+      }
+      if (atom.needsMark >= 0 && static_cast<std::size_t>(atom.needsMark) >= markTags.size()) {
+        return fail(ErrorCode::ValidationError,
+                    "piece '" + p.name + "' needs a mark with an undeclared tag");
+      }
+      for (const Pin& pin : atom.captureAt) {
+        if (pin.axis >= nd) {
+          return fail(ErrorCode::ValidationError,
+                      "piece '" + p.name + "' captures at an axis the board does not have");
+        }
+      }
+      // A move whose direction is its own (oriented, pinned, exact, expanded) differs by
+      // colour; a plain one is symmetric and both colours share a span.
+      const bool sided = atom.oriented || atom.flip || atom.kind != MoveKind::Extrapolated ||
+                         !atom.pins.empty();
 
       for (int ci = 0; ci < kNumColors; ++ci) {
         const auto color = static_cast<Color>(ci);
         std::vector<Direction> dirs;
-        if (atom.oriented) {
-          dirs = expandAtomOriented(atom.mags, nd,
-                                    static_cast<std::uint8_t>(orientationAxis), color);
-        } else if (ci == 1) {
+        if (!sided && ci == 1) {
           // Unoriented atoms are symmetric, so both colours share one span.
           atom.dirBegin[1] = atom.dirBegin[0];
           atom.dirEnd[1] = atom.dirEnd[0];
           continue;
-        } else {
-          dirs = expandAtom(atom.mags, nd);
         }
+        dirs = expandAtomFor(atom, nd, orientationAxis, color);
 
         const auto begin = static_cast<std::uint32_t>(dirTable.size());
         for (const Direction& d : dirs) dirTable.push_back(scaleByPitch(dims, d));
@@ -164,6 +230,25 @@ Result<void> VariantSpec::finalize() {
                           std::to_string(kMaxDirections) + " entries on a " +
                           std::to_string(nd) +
                           "-axis board; reduce the atom's order or the dimension count");
+        }
+      }
+
+      // Where an offset capture takes its piece: one direction per colour, flipped as the
+      // move is, so the geometry steps from the landing cell to the piece beside it.
+      if (!atom.captureAt.empty()) {
+        hasOffsetCaptures = true;
+        MoveAtom off;
+        off.kind = MoveKind::Exact;
+        off.pins = atom.captureAt;
+        off.flip = atom.flip;
+        for (int ci = 0; ci < kNumColors; ++ci) {
+          const auto dirs = expandAtomFor(off, nd, orientationAxis, static_cast<Color>(ci));
+          if (dirs.empty()) {
+            return fail(ErrorCode::ValidationError,
+                        "piece '" + p.name + "' has a capture offset the board cannot take");
+          }
+          atom.captureDir[ci] = static_cast<std::uint32_t>(dirTable.size());
+          dirTable.push_back(scaleByPitch(dims, dirs[0]));
         }
       }
 
@@ -194,8 +279,12 @@ Result<void> VariantSpec::finalize() {
     }
 
     p.reorients = p.flipsOnMirror && geom.hasOrientationReversingFace() &&
-                  std::any_of(p.atoms.begin(), p.atoms.end(),
-                              [](const MoveAtom& a) { return a.oriented; });
+                  std::any_of(p.atoms.begin(), p.atoms.end(), [](const MoveAtom& a) {
+                    // Both make White's and Black's directions differ: an oriented atom is
+                    // restricted to a half-space, and `flip` negates its pins on the
+                    // orientation axis. (expandAtomFor in pieces/atom.cpp is the definition.)
+                    return a.oriented || a.flip;
+                  });
 
     for (PieceTypeId to : p.promotesTo) {
       if (to == kNoPiece || to >= pieces.size()) {
@@ -260,6 +349,57 @@ Result<void> VariantSpec::finalize() {
                                                   std::to_string(ct.rightsBit));
     }
     usedBits.push_back(ct.rightsBit);
+  }
+
+  // ---- compound moves ---------------------------------------------------------
+  for (CompoundMove& cm : compounds) {
+    if (cm.name.empty()) return fail(ErrorCode::ValidationError, "a compound move needs a name");
+    if (cm.mover == kNoPiece || cm.mover >= pieces.size()) {
+      return fail(ErrorCode::ValidationError,
+                  "compound move '" + cm.name + "' names a piece that does not exist");
+    }
+    if (cm.partners.empty()) {
+      return fail(ErrorCode::ValidationError,
+                  "compound move '" + cm.name + "' needs at least one partner piece");
+    }
+    for (PieceTypeId pt : cm.partners) {
+      if (pt == kNoPiece || pt >= pieces.size()) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "' names a partner that does not exist");
+      }
+    }
+    cm.step.kind = MoveKind::Exact;
+    cm.step.mode = MoveMode::Slide;  // the cells crossed are what the partner and the checks use
+    const auto canon = MoveAtom::canonicalize(cm.step);
+    if (!canon.has_value()) {
+      return fail(canon.error().code,
+                  "compound move '" + cm.name + "': " + canon.error().message);
+    }
+    cm.step = *canon;
+    if (cm.step.flip && orientationAxis < 0) {
+      return fail(ErrorCode::ValidationError,
+                  "compound move '" + cm.name + "' flips but the variant declares no orientation axis");
+    }
+    for (const Pin& pin : cm.step.pins) {
+      if (pin.axis >= nd) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "' steps along an axis the board does not have");
+      }
+    }
+    cm.steps = exactSteps(cm.step);
+    for (int ci = 0; ci < kNumColors; ++ci) {
+      const auto dirs = expandAtomFor(cm.step, nd, orientationAxis, static_cast<Color>(ci));
+      if (dirs.empty()) {
+        return fail(ErrorCode::ValidationError,
+                    "compound move '" + cm.name + "' has a step the board cannot take");
+      }
+      cm.unitDir[ci] = static_cast<std::uint32_t>(dirTable.size());
+      dirTable.push_back(scaleByPitch(dims, dirs[0]));
+    }
+    if (cm.moverUnmoved) pieces[cm.mover].tracksMoved = true;
+    if (cm.partnerUnmoved) {
+      for (PieceTypeId pt : cm.partners) pieces[pt].tracksMoved = true;
+    }
   }
 
   if (enPassant && orientationAxis < 0) {
@@ -342,6 +482,20 @@ Result<void> VariantSpec::finalize() {
         h.add(static_cast<std::uint64_t>(a.fromRegion[ci].value));
       }
     }
+  }
+  for (const CompoundMove& cm : compounds) {
+    h.add(cm.name);
+    h.add(static_cast<std::uint64_t>(cm.fenLetter));
+    h.add(cm.mover);
+    h.add(cm.step.toString());
+    h.add(cm.moverUnmoved ? 1u : 0u);
+    for (PieceTypeId pt : cm.partners) h.add(pt);
+    h.add(cm.partnerUnmoved ? 1u : 0u);
+    for (const auto sc : cm.safe) h.add(static_cast<std::uint64_t>(sc));
+  }
+  for (std::size_t i = 1; i < markTags.size(); ++i) {
+    h.add(markTags[i].name);
+    h.add(markTags[i].blocks ? 1u : 0u);
   }
   h.add(static_cast<std::uint64_t>(orientationAxis));
   h.add(enPassant ? 1u : 0u);
