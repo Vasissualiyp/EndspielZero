@@ -28,6 +28,11 @@ wood material (console) needs too - build that once (M23.1), use it for both.
 
 ## M23.1 A material id on every instance (shared with the wood material)
 
+> **Specified precisely and built under [M24](M24-wood-material.md) (M24.1-M24.2).** Where the
+> two differ, M24 wins: the materials come from `Theme::materials` read by the renderer (no
+> `BoardOptions::Materials`), the fractional part of `Instance::material` is a per-instance
+> variation, and wood uses shader ids 2 (plank) and 6 (turned).
+
 `Instance` carries `float metal` (`board_renderer.hpp:~58`, shader input `instMetal`, location 9).
 Generalise it to a **material**: rename the field `material` (keep the vertex layout and the 84-byte
 `static_assert`), values:
