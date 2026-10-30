@@ -4,6 +4,7 @@
 // as pure data (set/erase/ordering, and the text form round-trips); `Shell`'s own
 // record/erase/advance is tested the way the rest of this file tests the shell -
 // headless, driving actions and a clock, never a window.
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
@@ -303,4 +304,14 @@ TEST_CASE("a fractional cue round-trips and orders within its move",
   CHECK(parsed->find({"torus", 3, 2, 2}) != nullptr);
   CHECK(parsed->find({"torus", 3, 2, 0}) != nullptr);
   CHECK(cameraTrackText(CameraTrack{}).find("sub=") == std::string::npos);
+}
+
+TEST_CASE("slides unwrap to the nearest lap of the previous key", "[unit][app]") {
+  const auto near = [](const std::vector<float>& a, const std::vector<float>& b) {
+    REQUIRE(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); ++i) CHECK(a[i] == Catch::Approx(b[i]).margin(1e-3));
+  };
+  near(unwrapSlides({3.9f, -3.9f, -3.7f}, {8, 8, 8}), {3.9f, 4.1f, 4.3f});
+  near(unwrapSlides({-26.47f, -28.3f, 125.5f}, {0, 8, 8}), {-26.47f, -28.3f, -26.5f});
+  near(unwrapSlides({1.0f, 50.0f, 2.0f}, {8, 0, 8}), {1.0f, 1.0f, 2.0f});
 }

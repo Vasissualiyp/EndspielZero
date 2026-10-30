@@ -1213,6 +1213,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Show coordinates", &s.showCoordinates);
   ImGui::SliderFloat("Trailer: shape morph speed", &s.trailerMorphSpeed, 0.25f, 4.0f,
                      "%.2fx");
+  ImGui::SliderFloat("Trailer: near clip", &s.trailerNearClip, view::kMinNearClip, 8.0f,
+                     "%.2f cells");
   ImGui::SliderFloat("Trailer: piece move speed", &s.trailerMoveSpeed, 0.25f, 4.0f,
                      "%.2fx");
   ImGui::SliderFloat("Trailer: show each move first", &s.trailerMovePreview, 0.0f, 0.5f,
@@ -1220,6 +1222,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Alternate square colours on every other layer (3-D boards)",
                   &s.swapLayerColors);
   ImGui::SliderFloat("Piece height", &s.pieceHeightScale, 0.0f, 2.0f, "%.2f");
+  ImGui::SliderFloat("Near clip (nothing closer is drawn)", &s.nearClip,
+                     view::kMinNearClip, view::kMaxNearClip, "%.2f cells");
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
   ImGui::TextUnformatted("height encodes value; 0 makes every piece the same");
@@ -1419,8 +1423,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.trailerMovePreview != s.trailerMovePreview ||
       before.trailerMorphSpeed != s.trailerMorphSpeed ||
       before.trailerMoveSpeed != s.trailerMoveSpeed ||
+      before.trailerNearClip != s.trailerNearClip ||
       before.kleinTwist != s.kleinTwist ||
-      before.pieceHeightScale != s.pieceHeightScale || before.flatView != s.flatView ||
+      before.pieceHeightScale != s.pieceHeightScale || before.nearClip != s.nearClip || before.flatView != s.flatView ||
       before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
       before.theme != s.theme || before.animationSpeed != s.animationSpeed ||
       before.overtureSpeed != s.overtureSpeed ||

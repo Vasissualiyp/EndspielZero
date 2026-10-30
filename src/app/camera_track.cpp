@@ -4,7 +4,27 @@
 #include <algorithm>
 #include <sstream>
 
+#include "view/morph.hpp"
+
 namespace cb::app {
+
+std::vector<float> unwrapSlides(const std::vector<float>& values,
+                                const std::vector<float>& laps) {
+  std::vector<float> out;
+  out.reserve(values.size());
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    const float lap = i < laps.size() ? laps[i] : 0.0f;
+    if (out.empty()) {
+      out.push_back(values[i]);
+    } else if (lap > 0.0f) {
+      out.push_back(view::nearestLap(values[i], out.back(), lap));
+    } else {
+      out.push_back(out.back());
+    }
+  }
+  return out;
+}
+
 namespace {
 
 std::string_view trim(std::string_view s) {

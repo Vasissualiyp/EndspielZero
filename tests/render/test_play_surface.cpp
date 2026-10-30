@@ -3095,3 +3095,78 @@ TEST_CASE("the morph is continuous from the flat board for any thickness, width 
     CHECK(gap(tor.second, kl.second) < 1e-3f);
   }
 }
+
+TEST_CASE("a long rank slide bends the torus the short way", "[render]") {
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus"));
+  for (const float formed : {0.55f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f}) {
+    CAPTURE(formed);
+    SurfacePose a, b;
+    a.formed = b.formed = formed;
+    a.slideV = 125.521f;
+    b.slideV = -2.479f;
+    const PlaySurface sa = PlaySurface::build(v, a);
+    const PlaySurface sb = PlaySurface::build(v, b);
+    REQUIRE(sa.seats().size() == sb.seats().size());
+    for (std::size_t i = 0; i < sa.seats().size(); ++i) {
+      CHECK(dist(sa.seats()[i].centre, sb.seats()[i].centre) < 1e-3f);
+    }
+  }
+}
+
+TEST_CASE("seam rail weights follow the morph stages", "[render]") {
+  using app::SurfaceKind;
+  for (const SurfaceKind k : {SurfaceKind::Tube, SurfaceKind::Torus, SurfaceKind::Klein,
+                              SurfaceKind::Band}) {
+    for (const int axis : {0, 1}) {
+      CAPTURE(static_cast<int>(k), axis);
+      float prev = seamRailWeight(k, axis, 0.0f);
+      const bool staged = !(axis == 1 && (k == SurfaceKind::Tube || k == SurfaceKind::Band));
+      if (staged) CHECK(prev == 0.0f);
+      for (int i = 1; i <= 100; ++i) {
+        const float w = seamRailWeight(k, axis, static_cast<float>(i) / 100.0f);
+        CHECK(w >= prev - 1e-6f);
+        prev = w;
+      }
+      CHECK(prev == 1.0f);
+    }
+  }
+  CHECK(seamRailWeight(SurfaceKind::Torus, 0, view::kTorusRollEnd) == 1.0f);
+  CHECK(seamRailWeight(SurfaceKind::Torus, 1, view::kTorusRollEnd) == 0.0f);
+  CHECK(seamRailWeight(SurfaceKind::Klein, 0, view::kKleinRingEnd) == 1.0f);
+  CHECK(seamRailWeight(SurfaceKind::Klein, 1, view::kKleinRingEnd) == 1.0f);
+}
+
+TEST_CASE("the plinth fades out early in the morph and is gone after", "[render]") {
+  using app::SurfaceKind;
+  CHECK(plinthOpacity(SurfaceKind::Tube, 0.0f) == 1.0f);
+  CHECK(plinthOpacity(SurfaceKind::Tube, 0.1f) < 1.0f);
+  CHECK(plinthOpacity(SurfaceKind::Tube, 0.1f) > 0.0f);
+  CHECK(plinthOpacity(SurfaceKind::Tube, 0.25f) == 0.0f);
+  CHECK(plinthOpacity(SurfaceKind::Tube, 1.0f) == 0.0f);
+  CHECK(plinthOpacity(SurfaceKind::FlatGrid, 0.0f) == 0.0f);
+}
+
+TEST_CASE("a torus3d slide of one lap is the identity", "[render]") {
+  const VariantSpec& v = *new VariantSpec(test::loadVariant("torus3d_8x8"));
+  const float lapU = app::slideLap(v, 0);
+  const float lapV = app::slideLap(v, 1);
+  CAPTURE(lapU, lapV);
+  const auto maxDelta = [&](float u0, float v0, float u1, float v1) {
+    SurfacePose a, b;
+    a.slideU = u0;
+    a.slideV = v0;
+    b.slideU = u1;
+    b.slideV = v1;
+    const PlaySurface sa = PlaySurface::build(v, a);
+    const PlaySurface sb = PlaySurface::build(v, b);
+    float worst = 0.0f;
+    for (std::size_t i = 0; i < sa.seats().size(); ++i) {
+      worst = std::max(worst, dist(sa.seats()[i].centre, sb.seats()[i].centre));
+    }
+    return worst;
+  };
+  // The slide must actually do something here, or the identity below proves nothing.
+  CHECK(maxDelta(0.0f, 0.0f, 3.0f, 0.0f) > 0.1f);
+  CHECK(maxDelta(1.5f, 0.0f, 1.5f + lapU, 0.0f) < 1e-3f);
+  CHECK(maxDelta(0.0f, 1.5f, 0.0f, 1.5f + lapV) < 1e-3f);
+}

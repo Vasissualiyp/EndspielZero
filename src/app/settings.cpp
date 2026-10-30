@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/settings.hpp"
 
+#include "view/camera.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -88,6 +90,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.showLastMove = asBool(value);
     else if (key == "show_check")
       s.showCheck = asBool(value);
+    else if (key == "trailer_near_clip")
+      s.trailerNearClip = asFloat(value, s.trailerNearClip);
+    else if (key == "near_clip")
+      s.nearClip = asFloat(value, s.nearClip);
     else if (key == "show_seams")
       s.showSeams = asBool(value);
     else if (key == "show_seam_legend")
@@ -211,6 +217,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "show_attack_hints = " << boolText(showAttackHints) << '\n';
   out << "show_last_move = " << boolText(showLastMove) << '\n';
   out << "show_check = " << boolText(showCheck) << '\n';
+  out << "near_clip = " << nearClip << '\n';
+  out << "trailer_near_clip = " << trailerNearClip << '\n';
   out << "show_seams = " << boolText(showSeams) << '\n';
   out << "show_seam_legend = " << boolText(showSeamLegend) << '\n';
   out << "show_coordinates = " << boolText(showCoordinates) << '\n';
@@ -270,6 +278,8 @@ void Settings::sanitize() {
   frameCap = std::clamp(frameCap, 0, 360);
   computerLevel = std::clamp(computerLevel, 1, 5);
   pieceHeightScale = std::clamp(pieceHeightScale, 0.0f, 2.0f);
+  nearClip = std::clamp(nearClip, view::kMinNearClip, view::kMaxNearClip);
+  trailerNearClip = std::clamp(trailerNearClip, view::kMinNearClip, 8.0f);
   geometryEvert = std::clamp(geometryEvert, 0.0f, 1.0f);
   geometryFormed = std::clamp(geometryFormed, 0.0f, 1.0f);
   geometryShellSpread = std::clamp(geometryShellSpread, 0.0f, 1.0f);

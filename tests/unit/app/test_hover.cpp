@@ -190,3 +190,21 @@ TEST_CASE("the divider between two squares picks one of them", "[unit][app]") {
     if (i >= 12) CHECK(c == a2);
   }
 }
+
+TEST_CASE("Ctrl over a piece also shows what attacks and defends it", "[unit][app]") {
+  auto s = open();
+  play(*s, "click e2\nclick e4\nclick d7\nclick d5");  // 1. e4 d5, white to move
+  s->setHover(cell(*s, "e4"), true);  // the white pawn: attacked by d5, defended by nothing
+  CHECK(vec(s->snapshot().hintAttackers()) == cells(*s, {"d5"}));
+  CHECK(s->snapshot().hintDefenders().empty());
+  CHECK_FALSE(s->snapshot().peekMoves().empty());  // its own moves are still shown
+  s->setHover(cell(*s, "d5"), true);  // the black pawn: attacked by e4, defended by the queen
+  CHECK(vec(s->snapshot().hintAttackers()) == cells(*s, {"e4"}));
+  CHECK(vec(s->snapshot().hintDefenders()) == cells(*s, {"d8"}));
+  CHECK(vec(s->snapshot().hintDefendPath()) == cells(*s, {"d6", "d7"}));
+  s->setHintOptions({true, false});  // attack hints off: only the peek
+  s->setHover(cell(*s, "e4"), false);
+  s->setHover(cell(*s, "d5"), true);
+  CHECK(s->snapshot().hintAttackers().empty());
+  CHECK_FALSE(s->snapshot().peekMoves().empty());
+}

@@ -588,20 +588,26 @@ void Session::refreshHints() {
     fold(after.moveGen().attackers(after.position(), cell, opponent(mover)), af, ap);
     fold(after.moveGen().attackers(after.position(), cell, mover), df, dp);
   } else if (!pos.at(cell).empty()) {
-    // Ctrl over a piece: its moves, either side's.
-    if (!hints_.ctrlPeek) return;
-    std::vector<CellId> to;
-    if (pos.at(cell).colorOf() == pos.sideToMove()) {
-      for (const Move& m : game_->legalMoves()) {
-        if (m.from == cell) to.push_back(m.to);
+    // Ctrl over a piece: its moves (either side's), and who attacks and who defends it.
+    if (hints_.ctrlPeek) {
+      std::vector<CellId> to;
+      if (pos.at(cell).colorOf() == pos.sideToMove()) {
+        for (const Move& m : game_->legalMoves()) {
+          if (m.from == cell) to.push_back(m.to);
+        }
+      } else {
+        MoveList l(variant_->moveUpperBound());
+        gen.movesFrom(pos, cell, l);
+        for (const Move& m : l) to.push_back(m.to);
       }
-    } else {
-      MoveList l(variant_->moveUpperBound());
-      gen.movesFrom(pos, cell, l);
-      for (const Move& m : l) to.push_back(m.to);
+      snapshot_.setPeekMoves(distinct(std::move(to)));
     }
-    snapshot_.setPeekMoves(distinct(std::move(to)));
-    return;
+    if (!hints_.attackHints) return;
+    // The piece's own square: the other side's attackers, and its own side's defenders (the
+    // probe lifts the piece itself off its square, so it never defends itself).
+    const Color own = pos.at(cell).colorOf();
+    fold(gen.attackers(pos, cell, opponent(own)), af, ap);
+    fold(gen.attackers(pos, cell, own), df, dp);
   } else if (hints_.attackHints) {
     // An empty square: who attacks it, and who could recapture there.
     fold(gen.attackers(pos, cell, opponent(pos.sideToMove())), af, ap);

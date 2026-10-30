@@ -77,6 +77,8 @@ struct BoardOptions {
   bool swapLayerColors{false};
   bool showCheck{true};
   bool showSeams{true};
+  /// Nothing closer to the camera than this many cells is drawn (`Settings::nearClip`).
+  float nearClip{0.1f};
   /// 1 keeps the height a piece's value implies; 0 makes every piece the same height.
   float pieceHeightScale{1.0f};
   /// Draw the board flat, looking straight down, with pieces as tokens rather than as

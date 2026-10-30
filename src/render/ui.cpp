@@ -55,7 +55,12 @@ ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
   // there is nothing for it to have replaced there, so disabling the toggle would only
   // break the ordinary flat/solid board for no shape to show in its place (reported
   // directly: "your edits have disabled the normal 2D mode... on cube5 or standard").
-  return {flatView ? "2D" : "3D", !(settings.geometryView && surfaceAvailable), false};
+  // Greyed only where a shape is standing in for the board. The flat view is never greyed: it
+  // is the way back. (With `geometryView` left on from a glued variant, a player who had
+  // switched to 2D on a variant with no shape would otherwise find both this and SHAPE
+  // greyed on the next glued board, with no way out.)
+  return {flatView ? "2D" : "3D", flatView || !(settings.geometryView && surfaceAvailable),
+          false};
 }
 
 namespace {
@@ -1236,6 +1241,19 @@ void Ui::drawDebugConsole(app::Shell& shell) {
 }
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
+  // The trailer's keys (Space pauses, the arrows step, Enter records a keyframe) are the
+  // app's, not the interface's. With keyboard navigation on, ImGui captures the keyboard
+  // whenever a panel button or slider has focus - as soon as one has been clicked - and
+  // Space would then press that button instead of pausing. So navigation is off while the
+  // trailer plays; a text field still captures what is typed into it.
+  {
+    ImGuiIO& io = ImGui::GetIO();
+    if (shell.attracting()) {
+      io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+    } else {
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    }
+  }
   // Start the frame with an empty field list. Only the board screen fills it; every other
   // screen, and cinema, leaves it empty so `recordBackground` submits nothing.
   resetBoardFieldList();
@@ -1446,6 +1464,10 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
     ImGui::SetNextItemWidth(px(150.0f));
     changed |=
         ImGui::SliderFloat("MOVE SPEED", &st.trailerMoveSpeed, 0.25f, 4.0f, "%.2fx");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(px(150.0f));
+    changed |= ImGui::SliderFloat("NEAR CLIP", &st.trailerNearClip, view::kMinNearClip,
+                                  8.0f, "%.2f");
     if (changed) request.settingsChanged = true;
   }
 }
@@ -1474,7 +1496,11 @@ float Ui::buildTrailerTimeline(app::Shell& shell) {
   const float labelH = px(15.0f);
   const float y0 = origin.y + labelH;  // the track
   const float y1 = origin.y + height;
-  const auto xOf = [&](float g) { return origin.x + g / total * width; };
+  // Padding at both ends: the first and last frames, and a keyframe sitting on either, would
+  // otherwise be half off the track and hard to grab.
+  const float pad = px(18.0f);
+  const float trackW = width - 2.0f * pad;
+  const auto xOf = [&](float g) { return origin.x + pad + g / total * trackW; };
 
   ImGui::InvisibleButton("##track", ImVec2(width, height));
   const bool hovered = ImGui::IsItemHovered();
@@ -1530,7 +1556,7 @@ float Ui::buildTrailerTimeline(app::Shell& shell) {
   // otherwise to the grid in use.
   if (hovered || ImGui::IsItemActive()) {
     const float mx = ImGui::GetIO().MousePos.x;
-    const float g = std::clamp((mx - origin.x) / width * total, 0.0f, total);
+    const float g = std::clamp((mx - origin.x - pad) / trackW * total, 0.0f, total);
     float snapTime = -1.0f;
     for (const float time : shell.trailerKeyTimes()) {
       if (std::abs(xOf(time) - mx) <= px(7.0f)) snapTime = time;
@@ -1590,8 +1616,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // skews, overlaps its neighbour, or goes nearly edge-on, so the whole block is gated on
   // the flat view and neither the solid board nor the shape draws it (M17.21 label
   // revision). The seam rails are presentation, not text, and stay.
-  const bool surfaceView =
-      shell.settings().geometryView && hasPlaySurface(session.variant());
+  // Flat wins over the shape here exactly as it does in `optionsFor`: with both flags on, the
+  // renderer draws the flat board, so the flat tokens are the pieces - skipping them left a
+  // glued board with no pieces at all.
+  const bool surfaceView = shell.settings().geometryView &&
+                           hasPlaySurface(session.variant()) && !session.flatView();
   if (coordinateLabelsShown(shell.settings(), session)) {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     const view::OrbitCamera cam = session.camera();
@@ -1998,7 +2027,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // Turn the shape inside out and back (M17.7). Only while the shape is showing, and
       // lit while it is inverted. It sets a target; the front end eases the pose to it,
       // so a pose stays a pure function of its number.
-      if (on) {
+      if (on && !session.flatView()) {
         // Follow the pieces while a move plays (M17.19): the align / approach / travel /
         // return choreography. A quick on/off beside SHAPE - the same switch the settings
         // screen's "Move camera" sets, so a player can turn the shot on for a capture

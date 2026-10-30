@@ -246,6 +246,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.swapLayerColors = s.swapLayerColors;
   o.showCheck = s.showCheck;
   o.showSeams = s.showSeams;
+  o.nearClip = s.nearClip;
   o.pieceHeightScale = s.pieceHeightScale;
   o.flat = s.flatView;
   // The player's own slide plus the anti-clip's transient offset. Both the renderer and
@@ -272,6 +273,8 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
 /// where there is a surface to become, so `standard` and every non-glued board stay flat.
 render::BoardOptions optionsFor(const app::Shell& shell) {
   render::BoardOptions o = optionsFrom(shell.settings());
+  // The trailer clips further in (see `Settings::trailerNearClip`).
+  if (shell.attracting()) o.nearClip = std::max(o.nearClip, shell.settings().trailerNearClip);
 #ifdef CB_HAVE_IMGUI
   const app::Session* session = shell.session();
   const app::Settings& s = shell.settings();

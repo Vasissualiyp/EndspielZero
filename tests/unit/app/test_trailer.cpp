@@ -499,6 +499,10 @@ TEST_CASE("the trailer timeline maps time to a beat, move and fraction and back"
   // Out of range clamps rather than wandering off the trailer.
   CHECK(shell->trailerCueAt(-5.0f).beat == 0);
   CHECK(shell->trailerCueAt(total + 50.0f).beat == seq.size() - 1);
+  // The very end of a beat is its last slot, not a wrap back to its start.
+  const TrailerCue lastCue = shell->trailerCueAt(total + 50.0f, 8);
+  CHECK(lastCue.ply == seq.back().moves.size());
+  CHECK(lastCue.sub == 7);
 }
 
 TEST_CASE("keyframe times for the timeline are in order and offset by beat",
@@ -822,4 +826,95 @@ TEST_CASE("the standard opener hands a flat cylinder beat the same picture",
   // The slow morphs are slow on purpose: the torus's bend is the one that used to wind
   // up.
   CHECK(seq[2].morphSpeed < seq[1].morphSpeed);
+}
+
+TEST_CASE("a keyframe at a beat's first move does not erase the 3-D torus's spread",
+          "[unit][app][trailer][spline]") {
+  auto shell = makeShell("trailer-spread.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->settings().trailerMovePreview = 0.0f;
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  for (const std::size_t ply : {std::size_t{0}, std::size_t{6}}) {
+    CameraKeyframe kf = trailerKey(5, ply, 0, 0.3f, 1.0f, "torus3d_8x8");
+    kf.shellSpread = 1.0f;
+    shell->cameraTrack().set(kf);
+  }
+  constexpr float kStep = 1.0f / 60.0f;
+  bool inBeat = false;
+  float first = -1.0f, prev = 0.0f, worst = 0.0f, last = 0.0f;
+  for (int i = 0; i < 60 * 400 && shell->attractStep() <= 5; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    const bool cut = shell->advanceAttract(kStep);
+    shell->advanceCameraTrack(kStep);
+    if (inBeat && shell->attractStep() != 5) break;  // the lap wrapped round
+    if (shell->attractStep() == 5) {
+      const float s = shell->settings().geometryShellSpread;
+      if (cut && !inBeat) {
+        inBeat = true;
+        first = s;
+      } else if (inBeat) {
+        worst = std::max(worst, std::abs(s - prev));
+      }
+      prev = s;
+      last = s;
+    }
+  }
+  REQUIRE(inBeat);
+  CHECK(first < 0.05f);   // the levels open collapsed onto one ring, matching the Klein ring
+  // ... and spread without a jump (the test clock runs a move in ~0.25 s, so the hand-over
+  // is ~15 frames; a snap would be 1.0 in one frame)
+  CHECK(worst < 0.15f);
+  CHECK(last > 0.5f);
+}
+
+TEST_CASE("the cylinder's roll blends into its first keyframe instead of snapping shut",
+          "[unit][app][trailer][spline]") {
+  auto shell = makeShell("trailer-cylsnap.conf");
+  shell->settings().watchDwell = 0.05f;
+  shell->settings().trailerMovePreview = 0.0f;
+  shell->startAttract(defaultAttractSequence());
+  shell->setTrailerCamera(TrailerCamera::Authored);
+  shell->cameraTrack().set(trailerKey(1, 1, 0, 0.3f, 1.0f, "cylinder"));
+  constexpr float kStep = 1.0f / 60.0f;
+  bool inBeat = false;
+  float first = -1.0f, prev = 0.0f, worst = 0.0f;
+  for (int i = 0; i < 60 * 200 && shell->attractStep() <= 1; ++i) {
+    shell->session()->advanceAnimation(kStep);
+    const bool cut = shell->advanceAttract(kStep);
+    shell->advanceCameraTrack(kStep);
+    if (shell->attractStep() == 1) {
+      const float f = shell->settings().geometryFormed;
+      if (cut && !inBeat) {
+        inBeat = true;
+        first = f;
+      } else if (inBeat) {
+        worst = std::max(worst, std::abs(f - prev));
+      }
+      prev = f;
+    }
+  }
+  REQUIRE(inBeat);
+  CHECK(first < 0.05f);
+  CHECK(worst < 0.15f);  // a snap shut would be about 1.0 in one frame
+}
+
+TEST_CASE("the live keyframe blend takes the short way round", "[unit][app][trailer]") {
+  auto shell = makeShell("trailer-livelap.conf");
+  REQUIRE(shell->startGame("torus").has_value());
+  shell->settings().geometrySlideU = 30.0f;
+  CameraKeyframe kf = trailerKey(0, 0, 0, 0.3f, 1.0f, "torus");
+  kf.cue = {"torus", 0, 0, 0};
+  kf.slideU = 0.0f;
+  kf.morphSpeed = 2.0f;
+  shell->cameraTrack().set(kf);
+  constexpr float kStep = 1.0f / 60.0f;
+  float prev = 30.0f, travel = 0.0f;
+  for (int i = 0; i < 600; ++i) {
+    shell->advanceCameraTrack(kStep);
+    travel += std::abs(shell->settings().geometrySlideU - prev);
+    prev = shell->settings().geometrySlideU;
+  }
+  CHECK(prev == Catch::Approx(32.0f).margin(1e-3));
+  CHECK(travel < 2.01f);
 }

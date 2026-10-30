@@ -81,4 +81,34 @@ inline constexpr float kTorusRollEnd = 0.5f;
 inline constexpr float kKleinRingEnd = 0.40f;
 inline constexpr float kKleinFoldEnd = 0.72f;
 
+/// `value` moved by whole `lap`s to the equivalent nearest `reference`:
+/// value + lap * round((reference - value) / lap). `lap <= 0` returns `value` unchanged
+/// (that axis does not slide). With reference 0 this is the canonical slide in
+/// [-lap/2, lap/2]. A slide is periodic, so interpolating between two values takes the
+/// short way round rather than sweeping spurious laps (M21).
+[[nodiscard]] inline float nearestLap(float value, float reference, float lap) noexcept {
+  if (!(lap > 0.0f)) return value;
+  return value + lap * std::round((reference - value) / lap);
+}
+
+/// How long the trailer takes to hand its pose from a beat's own reveal to the keyframe
+/// spline, in trailer units (one unit = one move).
+inline constexpr float kPoseHandoverUnits = 1.0f;
+
+/// The keyframe spline's weight in the trailer pose at unshifted trailer time `g`, for a
+/// beat whose first frame was at `beatStart` and whose first keyframe is at `firstKey`
+/// (infinity when the beat has none -> 0). The window is
+/// end = max(firstKey, beatStart + kPoseHandoverUnits), start = end - kPoseHandoverUnits;
+/// smoothstep between, 0 before, 1 after.
+[[nodiscard]] inline float poseHandoverWeight(float g, float beatStart,
+                                              float firstKey) noexcept {
+  if (!std::isfinite(firstKey)) return 0.0f;
+  const float end = std::max(firstKey, beatStart + kPoseHandoverUnits);
+  const float start = end - kPoseHandoverUnits;
+  if (g <= start) return 0.0f;
+  if (g >= end) return 1.0f;
+  const float t = (g - start) / kPoseHandoverUnits;
+  return t * t * (3.0f - 2.0f * t);
+}
+
 }  // namespace cb::view

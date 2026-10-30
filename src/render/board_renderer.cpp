@@ -69,6 +69,29 @@ view::Rgba mix(const view::Rgba& a, const view::Rgba& b, float t) {
                     a.a + (b.a - a.a) * t};
 }
 
+/// The slab a board stands on: `halfSpanX/Y` are measured to the slab's edge, its top face
+/// `depth` under `cellBottomZ`. One construction for the ordinary board and for the
+/// surface's flat sheet, so the two draw the same table (M21).
+Instance plinthInstance(const view::Vec3& centre, float halfSpanX, float halfSpanY,
+                        float cellBottomZ, float depth, bool present,
+                        const view::Vec3& cellHalf, const view::Theme& t) {
+  Instance plinth{};
+  plinth.center[0] = centre.x;
+  plinth.center[1] = centre.y;
+  plinth.center[2] = cellBottomZ - depth;
+  plinth.scale[0] = halfSpanX / cellHalf.x;
+  plinth.scale[1] = halfSpanY / cellHalf.y;
+  plinth.scale[2] = depth / cellHalf.z;
+  // A board in the present - one a move is expected on - stands on a lit plinth, so the
+  // boards to answer on are visible at a glance.
+  toFloat4(present ? mix(t.boardRim, t.emberDeep, 0.55f) : t.boardRim, plinth.color);
+  // A warm rim around the edge of the table, which is what makes it read as an object
+  // rather than as a darker rectangle.
+  toFloat4(present ? t.ember : mix(t.boardRim, t.emberDeep, 0.35f), plinth.edge);
+  plinth.edgeMask = 15.0f;
+  return plinth;
+}
+
 view::Rgba withHover(view::Rgba fill, const view::PositionView& p, CellId c) {
   if (c == kInvalidCell || c != p.hover()) return fill;
   return mix(fill, view::Rgba{1.0f, 1.0f, 1.0f, fill.a}, kHoverBrighten);
@@ -853,13 +876,21 @@ InstanceSet BoardRenderer::buildInstances(
         const float spread = std::clamp(options_.surfaceShellSpread, 0.0f, 1.0f);
         ghostAlpha = single + (ghostAlpha - single) * spread;
       }
+      // A rail colours in while its own axis's gluing closes, not at the cut (M21).
+      const app::SurfaceKind railKind = app::overtureSignature(v).surface;
+      const float railW0 = seamRailWeight(railKind, 0, options_.surfaceFormed);
+      const float railW1 = seamRailWeight(railKind, 1, options_.surfaceFormed);
       const auto tinted = [&](view::Rgba base, int i, int j) {
         if (rails) {
-          const SurfaceRail ru = surfaceRail(*seams, patch.cell, 0, i, j);
-          const SurfaceRail rv = surfaceRail(*seams, patch.cell, 1, i, j);
+          SurfaceRail ru = surfaceRail(*seams, patch.cell, 0, i, j);
+          SurfaceRail rv = surfaceRail(*seams, patch.cell, 1, i, j);
+          ru.weight *= railW0;
+          rv.weight *= railW1;
           if (ru.weight > 0.0f && rv.weight > 0.0f) {
             // The one corner where both rings cross: average them so neither wins.
-            base = mix(base, mix(ru.color, rv.color, 0.5f), 1.0f);
+            const float sum = ru.weight + rv.weight;
+            base = mix(base, mix(ru.color, rv.color, rv.weight / sum),
+                       std::max(ru.weight, rv.weight));
           } else if (ru.weight > 0.0f) {
             base = mix(base, ru.color, ru.weight);
           } else if (rv.weight > 0.0f) {
@@ -1057,6 +1088,44 @@ InstanceSet BoardRenderer::buildInstances(
         kShapeSlots);
     std::vector<std::vector<Instance>> byShapeFlourishDisc(
         kShapeSlots);
+    // The slab the board stands on fades out while the flat sheet starts to curl, instead
+    // of vanishing at the cut from the ordinary board (M21). It is the ordinary board's own
+    // plinth, laid under the sheet as it lies flat; a table, not part of the board, so it
+    // does not follow the curl.
+    if (!surf.stacked()) {
+      const float wp = plinthOpacity(app::overtureSignature(v).surface, options_.surfaceFormed);
+      if (wp > 0.0f && !surf.seats().empty()) {
+        SurfacePose flatPose = pose;
+        flatPose.formed = 0.0f;
+        const PlaySurface flat = PlaySurface::build(v, flatPose);
+        float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
+        float sumU = 0.0f, sumV = 0.0f;
+        view::Vec3 mean{0.0f, 0.0f, 0.0f};
+        for (const SurfaceSeat& s : flat.seats()) {
+          minX = std::min(minX, s.centre.x);
+          maxX = std::max(maxX, s.centre.x);
+          minY = std::min(minY, s.centre.y);
+          maxY = std::max(maxY, s.centre.y);
+          sumU += s.stepU;
+          sumV += s.stepV;
+          mean = mean + s.centre;
+        }
+        const float n = static_cast<float>(flat.seats().size());
+        const float pitchU = sumU / n;
+        const float pitchV = sumV / n;
+        mean = mean * (1.0f / n);
+        Instance plinth = plinthInstance(
+            mean, (maxX - minX) * 0.5f + 0.78f * pitchU, (maxY - minY) * 0.5f + 0.78f * pitchV,
+            mean.z - PlaySurface::kThickness * 0.5f, 0.13f * wp, false, cellHalfExtent(),
+            theme_);
+        if (wp >= 1.0f) {
+          byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
+        } else {
+          plinth.color[3] = wp;
+          byShapeFlourish[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
+        }
+      }
+    }
     if (anim != nullptr && anim->active() && anim->captures()) {
       const float t = anim->progress();
       const float fade = view::captureFade(t);
@@ -1355,25 +1424,12 @@ InstanceSet BoardRenderer::buildInstances(
     // The board is an object standing on the page, not a pattern printed on it, and the
     // rim under the cells is what says so. It comes from the palette rather than from a
     // blend of the ground, because on a light theme a blend of the ground is the ground.
-    const view::Rgba wood = theme_.boardRim;
     for (const Extent& e : extents) {
       if (!e.seen) continue;
-      Instance plinth{};
-      plinth.center[0] = (e.minX + e.maxX) * 0.5f;
-      plinth.center[1] = (e.minY + e.maxY) * 0.5f;
-      plinth.center[2] = e.z - half.z - 0.13f;
-      plinth.scale[0] = ((e.maxX - e.minX) * 0.5f + 0.78f) / half.x;
-      plinth.scale[1] = ((e.maxY - e.minY) * 0.5f + 0.78f) / half.y;
-      plinth.scale[2] = 0.13f / half.z;
-      // A board in the present - one a move is expected on - stands on a lit plinth, so
-      // the boards to answer on are visible at a glance.
-      toFloat4(e.present ? mix(wood, theme_.emberDeep, 0.55f) : wood, plinth.color);
-      // A warm rim around the edge of the table, which is what makes it read as an
-      // object rather than as a darker rectangle.
-      toFloat4(e.present ? theme_.ember : mix(theme_.boardRim, theme_.emberDeep, 0.35f),
-               plinth.edge);
-      plinth.edgeMask = 15.0f;
-      byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
+      byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinthInstance(
+          view::Vec3{(e.minX + e.maxX) * 0.5f, (e.minY + e.maxY) * 0.5f, 0.0f},
+          (e.maxX - e.minX) * 0.5f + 0.78f, (e.maxY - e.minY) * 0.5f + 0.78f,
+          e.z - half.z, 0.13f, e.present, half, theme_));
     }
   }
 
@@ -1836,7 +1892,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                               : BoardRect{0, 0, static_cast<float>(target.width()),
                                           static_cast<float>(target.height())};
   PushConstants push{};
-  push.viewProj = camera.viewProj(board.width / board.height);
+  push.viewProj = camera.withNearClip(options_.nearClip).viewProj(board.width / board.height);
   const view::Vec3 eye = camera.eye();
   push.eyePos[0] = eye.x;
   push.eyePos[1] = eye.y;

@@ -156,6 +156,59 @@ float shapeEase(float local) noexcept {
   return t * t * (3.0f - 2.0f * t);
 }
 
+float seamRailWeight(app::SurfaceKind kind, int axis, float formed) noexcept {
+  const float f = std::clamp(formed, 0.0f, 1.0f);
+  float begin = 0.0f;
+  float end = 1.0f;
+  switch (kind) {
+    case app::SurfaceKind::Tube:
+      if (axis != 0) return 1.0f;
+      break;
+    case app::SurfaceKind::Torus:
+      if (axis == 0) {
+        end = view::kTorusRollEnd;
+      } else if (axis == 1) {
+        begin = view::kTorusRollEnd;
+      } else {
+        return 1.0f;
+      }
+      break;
+    case app::SurfaceKind::Klein:
+      if (axis != 0 && axis != 1) return 1.0f;
+      end = view::kKleinRingEnd;
+      break;
+    case app::SurfaceKind::Band:
+      if (axis != 0) return 1.0f;
+      begin = kRibbonStretchWindow;
+      break;
+    default:
+      return 1.0f;
+  }
+  return shapeEase(stageForm(f, begin, end));
+}
+
+float plinthOpacity(app::SurfaceKind kind, float formed) noexcept {
+  float firstStageEnd = 0.0f;
+  switch (kind) {
+    case app::SurfaceKind::Tube:
+      firstStageEnd = 1.0f;
+      break;
+    case app::SurfaceKind::Torus:
+      firstStageEnd = view::kTorusRollEnd;
+      break;
+    case app::SurfaceKind::Klein:
+      firstStageEnd = view::kKleinRingEnd;
+      break;
+    case app::SurfaceKind::Band:
+      firstStageEnd = kRibbonStretchWindow;
+      break;
+    default:
+      return 0.0f;
+  }
+  const float f = std::clamp(formed, 0.0f, 1.0f);
+  return 1.0f - shapeEase(stageForm(f, 0.0f, kPlinthFadeShare * firstStageEnd));
+}
+
 ShapeBeat shapeBeat(float elapsed, float alignSeconds, float approachSeconds,
                     float travelSeconds, float returnSeconds) noexcept {
   float t = std::max(0.0f, elapsed);
@@ -296,7 +349,13 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // A rank slide moves the board along the tube - which is open, and so has nowhere to go -
   // until the bend closes it into a ring. It comes in with the bend, or the first bent
   // frame would carry the whole board away from where the open tube left it.
-  if (kind == app::SurfaceKind::Torus) sv *= stageForm(form, view::kTorusRollEnd, 1.0f);
+  // The nearest equivalent lap, not the raw two-lap window: a slide accumulated by a long
+  // middle-drag (125 cells) would otherwise carry the ring several laps round while the
+  // bend ramps it in (M21). Bit-identical for |slideV| <= nz / 2.
+  if (kind == app::SurfaceKind::Torus) {
+    sv = view::nearestLap(pose.slideV, 0.0f, fnz) / fnz *
+         stageForm(form, view::kTorusRollEnd, 1.0f);
+  }
   // A nonzero square shift only lines the rank seam up at `sv == 0` by itself:
   // `kleinSurf` samples `lemniscateAngle(u + collapsePhase * v)`, and the seam's true
   // partner of `(u, rank 0)` is `(1 - u - collapsePhase * (v_lo + v_hi), rank nz - 1)`

@@ -90,6 +90,13 @@ class CameraTrack {
   std::vector<CameraKeyframe> keyframes_;
 };
 
+/// Unwrap a keyframe slide channel for interpolation: each value becomes its equivalent
+/// (view::nearestLap with that key's own lap) nearest the previous *unwrapped* value, so
+/// consecutive keys never sweep a spurious lap. A key whose lap is 0 (its variant does not
+/// slide on that axis) holds the previous unwrapped value; the first key keeps its own.
+[[nodiscard]] std::vector<float> unwrapSlides(const std::vector<float>& values,
+                                              const std::vector<float>& laps);
+
 /// Serialize a track as text, one keyframe per line - the same line-oriented, hand-
 /// editable spirit as a `GameFile` (`io/game_file.hpp`).
 [[nodiscard]] std::string cameraTrackText(const CameraTrack& track);

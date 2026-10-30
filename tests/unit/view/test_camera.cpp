@@ -252,3 +252,28 @@ TEST_CASE("scalar spline is smooth and passes through its points",
   const float d2 = (splineScalar(pts, 1.0f + h) - splineScalar(pts, 1.0f)) / h;
   CHECK(std::abs(d1 - d2) < 0.02f);
 }
+
+TEST_CASE("the near clip hides what is closer to the eye than it, and only that", "[view]") {
+  view::OrbitCamera cam;
+  cam.target = view::Vec3{0, 0, 0};
+  cam.distance = 10.0f;
+  const view::Vec3 eye = cam.eye();
+  const view::Vec3 fwd = view::normalize(cam.target - eye);
+  const auto clipZ = [&](const view::OrbitCamera& c, float ahead) {
+    const view::Vec3 p = eye + fwd * ahead;
+    const view::Mat4 vp = c.viewProj(1.0f);
+    const float z = vp[2] * p.x + vp[6] * p.y + vp[10] * p.z + vp[14];
+    const float w = vp[3] * p.x + vp[7] * p.y + vp[11] * p.z + vp[15];
+    return z / w;  // Vulkan depth: inside the frustum when in [0, 1]
+  };
+  const view::OrbitCamera far = cam.withNearClip(0.6f);
+  // 0.3 ahead of the eye: drawn with the old 0.1 plane, clipped with a 0.6 one.
+  CHECK(clipZ(cam, 0.3f) > 0.0f);
+  CHECK(clipZ(far, 0.3f) < 0.0f);
+  // Past the plane both draw it.
+  CHECK(clipZ(far, 1.0f) > 0.0f);
+  // A camera that already clips further is not pulled nearer.
+  view::OrbitCamera wide = cam;
+  wide.nearZ = 2.0f;
+  CHECK(wide.withNearClip(0.5f).nearZ == 2.0f);
+}

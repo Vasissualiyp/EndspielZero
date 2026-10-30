@@ -60,6 +60,14 @@ Mat4 perspective(float fovYRadians, float aspect, float nearZ, float farZ);
 /// board is a diagram, and a diagram has no vanishing point.
 Mat4 orthographic(float halfHeight, float aspect, float nearZ, float farZ);
 
+/// The distance, in cells, inside which nothing is drawn: the camera's near clipping plane
+/// as a play setting. A camera zoomed or slid into a shape (the inside of a torus tube) would
+/// otherwise have polygons a hair in front of the lens flicker and fill the screen. 0.1 was
+/// the fixed value before this was a setting.
+inline constexpr float kMinNearClip = 0.05f;
+inline constexpr float kMaxNearClip = 3.0f;
+inline constexpr float kDefaultNearClip = 0.5f;
+
 /// An orbit camera, which is the only control scheme that makes sense for a board you
 /// are looking at rather than standing in.
 struct OrbitCamera {
@@ -97,6 +105,13 @@ struct OrbitCamera {
   /// the renderer's basis and not a second derivation of it.
   void basis(Vec3& forward, Vec3& right, Vec3& up) const;
   [[nodiscard]] Mat4 viewProj(float aspect) const;
+  /// This camera with its near plane at least `nearClip` away: geometry closer to the eye
+  /// than that is not drawn. Never moves the plane nearer than the camera already had it.
+  [[nodiscard]] OrbitCamera withNearClip(float nearClip) const noexcept {
+    OrbitCamera c = *this;
+    c.nearZ = nearZ > nearClip ? nearZ : nearClip;
+    return c;
+  }
 
   /// A world point in pixels, origin top left - the inverse of pickRay. `visible` is
   /// false when the point is behind the camera or outside the viewport, which is exactly

@@ -43,6 +43,13 @@ struct Settings {
   /// Draw cyan edges where the board is glued to itself. Off only for a player who
   /// already knows the geometry by heart.
   bool showSeams{true};
+  /// Nothing closer to the camera than this many cells is drawn: stops polygons flickering
+  /// across the lens when the camera is inside a shape.
+  float nearClip{0.5f};
+  /// The near clip while the trailer plays (the larger of this and `nearClip`). The 3-D
+  /// torus beat puts the camera inside its nested shells, a few cells from the target, where
+  /// half a cell clears nothing; 2 keeps the geometry hugging the lens out of frame.
+  float trailerNearClip{2.0f};
   /// Draw the corner legend that names what the cyan seam colours mean (M14.4).
   bool showSeamLegend{true};
   bool showCoordinates{true};

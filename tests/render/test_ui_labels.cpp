@@ -101,12 +101,12 @@ TEST_CASE("the 2D/3D button is re-purposed on the shape view", "[render]") {
     CHECK(b.enabled);
     CHECK(b.pieceStyle);
   }
-  // Flat wins over the shape, so there the board toggle is in charge - and greyed, as
-  // when SHAPE is on.
+  // Flat wins over the shape, so there the board toggle is in charge - and live, because it
+  // is the only way back: SHAPE is greyed in 2D, so a greyed toggle too was a dead end.
   {
     const ViewModeButton b = viewModeButton(settings, true, true);
     CHECK(std::string(b.label) == "2D");
-    CHECK_FALSE(b.enabled);
+    CHECK(b.enabled);
     CHECK_FALSE(b.pieceStyle);
   }
 }

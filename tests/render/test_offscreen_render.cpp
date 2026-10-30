@@ -154,7 +154,8 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
           std::abs(lit.instances[i].color[1] - set.instances[i].color[1]) > 0.02f;
       if (differs) ++changed;
     }
-    REQUIRE(changed == 3);
+    // Three cells, and the selected piece itself, which takes the stronger accent tint (M20).
+    REQUIRE(changed == 4);
 
     const auto& ember = renderer.theme().ember;
     int selected = 0;

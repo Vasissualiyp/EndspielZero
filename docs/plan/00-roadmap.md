@@ -42,6 +42,7 @@ directory. Read `docs/ARCHITECTURE.md` first.
 | M16 | Steam publishing: store, demo and release | Coming Soon page, build pipeline, demo/Next Fest, ratings, launch | in progress: M16.2 packaging + SteamPipe scaffolding done; M16.1 store page is process | [M16](M16-publishing.md) |
 | M17 | Play on the shape: the geometry view | a button turns the play board into its own topology - the torus is a donut, the Klein bottle a bottle - and a move is played on it | not started, first in the release sequence's Wave 1 tail | [M17](M17-geometry-view.md) |
 | M18 | Production polish: the game stops reading as a tech demo | capture/move juice, contact shadows, a cinema vignette/grade, an ambient background drawn from the game's own geometry instead of abstract confetti, and v1 audio | spec'd, not started; sits beside the release sequence rather than inside it - see its own Dependencies section | [M18](M18-production-polish.md) |
+| M22 | Adjacent boards: the tiled view | a switch (2D and 3D) draws the board's neighbours through its glued edges - a cylinder repeats, a torus tiles, a Möbius band and Klein bottle tile with their flips - rings of neighbours go out from the centre, more transparent the higher the order, and they arrive from "infinity" and merge with the centre | planned (2026-10-30), not started; medium effort (about a week); **must be ready before the demo is published** - target mid-December 2026, see Wave 2 item 8b | [M22](M22-adjacent-boards.md) |
 
 Each completed milestone's plan file ends with a **Status** section recording what was
 built, what was deferred, and why - including the places where the plan turned out to
@@ -114,6 +115,15 @@ first and can ship on their own.
    extends it to *every* variant by sampling mobility on that variant's own geometry. It
    lands **before** the demo, so Next Fest has a legal opponent on every curated board;
    M10.4-M10.5 stay in Wave 3.
+8b. **M22 — adjacent boards (the tiled view).** Added 2026-10-30 at the user's direction, **to be
+    ready before the demo is published**: it is the second "the board is a surface" visual, and
+    works in both the 2D and 3D board views. Scheduled to land
+    **by mid-December 2026**, a clear two weeks ahead of the demo build (early January 2027,
+    item 9), so the demo is cut from a tree that already has it. Cut line if it slips: M22.1
+    (the pure copies + property test), M22.2 drawing in the 3-D board and the flat tokens, M22.3
+    switch/button/setting and the minimal arrival animation (M22.4 without the ring stagger) are
+    the **must-have**; picking (M22.5), rings beyond 2, and the third axis (M22.8) follow after
+    the demo. See [M22](M22-adjacent-boards.md).
 9. **M16.2 + M16.3 — the build pipeline and the demo.** The **February 2027** Next Fest is
    the target (October 2026's deadlines have passed): registration closes roughly 10-12
    weeks prior and the demo build must pass review ~3 weeks prior, so the pipeline and the

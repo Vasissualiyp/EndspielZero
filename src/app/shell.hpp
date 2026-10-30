@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -511,8 +512,10 @@ class Shell {
   /// than writing the settings directly (playback).
   void applySplineAt(float g, bool toEditPose);
   void seekNow(const TrailerCue& to);
-  /// Whether the keyframes own the pose right now (see `poseKeysFrom`).
-  [[nodiscard]] bool splinePoseActive() const;
+  /// Ease the beat's own pose (`beatPose_`) one frame toward `want`. Separate from
+  /// `easePose` (which edit mode drives on `settings_`) so the two never restart each
+  /// other's eases.
+  void easeBeatPose(const TrailerPose& want, float dt, float formSpeed);
   [[nodiscard]] float poseKeysFrom(std::size_t beat) const;
 
   std::vector<std::string> library_;
@@ -563,6 +566,19 @@ class Shell {
   view::EasedMorph formedEase_;
   view::EasedMorph ghostEase_;
   view::EasedMorph spreadEase_;
+  /// The beat's own eased pose - the reveal the beat plays (the cylinder rolling up, the
+  /// 3-D torus's levels spreading) - never written by the keyframe spline, which is blended
+  /// over it (`view::poseHandoverWeight`) so the pose hands over to the keys instead of
+  /// snapping (M21).
+  TrailerPose beatPose_;
+  view::EasedMorph beatFormedEase_;
+  view::EasedMorph beatGhostEase_;
+  view::EasedMorph beatSpreadEase_;
+  /// The unshifted trailer time of the current beat's first frame.
+  float beatStartTime_{0.0f};
+  /// One lap of slide on each axis, per beat (`slideLap`), computed when the trailer
+  /// starts; {0, 0} where a beat's variant does not load or does not slide.
+  std::vector<std::array<float, 2>> beatLaps_;
   std::optional<TrailerCue> pendingSeek_;
   bool pendingRestart_{false};
   bool trailerPaused_{false};

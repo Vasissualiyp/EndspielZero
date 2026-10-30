@@ -35,6 +35,12 @@ struct OvertureSignature {
 /// geometry: a table test pins every shipped variant's surface.
 [[nodiscard]] OvertureSignature overtureSignature(const VariantSpec& v) noexcept;
 
+/// One lap of slide on `axis` (0 = slideU along the files, 1 = slideV along the ranks), in
+/// cells: the smallest slide that gives the identical picture once the shape is formed
+/// (docs/plan/M21-trailer-transitions.md). 0 where that axis does not slide on the shape.
+/// Keyed by SurfaceKind, never by name.
+[[nodiscard]] float slideLap(const VariantSpec& v, int axis) noexcept;
+
 /// True when the variant's name has a hand-authored scene. Everything else - a Workshop
 /// package, a variant added as data - animates with the derived scene instead.
 [[nodiscard]] bool hasBespokeOverture(std::string_view variantName) noexcept;

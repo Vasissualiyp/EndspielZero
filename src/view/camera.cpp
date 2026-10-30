@@ -399,11 +399,22 @@ OrbitCamera splineCamera(const std::vector<CameraWaypoint>& keys, float t) {
     const Quat& next = k + 1 < q.size() ? q[k + 1] : q[k];
     return squadControl(prev, q[k], next);
   };
-  const Quat s0 = control(i);
-  const Quat s1 = control(i + 1);
+  // Each control point stays on the hemisphere of the key it belongs to, so `inner` is the
+  // short way between them, and the blend below can never flip: `slerp` picks the short way
+  // by negating one end, and when `outer` and `inner` are a quarter turn of quaternion
+  // space apart that choice changes sign from one frame to the next - the camera used to
+  // spin half a turn in a single frame there (a key added between two far-apart poses).
+  // Weighting the squad term by |dot| makes it vanish exactly where the sign would flip, so
+  // the path is continuous whichever way it is signed.
+  Quat s0 = control(i);
+  Quat s1 = control(i + 1);
+  if (dotq(s0, q[i]) < 0.0f) s0 = {-s0.x, -s0.y, -s0.z, -s0.w};
+  if (dotq(s1, q[i + 1]) < 0.0f) s1 = {-s1.x, -s1.y, -s1.z, -s1.w};
   const Quat outer = slerp(q[i], q[i + 1], h);
-  const Quat inner = slerp(s0, s1, h);
-  const Quat orient = slerp(outer, inner, 2.0f * h * (1.0f - h));
+  Quat inner = slerp(s0, s1, h);
+  const float d = dotq(outer, inner);
+  if (d < 0.0f) inner = {-inner.x, -inner.y, -inner.z, -inner.w};
+  const Quat orient = slerp(outer, inner, 2.0f * h * (1.0f - h) * std::fabs(d));
 
   // Position, distance and lens: Catmull-Rom on each component.
   const float span = times[i + 1] - times[i];

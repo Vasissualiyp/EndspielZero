@@ -116,6 +116,24 @@ struct ShapeBeat {
 /// with a jerk.
 [[nodiscard]] float shapeEase(float local) noexcept;
 
+/// How much of a seam rail's colour shows on `axis` (0 files, 1 ranks) at morph amount
+/// `formed`: 0 on the flat board (which has no seams to mark - the ordinary `standard`
+/// board draws none), 1 once that axis's own gluing has closed. Staged on the same
+/// boundaries the surface functions use (view/morph.hpp), eased with shapeEase, so a rail
+/// colours in exactly while its two edges travel to meet. Pure; 1 for any kind/axis with
+/// no stage (so formed = 1 is bit-for-bit the shipped mesh).
+[[nodiscard]] float seamRailWeight(app::SurfaceKind kind, int axis, float formed) noexcept;
+
+/// The plinth's share of a surface's first morph stage: the slab under the flat board fades
+/// out over the first quarter of the stage in which the sheet starts to curl, so it is
+/// gone before the sheet has lifted far off it.
+inline constexpr float kPlinthFadeShare = 0.25f;
+/// 1 at formed 0 (the slab the ordinary board stands on), 0 from
+/// kPlinthFadeShare * firstStageEnd(kind) on, shapeEase'd between. firstStageEnd: Tube 1,
+/// Torus kTorusRollEnd, Klein kKleinRingEnd, Band kRibbonStretchWindow; other kinds 0
+/// (no plinth). Pure.
+[[nodiscard]] float plinthOpacity(app::SurfaceKind kind, float formed) noexcept;
+
 /// The chase camera's elevation above the followed piece's tangent plane, expressed as a
 /// tangent (the ratio of the eye's normal lift to its distance behind), for a caller with
 /// no setting: 30 degrees. `Settings::followElevationDeg` overrides it.

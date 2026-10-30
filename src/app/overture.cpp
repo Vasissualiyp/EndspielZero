@@ -48,6 +48,23 @@ bool hasBespokeOverture(std::string_view variantName) noexcept {
   return false;
 }
 
+float slideLap(const VariantSpec& v, int axis) noexcept {
+  const auto nx = static_cast<float>(v.dims.extent(0));
+  const auto nz = v.dims.dims() > 1 ? static_cast<float>(v.dims.extent(1)) : 0.0f;
+  switch (overtureSignature(v).surface) {
+    case SurfaceKind::Tube:
+      return axis == 0 ? nx : 0.0f;
+    case SurfaceKind::Torus:
+      return axis == 0 ? nx : axis == 1 ? nz : 0.0f;
+    case SurfaceKind::Band:
+      return axis == 0 ? 2.0f * nx : 0.0f;
+    case SurfaceKind::Klein:
+      return axis == 0 ? nx : axis == 1 ? 2.0f * nz : 0.0f;
+    default:
+      return 0.0f;
+  }
+}
+
 OvertureSignature overtureSignature(const VariantSpec& v) noexcept {
   OvertureSignature sig;
   sig.dims = v.dims.dims();
