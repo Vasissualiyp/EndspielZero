@@ -45,8 +45,9 @@ namespace {
 
 /// Where the variants live, whether running from the build tree or an install.
 std::filesystem::path variantDir() {
-  for (const char* base : {"variants", "../variants", "../../variants",
-                           "share/endspielzero/variants", "/usr/share/endspielzero/variants"}) {
+  for (const char* base :
+       {"variants", "../variants", "../../variants", "share/endspielzero/variants",
+        "/usr/share/endspielzero/variants"}) {
     if (std::filesystem::is_directory(base)) return base;
   }
   return "variants";
@@ -422,8 +423,8 @@ void syncShapeCentre(app::Shell& shell) {
     shell.setTrailerShapeCentre({3.5f, 3.5f, 0.7f});
     return;
   }
-  const render::PlaySurface surf =
-      render::PlaySurface::build(session->variant(), poseFrom(shell.settings(), session->variant()));
+  const render::PlaySurface surf = render::PlaySurface::build(
+      session->variant(), poseFrom(shell.settings(), session->variant()));
   if (surf.empty()) return;
   const view::Bounds b = surf.bounds();
   // The ordinary board is looked at 0.7 above its plane; keep that lift over the shape.
@@ -577,7 +578,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::Settings);
   else if (screen == "editor")
     shell->go(app::Screen::Editor);
-  else if (screen == "designer" || screen == "body" || screen == "flat") {
+  else if (screen == "designer" || screen == "body" || screen == "flat" ||
+           screen == "rules") {
     // The designers need a document open, which the editor's own entry does for them.
     (void)shell->openEditor(variantName);
     shell->go(app::Screen::Editor);
@@ -707,6 +709,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   if (screen == "designer") (*ui)->openEditorPage(1, 0);
   if (screen == "body") (*ui)->openEditorPage(1, 1);
   if (screen == "flat") (*ui)->openEditorPage(1, 2);
+  if (screen == "rules") (*ui)->openEditorPage(1, 3);
   (*ui)->setPreviewDims(previewDims);
   // Point the library at the named variant, so a capture of a variant with a derived
   // overture shows *it* rather than the standard construction the first entry opens on.
@@ -1739,6 +1742,9 @@ int main(int argc, char** argv) {
     // While the attract sequence runs it owns the session's watch, so the ordinary driver
     // stands down rather than advancing the same runner twice (M13.9).
     if (!shell->attracting()) shell->advanceWatching(dt);
+    // The computer opponent (M10.2-M10.3): it thinks on a worker, so this only starts a
+    // search or collects an answer - the frame is never held up by it.
+    if (!shell->attracting()) (void)shell->advanceEngine(dt);
 
     // The attract sequence (M13.9): started from the "Watch trailer" button, never by
     // merely sitting on the menu. It plays on the ordinary game screen like a watched

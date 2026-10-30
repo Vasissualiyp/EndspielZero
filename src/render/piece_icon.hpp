@@ -52,4 +52,10 @@ struct PieceIcon {
 /// are not pieces and come back empty.
 PieceIcon pieceIcon(IconStyle style, Archetype shape);
 
+/// The icon a piece of a variant draws with: its authored `[piece.icon]` (M7.3.4) when it
+/// has one - in either style, since an author draws one icon - and otherwise its
+/// archetype's. The returned spans stay valid for the life of the program: authored
+/// icons are converted once and kept, keyed by their content.
+PieceIcon pieceIconFor(IconStyle style, const PieceTypeDef& piece);
+
 }  // namespace cb::render

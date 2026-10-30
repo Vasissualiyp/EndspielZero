@@ -70,8 +70,8 @@ std::filesystem::path findFont(const char* name) {
     roots.push_back(exe / ".." / ".." / "fonts");
     roots.push_back(exe / ".." / "share" / "endspielzero" / "fonts");
   }
-  for (const char* rel : {"fonts", "../fonts", "build/dev/fonts", "share/endspielzero/fonts",
-                          "/usr/share/endspielzero/fonts"}) {
+  for (const char* rel : {"fonts", "../fonts", "build/dev/fonts",
+                          "share/endspielzero/fonts", "/usr/share/endspielzero/fonts"}) {
     roots.emplace_back(rel);
   }
   for (const auto& root : roots) {
@@ -173,16 +173,17 @@ float smoothstep(float t) {
 ///
 /// `behind` is what the icon is drawn on: the cut-outs are painted in it, which is how
 /// a knight gets an eye out of a single-colour silhouette.
-void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
-                    Archetype shape, IconStyle style) {
-  const PieceIcon icon = pieceIcon(style, shape);
-  // The box is 100 wide; r is the icon's half-size on screen.
+void drawIconGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
+                   const PieceIcon& icon, bool upsideDown = false) {
+  // The box is 100 wide; r is the icon's half-size on screen. Upside down is how a piece
+  // whose forward a seam has reversed shows it (Piece::flipped).
   const float k = r / 50.0f;
+  const float ky = upsideDown ? -k : k;
   const auto trace = [&](const IconPoly& poly, ImU32 fill) {
     if (poly.size() < 3) return;
     dl->PathClear();
     for (const IconPoint& p : poly) {
-      dl->PathLineTo(ImVec2(c.x + (p.x - 50.0f) * k, c.y + (p.y - 50.0f) * k));
+      dl->PathLineTo(ImVec2(c.x + (p.x - 50.0f) * k, c.y + (p.y - 50.0f) * ky));
     }
     // Concave, and properly so: a rook's crenellations, a queen's coronet and any
     // valley an author draws are not convex hulls, and a fill that treats them as one
@@ -192,6 +193,11 @@ void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
   };
   for (const IconPoly& poly : icon.fills) trace(poly, col);
   for (const IconPoly& poly : icon.cuts) trace(poly, behind);
+}
+
+void drawPieceGlyph(ImDrawList* dl, ImVec2 c, float r, ImU32 col, ImU32 behind,
+                    Archetype shape, IconStyle style) {
+  drawIconGlyph(dl, c, r, col, behind, pieceIcon(style, shape));
 }
 
 }  // namespace
@@ -2076,9 +2082,10 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // to sit on - and the thing being read is the figure.
       dl->AddCircleFilled(centre, radius, u32(t.pieceToken, focus), 24);
       dl->AddCircle(centre, radius, u32(t.boardRim, focus), 24, px(1.5f));
-      drawPieceGlyph(
-          dl, centre, radius * 0.82f, u32(white ? t.whitePiece : t.blackPiece, focus),
-          u32(t.pieceToken, focus), archetypeFor(v.pieces[piece.type]), iconStyle_);
+      drawIconGlyph(dl, centre, radius * 0.82f,
+                    u32(white ? t.whitePiece : t.blackPiece, focus),
+                    u32(t.pieceToken, focus),
+                    pieceIconFor(iconStyle_, v.pieces[piece.type]), piece.flipped());
     };
 
     const view::MoveAnimation& anim = session.animation();

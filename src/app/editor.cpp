@@ -5,6 +5,8 @@
 #include <sstream>
 #include <utility>
 
+#include "io/variant_toml.hpp"
+
 namespace cb::app {
 
 Editor::Editor(VariantDoc doc, std::string sourceName)
@@ -31,6 +33,8 @@ Result<Editor> Editor::openFile(const std::filesystem::path& path) {
 }
 
 Result<void> Editor::saveFile(const std::filesystem::path& path) {
+  // No "save anyway": a file the game cannot load is not saved (M7.0.3).
+  if (auto ok = validate(); !ok.has_value()) return ok;
   std::ofstream out(path, std::ios::trunc);
   if (!out) {
     return fail(ErrorCode::Internal, "cannot write '" + path.string() + "'");
@@ -143,6 +147,62 @@ Result<void> Editor::setPieceAtoms(std::string_view piece,
 
 std::string Editor::serialize() const {
   return doc_.serialize();
+}
+
+Result<std::optional<assets::PieceModel>> Editor::pieceModel(
+    std::string_view piece) const {
+  return doc_.pieceModel(piece);
+}
+
+Result<std::optional<assets::IconModel>> Editor::pieceIcon(std::string_view piece) const {
+  return doc_.pieceIcon(piece);
+}
+
+Result<void> Editor::setPieceModel(std::string_view piece,
+                                   const std::optional<assets::PieceModel>& m) {
+  if (auto now = doc_.pieceModel(piece); now.has_value() && *now == m) return {};
+  return edit([&](VariantDoc& d) { return d.setPieceModel(piece, m); });
+}
+
+Result<void> Editor::setPieceIcon(std::string_view piece,
+                                  const std::optional<assets::IconModel>& m) {
+  if (auto now = doc_.pieceIcon(piece); now.has_value() && *now == m) return {};
+  return edit([&](VariantDoc& d) { return d.setPieceIcon(piece, m); });
+}
+
+std::vector<Editor::FieldInfo> Editor::fields(bool cellFields) const {
+  return doc_.fields(cellFields);
+}
+
+Result<void> Editor::setFields(bool cellFields, const std::vector<FieldInfo>& fields) {
+  if (doc_.fields(cellFields) == fields) return {};
+  return edit([&](VariantDoc& d) -> Result<void> {
+    d.setFields(cellFields, fields);
+    return {};
+  });
+}
+
+std::vector<Editor::RuleInfo> Editor::rules() const {
+  return doc_.rules();
+}
+
+Result<void> Editor::setRules(const std::vector<RuleInfo>& rules) {
+  if (doc_.rules() == rules) return {};
+  return edit([&](VariantDoc& d) -> Result<void> {
+    d.setRules(rules);
+    return {};
+  });
+}
+
+Result<void> Editor::validate() const {
+  const std::string& text = history_[cursor_];
+  if (text != validatedText_ || validatedText_.empty()) {
+    auto loaded = loadVariantToml(text, sourceName_);
+    validated_ = loaded.has_value() ? Result<void>{}
+                                    : Result<void>{std::unexpected(loaded.error())};
+    validatedText_ = text;
+  }
+  return validated_;
 }
 
 }  // namespace cb::app

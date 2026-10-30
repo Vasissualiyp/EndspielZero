@@ -140,13 +140,13 @@ struct InstanceSet {
     std::uint32_t first{0};
     std::uint32_t count{0};
   };
-  std::array<Batch, static_cast<std::size_t>(Archetype::Count)> batches{};
+  std::array<Batch, kShapeSlots> batches{};
   /// M17.26: how many of `batches[s]` are token discs rather than icon decals. The shape
   /// view emits the disc first and the icon second for each piece, both in this one
   /// batch; the first `discCounts[s]` draw from `discRanges[s]` and the rest from
   /// `cylinderRanges[s]`. Zero on every board that is not the shape view's puck board, so
   /// the ordinary per-shape draw is unchanged.
-  std::array<std::uint32_t, static_cast<std::size_t>(Archetype::Count)> discCounts{};
+  std::array<std::uint32_t, kShapeSlots> discCounts{};
 
   /// The geometry view's board, as one mesh (M17). A square on a curved surface is a
   /// patch of that surface, not a slab turned to face it, so it cannot be an instance of
@@ -163,18 +163,17 @@ struct InstanceSet {
   /// with alpha blending - their alpha *is* the fade - in one pass after the opaque board
   /// rather than in the per-shape batches, which write depth and do not blend.
   std::vector<Instance> flourish;
-  std::array<Batch, static_cast<std::size_t>(Archetype::Count)> flourishBatches{};
+  std::array<Batch, kShapeSlots> flourishBatches{};
   /// M17.26: the flourish's token discs, ahead of its icon decals in the same batch -
   /// `flourishBatches[s]`'s first `flourishDiscCounts[s]` draw from `discRanges[s]`.
-  std::array<std::uint32_t, static_cast<std::size_t>(Archetype::Count)>
-      flourishDiscCounts{};
+  std::array<std::uint32_t, kShapeSlots> flourishDiscCounts{};
 
   /// The contact shadows (M18.2): one soft, dark decal under each occupied cell, flat or
   /// on a shape. Kept apart from `instances` for the same reason as the flourish - their
   /// softness *is* their alpha, so they cannot ride the opaque per-shape batches. Drawn
   /// in the same blended pass, before the flourish.
   std::vector<Instance> shadows;
-  std::array<Batch, static_cast<std::size_t>(Archetype::Count)> shadowBatches{};
+  std::array<Batch, kShapeSlots> shadowBatches{};
 
   /// The `hyper4` wireframe scaffold (M17.12 part D): the tesseract's own 16-corner,
   /// 32-edge skeleton, drawn as thin bars so the eye has a small, stable frame to read
@@ -184,7 +183,12 @@ struct InstanceSet {
   /// fully drawn (depth-tested against the real board geometry); whether its far-side
   /// edges should dim is a separate judgement call. It never enters picking.
   std::vector<Instance> scaffold;
-  std::array<Batch, static_cast<std::size_t>(Archetype::Count)> scaffoldBatches{};
+  std::array<Batch, kShapeSlots> scaffoldBatches{};
+
+  /// The variant these instances were built for, so `record` can make sure its authored
+  /// bodies (M7.3.4) are in the mesh library before a slot past `Archetype::Count` is
+  /// drawn. Null for a set built by hand.
+  const VariantSpec* variant{nullptr};
 
   [[nodiscard]] std::size_t size() const noexcept { return instances.size(); }
 };
@@ -280,6 +284,9 @@ class BoardRenderer {
   /// while the previous frame of the same slot may still have been reading them.
   Result<void> bindBlurTarget(const OffscreenTarget& target, std::uint32_t frame);
   Result<void> uploadGeometry();
+  /// Rebuild and re-upload the mesh library when `v`'s authored bodies differ from the
+  /// ones it holds. Waits for the device, so it is only ever paid on a change.
+  Result<void> ensureAuthored(const VariantSpec& v);
   Result<void> ensureInstanceCapacity(std::uint32_t frame, std::size_t count);
   Result<void> ensureSurfaceCapacity(std::uint32_t frame, std::size_t vertices,
                                      std::size_t indices);
@@ -289,6 +296,8 @@ class BoardRenderer {
   view::Theme theme_{view::Theme::manifold()};
   BoardOptions options_{};
   MeshLibrary meshes_;
+  /// `authoredKey` of the variant whose bodies `meshes_` holds; 0 for none.
+  std::uint64_t meshesKey_{0};
   CellId lastFrom_{kInvalidCell};
   CellId lastTo_{kInvalidCell};
   CellId checkCell_{kInvalidCell};

@@ -50,6 +50,18 @@ struct Walker {
   Coord coord{};
   Direction dir{};
   std::int32_t delta{0};
+  /// Optional frame tracking for a directional piece: where the unit vector along
+  /// `upAxis` (initially the variant's orientation axis) has been carried by the seams
+  /// crossed so far, and with what sign. upSign == 0 means "not tracked", which is
+  /// the default and costs the boundary step one comparison.
+  std::uint8_t upAxis{0};
+  std::int8_t upSign{0};
+
+  /// Has the tracked axis come back reversed? A seam that swaps it onto another axis
+  /// leaves no answer, and that is read as "not reversed".
+  [[nodiscard]] bool upReversed(std::uint8_t orientAxis) const noexcept {
+    return upSign < 0 && upAxis == orientAxis;
+  }
 };
 
 /// Boundary topology. With no identifications this is an ordinary box and the

@@ -15,7 +15,39 @@ namespace {
 struct RayCell {
   CellId cell{kInvalidCell};
   Coord coord{};
+  /// The orientation axis's unit vector, carried along the ray: negative on that axis
+  /// means a directional piece arriving here faces the other way.
+  bool upReversed{false};
 };
+
+/// Carry `up` across one step from `at` along `dir` by folding the covering-space
+/// coordinate back through the face transforms, one face at a time. Written against
+/// Transform::applyToDir rather than the engine's own frame tracking in
+/// Geometry::stepBoundary, so the two are independent implementations.
+Direction carryUp(const VariantSpec& v, const Coord& at, const Direction& dir,
+                  Direction up) {
+  Coord q = at;
+  for (std::uint8_t a = 0; a < v.dims.dims(); ++a) {
+    q.c[a] = static_cast<std::int16_t>(q.c[a] + dir.v[a]);
+  }
+  for (int guard = 0; guard < 4 * kMaxDims; ++guard) {
+    int off = -1;
+    Side side = Side::Max;
+    for (std::uint8_t a = 0; a < v.dims.dims() && off < 0; ++a) {
+      if (q.c[a] >= v.dims.extent(a)) off = a;
+      if (q.c[a] < 0) {
+        off = a;
+        side = Side::Min;
+      }
+    }
+    if (off < 0) return up;
+    const Transform* xf = v.geom.faceTransform(static_cast<std::uint8_t>(off), side);
+    if (xf == nullptr) return up;
+    q = xf->applyToCoord(q);
+    up = xf->applyToDir(up);
+  }
+  return up;
+}
 
 /// Walk a ray, re-deriving everything each step.
 ///
@@ -31,10 +63,22 @@ std::vector<RayCell> ray(const VariantSpec& v, CellId from, const Direction& dir
   Walker w = v.geom.start(from, dir);
   const std::uint32_t cap =
       maxSteps == kUnlimited ? v.dims.cellCount() * 2 * kMaxDims : maxSteps;
+  Direction up{};
+  const bool oriented = v.orientationAxis >= 0;
+  if (oriented) {
+    std::array<std::int16_t, kMaxDims> u{};
+    u[static_cast<std::size_t>(v.orientationAxis)] = 1;
+    up = Direction::make(u, v.dims.dims());
+  }
   for (std::uint32_t k = 0; k < cap; ++k) {
+    const Coord before = w.coord;
+    const Direction stepDir = w.dir;
     if (!v.geom.step(w)) break;
     if (w.cell == from && w.dir == dir) break;  // orbit closed
-    out.push_back(RayCell{w.cell, v.dims.toCoord(w.cell)});
+    if (oriented) up = carryUp(v, before, stepDir, up);
+    out.push_back(
+        RayCell{w.cell, v.dims.toCoord(w.cell),
+                oriented && up.v[static_cast<std::size_t>(v.orientationAxis)] < 0});
     // Re-seed from the cell and the current direction, discarding any carried
     // state, so a bug in the incremental walk cannot hide here too.
     const Direction here = w.dir;
@@ -86,9 +130,17 @@ const std::vector<Direction>& directionsFor(const VariantSpec& v, const MoveAtom
   return cache.emplace(key, std::move(dirs)).first->second;
 }
 
-void appendPromotions(const VariantSpec& v, const Move& base, PieceTypeId type,
-                      Color side, const Coord& toCoord, std::vector<Move>& out) {
+/// `side` is the mover's orientation before the move; a ray cell that arrives reversed
+/// marks the move Reorient - for a piece that reorients - and promotes by the other one.
+void appendPromotions(const VariantSpec& v, Move base, PieceTypeId type, Color side,
+                      const RayCell& at, std::vector<Move>& out) {
   const PieceTypeDef& def = v.pieces[type];
+  if (def.reorients && at.upReversed) {
+    base.flags = static_cast<std::uint8_t>(base.flags |
+                                           static_cast<std::uint8_t>(MoveFlag::Reorient));
+    side = opponent(side);
+  }
+  const Coord& toCoord = at.coord;
   const Region& promo = v.promotion[static_cast<std::size_t>(side)];
   if (!def.promotesTo.empty() && promo.contains(toCoord)) {
     for (PieceTypeId to : def.promotesTo) {
@@ -114,12 +166,14 @@ std::vector<Move> pseudoLegal(const Position& p) {
     const Piece piece = p.at(from);
     if (piece.empty() || piece.colorOf() != side) continue;
     const Coord fromCoord = v.dims.toCoord(from);
+    // A flipped piece walks the other colour's forward directions.
+    const Color orient = piece.flipped() ? opponent(side) : side;
 
     for (const MoveAtom& atom : v.pieces[piece.type].atoms) {
-      const Region& gate = atom.fromRegion[static_cast<std::size_t>(side)];
+      const Region& gate = atom.fromRegion[static_cast<std::size_t>(orient)];
       if (gate.active() && !gate.contains(fromCoord)) continue;
 
-      for (const Direction& dir : directionsFor(v, atom, side)) {
+      for (const Direction& dir : directionsFor(v, atom, orient)) {
         const auto cells = ray(v, from, dir, atom.maxK);
         bool hurdleFound = false;
         CellId prev = kInvalidCell;
@@ -127,7 +181,6 @@ std::vector<Move> pseudoLegal(const Position& p) {
         for (std::size_t i = 0; i < cells.size(); ++i) {
           const auto k = static_cast<std::uint32_t>(i + 1);
           const CellId to = cells[i].cell;
-          const Coord& toCoord = cells[i].coord;
           const Piece target = p.at(to);
           const bool own = !target.empty() && target.colorOf() == side;
           const bool enemy = !target.empty() && !own;
@@ -140,8 +193,8 @@ std::vector<Move> pseudoLegal(const Position& p) {
             }
             if (own) break;
             if (target.empty() && atom.capture != CapturePolicy::Must) {
-              appendPromotions(v, Move{.from = from, .to = to}, piece.type, side, toCoord,
-                               out);
+              appendPromotions(v, Move{.from = from, .to = to}, piece.type, orient,
+                               cells[i], out);
             } else if (enemy && atom.capture != CapturePolicy::Cannot) {
               appendPromotions(
                   v,
@@ -149,7 +202,7 @@ std::vector<Move> pseudoLegal(const Position& p) {
                        .to = to,
                        .captureCell = to,
                        .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
-                  piece.type, side, toCoord, out);
+                  piece.type, orient, cells[i], out);
             }
             break;
           }
@@ -167,7 +220,7 @@ std::vector<Move> pseudoLegal(const Position& p) {
                        .to = to,
                        .captureCell = to,
                        .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
-                  piece.type, side, toCoord, out);
+                  piece.type, orient, cells[i], out);
             }
             if (atom.mode == MoveMode::Slide) break;
             prev = to;
@@ -183,7 +236,7 @@ std::vector<Move> pseudoLegal(const Position& p) {
                 m.epTarget = prev;
                 m.epVictim = to;
               }
-              appendPromotions(v, m, piece.type, side, toCoord, out);
+              appendPromotions(v, m, piece.type, orient, cells[i], out);
             } else if (v.enPassant && to == p.epTarget() &&
                        p.epVictim() != kInvalidCell) {
               appendPromotions(v,
@@ -191,7 +244,7 @@ std::vector<Move> pseudoLegal(const Position& p) {
                                     .to = to,
                                     .captureCell = p.epVictim(),
                                     .flags = MoveFlag::Capture | MoveFlag::EnPassant},
-                               piece.type, side, toCoord, out);
+                               piece.type, orient, cells[i], out);
             }
           }
           prev = to;
@@ -247,11 +300,12 @@ bool isAttacked(const Position& p, CellId target, Color by) {
     const Piece piece = tmp.at(from);
     if (piece.empty() || piece.colorOf() != by) continue;
     const Coord fromCoord = v.dims.toCoord(from);
+    const Color orient = piece.flipped() ? opponent(by) : by;
     for (const MoveAtom& atom : v.pieces[piece.type].atoms) {
       if (atom.capture == CapturePolicy::Cannot) continue;
-      const Region& gate = atom.fromRegion[static_cast<std::size_t>(by)];
+      const Region& gate = atom.fromRegion[static_cast<std::size_t>(orient)];
       if (gate.active() && !gate.contains(fromCoord)) continue;
-      for (const Direction& dir : directionsFor(v, atom, by)) {
+      for (const Direction& dir : directionsFor(v, atom, orient)) {
         const auto cells = ray(v, from, dir, atom.maxK);
         bool hurdleFound = false;
         for (std::size_t i = 0; i < cells.size(); ++i) {

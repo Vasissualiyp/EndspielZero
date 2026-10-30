@@ -238,6 +238,9 @@ class Shell {
   /// Drive the watched game's clock for one interactive frame. Ends the watch and returns
   /// to the main menu when the file runs out.
   void advanceWatching(float dt);
+  /// The computer opponent's clock, on the game screen only (Session::advanceEngine).
+  /// True while it is thinking or about to, so the front end keeps drawing.
+  bool advanceEngine(float dt);
 
   /// Begin the attract sequence (M13.9): a looping run of short games, each on a
   /// different shape, played on the ordinary game screen like a watched game. Does
@@ -527,7 +530,8 @@ class Shell {
   bool trailerCutPending_{false};
   float trailerClock_{0.0f};
   /// Added to the trailer timeline position so it stays continuous across a cut (a beat's
-  /// first move starts at once, which would otherwise skip the clock ahead); it decays to 0.
+  /// first move starts at once, which would otherwise skip the clock ahead); it decays to
+  /// 0.
   float trailerShift_{0.0f};
   float swayWeight_{1.0f};
   float trailerKeySpeed_{2.0f};

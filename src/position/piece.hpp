@@ -7,15 +7,26 @@
 
 namespace cb {
 
+/// Piece::flags bit: the piece's sense of "forward" is reversed.
+constexpr std::uint8_t kPieceFlipped = 1u << 0;
+
 /// What sits on a cell. Four bytes, so the board is a flat array with good cache
 /// behaviour and can be uploaded to the GPU as-is (ARCH section 10).
 struct Piece {
   PieceTypeId type{kNoPiece};
   std::uint8_t color{0};
-  std::uint8_t flags{0};  ///< reserved for custom field bits (M5)
+  std::uint8_t flags{0};  ///< kPieceFlipped; the other bits are reserved
 
   [[nodiscard]] bool empty() const noexcept { return type == kNoPiece; }
+  /// A directional piece that has crossed an orientation-reversing seam an odd number
+  /// of times: its forward moves, home region and promotion region are the other
+  /// colour's (see PieceTypeDef::reorients).
+  [[nodiscard]] bool flipped() const noexcept { return (flags & kPieceFlipped) != 0; }
   [[nodiscard]] Color colorOf() const noexcept { return static_cast<Color>(color); }
+  /// The colour whose forward directions this piece uses - its own, unless flipped.
+  [[nodiscard]] Color orientation() const noexcept {
+    return static_cast<Color>(color ^ (flags & kPieceFlipped));
+  }
 
   friend bool operator==(const Piece& a, const Piece& b) {
     return a.type == b.type && a.color == b.color && a.flags == b.flags;

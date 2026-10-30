@@ -468,6 +468,44 @@ editor around it; the board and gamemode editors (M7.5) are not part of Wave 1 a
 Wave 2.
 
 
+## Revision 2026-10-29 - M7.3.4, elements, save gating, M7.2
+
+- **Authored models are part of the variant (M7.3.4).** `[piece.model]` / `[piece.icon]`
+  in the variant TOML (`src/io/piece_model_toml.{hpp,cpp}`, shared by the loader and the
+  document), on `PieceTypeDef::model/icon` (cosmetic, outside `VariantId`).
+  `VariantDoc`/`Editor` read and write them; the body and icon tabs now keep a working copy
+  of the document's model and commit it as one undo step when the mouse is up - the
+  session-only `designs_` map is gone, and RESET clears the document's model.
+- **The renderer draws them.** `MeshLibrary::appendModel` sweeps the profile (faceted, one
+  normal per facet) and extrudes each element in its (radial, up) plane, replicated by the
+  symmetry group (k-fold: i/k of a turn; mirror: half a turn). Each authored piece gets a
+  shape slot past `Archetype::Count` (`shapeSlots`, up to 32); `BoardRenderer::record`
+  rebuilds and re-uploads the library when `authoredKey` changes. The shape view's puck
+  and disc for an authored piece are its archetype's. The flat board draws the authored
+  icon (`pieceIconFor`). A piece with no model keeps its primitive archetype - the shipped
+  look is unchanged until someone draws a piece. **Deviation from M7.3.4:** the archetypes
+  are *not* rebuilt through the profile path, so there are still two pipelines; doing that
+  changes every shipped frame and should be its own reviewed step.
+- **Element placement (M7.3.3).** Step 3 of the body tab: add / remove / next element,
+  drag its ember anchor on the profile, edit its outline (shifted half a box so it can reach
+  both sides of the anchor). Disabled under `full` symmetry, with the reason shown. The
+  revolve preview draws every element at every copy.
+- **Save is gated on the loader (M7.0.3).** `Editor::validate()` loads the serialized text
+  exactly as the game would (cached per document state); `saveFile` refuses a document that
+  does not load; both SAVE buttons are disabled with the loader's message shown. After a
+  save the shell's cached preview is dropped so the game reads the new file.
+- **Fields and rules (M7.2).** A RULES tab: piece and cell fields (name, default, min, max,
+  hashed) and the rules as a form - trigger, S-expression condition, ordered effects whose
+  ops and keys come from `io/rule_catalogue` (the same keys the loader reads; a test builds
+  one rule per op and per trigger through the form and loads it), with up/down reordering.
+  The loader's own message is shown live. `--screen rules` captures it.
+- Tests: `tests/unit/io/test_piece_model_toml.cpp`, `tests/unit/io/test_rule_form.cpp`
+  (charged/atomic/mustcapture rebuilt through the form keep their `VariantId`),
+  `tests/render/test_authored_mesh.cpp` (closed, deterministic sweep; k copies per k-fold).
+- **Still open:** M7.2's dry run, M7.2's raw S-expression editor beyond the condition
+  field, M7.0.4's package directory (saving still overwrites `variants/<name>.toml`), and
+  "start from anything" (M7.0.5).
+
 ## Revision 2026-10-18 - piece designer fixes
 
 - **Red box on "rook".** The piece-name chips and the "add a move" bundles are both

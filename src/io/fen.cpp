@@ -33,6 +33,8 @@ std::string toFen(const Position& p) {
         const char sym = v.pieces[piece.type].symbol;
         board += piece.colorOf() == Color::White ? static_cast<char>(std::toupper(sym))
                                                  : static_cast<char>(std::tolower(sym));
+        if (piece.flipped())
+          board += '\'';  // forward reversed by a seam (Piece::flipped)
       },
       [&](std::uint8_t axis) {
         if (axis >= d.dims()) return;  // the final rollover writes no separator
@@ -104,7 +106,18 @@ Result<Position> fromFen(const VariantSpec& v, std::string_view fen) {
     }
     const Color color =
         std::isupper(static_cast<unsigned char>(ch)) != 0 ? Color::White : Color::Black;
-    p.place(order[idx], type, color);
+    std::uint8_t flags = 0;
+    if (i + 1 < board.size() && board[i + 1] == '\'') {
+      if (!v.pieces[type].reorients) {
+        return fail(
+            ErrorCode::ParseError,
+            std::string("'") + ch +
+                "'' marks a flipped piece, but this piece cannot flip on this board");
+      }
+      flags = kPieceFlipped;
+      ++i;
+    }
+    p.place(order[idx], type, color, flags);
     ++idx;
   }
   if (idx != order.size()) {

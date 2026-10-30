@@ -27,10 +27,15 @@ MoveGen::MoveGen(const VariantSpec& v) : v_(&v) {
   rayCap_ = v.geom.isBox() ? v.dims.cellCount() : v.dims.cellCount() * 2 * kMaxDims;
 }
 
-void MoveGen::emit(const Position& p, Move m, PieceTypeId type, Color side,
-                   const Coord& toCoord, MoveList& out) const {
+void MoveGen::emit(const Position& p, Move m, PieceTypeId type, Color orient,
+                   bool reorient, const Coord& toCoord, MoveList& out) const {
+  if (reorient) {
+    m.flags = static_cast<std::uint8_t>(m.flags |
+                                        static_cast<std::uint8_t>(MoveFlag::Reorient));
+    orient = opponent(orient);
+  }
   const PieceTypeDef& def = v_->pieces[type];
-  const Region& promo = v_->promotion[static_cast<std::size_t>(side)];
+  const Region& promo = v_->promotion[static_cast<std::size_t>(orient)];
   if (!def.promotesTo.empty() && promo.contains(toCoord)) {
     // One move per promotion choice. A variant that declares no promotion region
     // (a torus has no last rank) simply never reaches this branch.
@@ -48,19 +53,27 @@ void MoveGen::emit(const Position& p, Move m, PieceTypeId type, Color side,
 }
 
 void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoord,
-                           Color side, PieceTypeId type, const MoveAtom& atom,
-                           MoveList& out) const {
-  const std::size_t ci = static_cast<std::size_t>(side);
+                           Color side, Color orient, PieceTypeId type,
+                           const MoveAtom& atom, MoveList& out) const {
+  // Direction spans and home regions follow the piece's orientation; occupancy and
+  // capture follow its colour. The two differ only for a flipped piece.
+  const std::size_t ci = static_cast<std::size_t>(orient);
   const Region& gate = atom.fromRegion[ci];
   if (gate.active() && !gate.contains(fromCoord)) return;
 
   const Geometry& geom = v_->geom;
   const std::uint32_t begin = atom.dirBegin[ci];
   const std::uint32_t end = atom.dirEnd[ci];
+  const bool tracks = v_->pieces[type].reorients;
+  const auto orientAxis = static_cast<std::uint8_t>(v_->orientationAxis);
 
   for (std::uint32_t di = begin; di < end; ++di) {
     const Direction startDir = v_->dirTable[di];
     Walker w = geom.start(from, startDir);
+    if (tracks) {
+      w.upAxis = orientAxis;
+      w.upSign = 1;
+    }
     bool hurdleFound = false;
     /// The cell occupied one step earlier, which is what a double step leaves
     /// behind as an en-passant target. Tracked rather than computed, because
@@ -74,6 +87,8 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
       if (rayClosed(w, from, startDir)) break;
 
       const CellId to = w.cell;
+      // A directional piece whose frame came back reversed lands flipped.
+      const bool flipNow = tracks && w.upReversed(orientAxis);
       // The origin still holds the moving piece, so a slider is blocked there and
       // a leaper passes over it - handled by the ordinary occupancy classification.
       const Occupant occ = classify(p, to, side);
@@ -89,14 +104,14 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
         }
         if (occ == Occupant::Own) break;
         if (occ == Occupant::Empty && atom.capture != CapturePolicy::Must) {
-          emit(p, Move{.from = from, .to = to}, type, side, w.coord, out);
+          emit(p, Move{.from = from, .to = to}, type, orient, flipNow, w.coord, out);
         } else if (occ == Occupant::Enemy && atom.capture != CapturePolicy::Cannot) {
           emit(p,
                Move{.from = from,
                     .to = to,
                     .captureCell = to,
                     .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
-               type, side, w.coord, out);
+               type, orient, flipNow, w.coord, out);
         }
         break;
       }
@@ -113,7 +128,7 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
                     .to = to,
                     .captureCell = to,
                     .flags = static_cast<std::uint8_t>(MoveFlag::Capture)},
-               type, side, w.coord, out);
+               type, orient, flipNow, w.coord, out);
         }
         if (atom.mode == MoveMode::Slide) break;
         continue;
@@ -129,7 +144,7 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
             m.epTarget = prevCell;
             m.epVictim = to;
           }
-          emit(p, m, type, side, w.coord, out);
+          emit(p, m, type, orient, flipNow, w.coord, out);
         } else if (v_->enPassant && to == p.epTarget() && p.epVictim() != kInvalidCell) {
           // A capture-only atom landing on the en-passant target takes the piece
           // that passed through, not the piece on the destination.
@@ -138,7 +153,7 @@ void MoveGen::generateAtom(const Position& p, CellId from, const Coord& fromCoor
                     .to = to,
                     .captureCell = p.epVictim(),
                     .flags = MoveFlag::Capture | MoveFlag::EnPassant},
-               type, side, w.coord, out);
+               type, orient, flipNow, w.coord, out);
         }
       }
 
@@ -155,7 +170,7 @@ void MoveGen::generateForPiece(const Position& p, CellId from, MoveList& out) co
   // never divides (ARCH section 4.2).
   const Coord fromCoord = v_->dims.toCoord(from);
   for (const MoveAtom& atom : v_->pieces[piece.type].atoms) {
-    generateAtom(p, from, fromCoord, side, piece.type, atom, out);
+    generateAtom(p, from, fromCoord, side, piece.orientation(), piece.type, atom, out);
   }
 }
 
@@ -230,6 +245,8 @@ bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {
   // the scan is the only correct answer.
   if (hasHoppers_ || !v_->geom.isBox()) return isAttackedByForwardScan(p, target, by);
 
+  // No piece is ever flipped here: only a board with an orientation-reversing face can
+  // flip one (PieceTypeDef::reorients), and such a board is never a box.
   const Geometry& geom = v_->geom;
 
   for (std::size_t ti = 1; ti < v_->pieces.size(); ++ti) {

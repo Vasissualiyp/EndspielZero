@@ -85,7 +85,34 @@ full evaluator.
 
 ## Status
 
-Planned, not started. **Split across waves:** M10.2-M10.3 (the baseline opponent) is in
+**M10.2-M10.3 floor built (2026-10-29), `src/ai/` (layer 85, integer-only, in the arch
+test's no-float list).**
+
+- `ai::Evaluator` derives every piece's value from its average move count over 48 random
+  positions of the variant's own board with blockers at half the opening density (standard
+  chess comes out pawn 82 / knight 242 / bishop 290 / rook 425 / queen 712), plus a mobility
+  term (3 per move of difference) so the opponent develops rather than shuffles.
+- `ai::chooseMove` is negamax alpha-beta, depth 2 plus a capture/promotion quiescence of 4,
+  over `Game::legalMoves`/`play`/`undo` - so rules, seams, flips and timelines are respected
+  with no code here. MVV-LVA ordering, a node budget (60k default, nodes not time, so a
+  move is reproducible), a stop flag, and "same side still to move" handled for multi-jumps
+  and temporal turns. Deterministic; ties go to the first move in generation order.
+- `Session` runs it on a worker thread (`std::async`, the game copied) via `advanceEngine`
+  from the frame loop; the board is locked on the computer's turn; undo goes back to the
+  player's turn; a stale answer is dropped. Settings `vs_computer` / `computer_plays_white`,
+  on the new-game screen and in Settings. Script verb `engine` plays one engine move
+  (captures: `--script $'click e2\nclick e4\nengine'`).
+- Tests: `tests/unit/ai/test_search.cpp` (a legal, reproducible move on all 18 shipped
+  variants; takes a free piece; does not hang its queen to a defended pawn; mate in one;
+  standard values in order), and three session tests.
+
+Not built: the transposition table and iterative deepening (M10.2's full list), MCTS, the
+goal-distance term for `OnEnterRegion` wins, the mate-in-N suites. Cost to know: on glued
+3-D boards each node pays the forward-scan attack test (ADR-0010); in a Debug build that is
+~30 ms a node on `torus3d_8x8`, which is why the search runs off the frame. The first use of
+the opponent as a design tool is `docs/design/variant-lineup.md`.
+
+Originally: planned, not started. **Split across waves:** M10.2-M10.3 (the baseline opponent) is in
 Release Wave 2, ahead of the M16.3 demo, because a Next Fest build with no opponent reads as
 a tech demo; M10.4-M10.5 (learning and evaluation) remain in Wave 3. Depends on the existing
 movegen and legality (done); the search is shared with M15's puzzle solver, which is why the

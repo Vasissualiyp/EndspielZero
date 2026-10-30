@@ -193,6 +193,10 @@ Result<void> VariantSpec::finalize() {
                         reach;
     }
 
+    p.reorients = p.flipsOnMirror && geom.hasOrientationReversingFace() &&
+                  std::any_of(p.atoms.begin(), p.atoms.end(),
+                              [](const MoveAtom& a) { return a.oriented; });
+
     for (PieceTypeId to : p.promotesTo) {
       if (to == kNoPiece || to >= pieces.size()) {
         return fail(ErrorCode::ValidationError,
@@ -310,6 +314,8 @@ Result<void> VariantSpec::finalize() {
     h.add(pieces[pi].resetsDrawClock ? 1u : 0u);
     for (PieceTypeId to : pieces[pi].promotesTo) h.add(to);
     for (const MoveAtom& a : pieces[pi].atoms) h.add(a.toString());
+    // Only the non-default value is hashed, so every existing variant keeps its id.
+    if (!pieces[pi].flipsOnMirror) h.add("keeps-forward");
   }
   for (const StartPiece& sp : start) {
     h.add(sp.at.toString());

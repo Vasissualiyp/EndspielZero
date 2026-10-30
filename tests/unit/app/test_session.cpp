@@ -6,7 +6,9 @@
 // ordinary assertions rather than by someone clicking around (M4.6).
 #include "app/session.hpp"
 
+#include <chrono>
 #include <cmath>
+#include <thread>
 #include <utility>
 
 #include <catch2/catch_test_macros.hpp>
@@ -372,4 +374,48 @@ TEST_CASE("a move waiting for confirmation can be cancelled", "[unit][app]") {
   s->cancelMove();
   CHECK_FALSE(s->pendingMove().active);
   CHECK(s->game().plyCount() == 0);
+}
+
+TEST_CASE("against the computer, it answers and the board is locked on its turn",
+          "[unit][app]") {
+  auto s = open("standard");
+  s->setEngineSide(Color::Black);
+  CHECK_FALSE(s->engineToMove());
+  REQUIRE(s->applyScript("click e2\nclick e4").has_value());
+  REQUIRE(s->game().plyCount() == 1);
+  CHECK(s->engineToMove());
+  CHECK(s->boardLocked());
+  // A click on Black's pieces does nothing while it is the computer's turn.
+  REQUIRE(s->applyScript("click e7\nclick e5").has_value());
+  CHECK(s->game().plyCount() == 1);
+
+  s->finishEngineMove();
+  REQUIRE(s->game().plyCount() == 2);
+  CHECK(s->game().position().sideToMove() == Color::White);
+  CHECK_FALSE(s->engineToMove());
+
+  // Undo takes back to the player's own turn, not just the computer's reply.
+  REQUIRE(s->applyScript("undo").has_value());
+  CHECK(s->game().plyCount() == 0);
+}
+
+TEST_CASE("the frame loop drives the computer on a worker without blocking",
+          "[unit][app]") {
+  auto s = open("standard");
+  s->setEngineSide(Color::White);
+  // White is the computer and moves first; give the clock long enough to start, then
+  // wait for the worker by ticking (each tick returns at once).
+  for (int i = 0; i < 2000 && s->game().plyCount() == 0; ++i) {
+    (void)s->advanceEngine(0.05f);
+    (void)s->advanceAnimation(1.0f);
+    if (s->engineThinking()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  CHECK(s->game().plyCount() == 1);
+  CHECK(s->game().position().sideToMove() == Color::Black);
+}
+
+TEST_CASE("a script can ask the computer for a move", "[unit][app]") {
+  auto s = open("standard");
+  REQUIRE(s->applyScript("engine\nengine").has_value());
+  CHECK(s->game().plyCount() == 2);
 }

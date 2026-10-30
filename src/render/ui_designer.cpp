@@ -11,10 +11,12 @@
 // The model itself is `assets::PieceModel`, integer permille, with no floating point in
 // it at all. Everything in this file is presentation: the grid, the handles, the preview.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <string>
 
+#include "io/rule_catalogue.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/ui.hpp"
 #include "render/ui_widgets.hpp"
@@ -46,6 +48,33 @@ assets::ModelPoint fromScreen(ImVec2 at, ImVec2 min, ImVec2 max, bool yUp) {
     return static_cast<std::int16_t>(std::clamp(std::lround(t * 20.0f) * 50L, 0L, 1000L));
   };
   return assets::ModelPoint{snap(u), snap(v)};
+}
+
+/// A text box over a std::string, growing as it is typed into.
+bool inputString(const char* id, std::string& text, float width) {
+  ImGui::SetNextItemWidth(width);
+  return ImGui::InputText(
+      id, text.data(), text.capacity() + 1, ImGuiInputTextFlags_CallbackResize,
+      [](ImGuiInputTextCallbackData* data) {
+        if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+          auto* str = static_cast<std::string*>(data->UserData);
+          str->resize(static_cast<std::size_t>(data->BufTextLen));
+          data->Buf = str->data();
+        }
+        return 0;
+      },
+      &text);
+}
+
+/// Step a word through a fixed list - a trigger, an op, a piece name - so the form can
+/// only ever hold a word the loader knows.
+template <class List>
+std::string nextWord(const List& list, const std::string& now) {
+  if (list.empty()) return now;
+  for (std::size_t i = 0; i < list.size(); ++i) {
+    if (std::string_view(list[i]) == now) return std::string(list[(i + 1) % list.size()]);
+  }
+  return std::string(list[0]);
 }
 
 /// The grid an outline is drawn on, plus the axis the profile is swept about.
@@ -108,32 +137,65 @@ void Ui::syncDesignAssets(app::Shell& shell) {
   if (names.empty()) return;
   const int idx = std::clamp(editorPiece_, 0, static_cast<int>(names.size()) - 1);
   const std::string& piece = names[static_cast<std::size_t>(idx)];
-  if (designFor_ == piece) return;
-  // Leaving a piece keeps what was drawn on it; coming back to one restores it.
-  if (!designFor_.empty()) designs_[designFor_] = Design{designModel_, designIcon_};
 
-  // Seeded from the shipped archetype for this piece, so the designer always opens on
-  // something editable. The invariant the fallback exists for: a piece is never left
-  // without a body for want of an asset.
+  auto docModel = editor->pieceModel(piece);
+  auto docIcon = editor->pieceIcon(piece);
+  const std::optional<assets::PieceModel> model =
+      docModel.has_value() ? *docModel : std::nullopt;
+  const std::optional<assets::IconModel> icon =
+      docIcon.has_value() ? *docIcon : std::nullopt;
+  if (designFor_ == piece && model == designModelSeen_ && icon == designIconSeen_) return;
+
+  // A different piece, or the document changed underneath the working copy (undo, redo,
+  // reset): reload from the document, and from the shipped archetype where it holds
+  // nothing - so the designer always opens on something editable, and a piece is never
+  // left without a body for want of an asset.
+  if (designFor_ != piece) {
+    designProfilePoint_ = -1;
+    designElement_ = -1;
+    designElementPoint_ = -1;
+    designIconPoint_ = -1;
+    designIconPoly_ = 0;
+  }
   designFor_ = piece;
-  // Which body this piece starts from is derived from how it *moves*, the same way the
-  // game derives a shape for a piece that names none - so the designer opens on the
-  // figure the player would already have seen.
-  const char* seed = "dome";
-  if (const VariantSpec* spec = shell.preview(shell.editorVariant()); spec != nullptr) {
-    const PieceTypeId id = spec->findPiece(piece);
-    if (id != kNoPiece) seed = modelNameFor(archetypeFor(spec->pieces[id]));
-  }
-  if (const auto kept = designs_.find(piece); kept != designs_.end()) {
-    designModel_ = kept->second.model;
-    designIcon_ = kept->second.icon;
+  designModelSeen_ = model;
+  designIconSeen_ = icon;
+  if (model) {
+    designModel_ = *model;
   } else {
+    // Which body a piece starts from is derived from how it *moves*, the same way the
+    // game derives a shape for a piece that names none - so the designer opens on the
+    // figure the player would already have seen.
+    const char* seed = "dome";
+    if (const VariantSpec* spec = shell.preview(shell.editorVariant()); spec != nullptr) {
+      const PieceTypeId id = spec->findPiece(piece);
+      if (id != kNoPiece) seed = modelNameFor(archetypeFor(spec->pieces[id]));
+    }
     designModel_ = assets::archetypeModel(seed);
-    designIcon_ = assets::iconFromProfile(designModel_);
   }
-  designProfilePoint_ = -1;
-  designIconPoint_ = -1;
-  designIconPoly_ = 0;
+  designIcon_ = icon ? *icon : assets::iconFromProfile(designModel_);
+  designModelBase_ = designModel_;
+  designIconBase_ = designIcon_;
+  designIconPoly_ = std::min(designIconPoly_, designIcon_.fills.size() - 1);
+}
+
+void Ui::commitDesignAssets(app::Shell& shell) {
+  app::Editor* editor = shell.editor();
+  if (editor == nullptr || designFor_.empty()) return;
+  // One undo step per gesture, not per frame of a drag.
+  if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) return;
+  if (!(designModel_ == designModelBase_) && assets::validate(designModel_).has_value()) {
+    if (editor->setPieceModel(designFor_, designModel_).has_value()) {
+      designModelBase_ = designModel_;
+      designModelSeen_ = designModel_;
+    }
+  }
+  if (!(designIcon_ == designIconBase_) && assets::validate(designIcon_).has_value()) {
+    if (editor->setPieceIcon(designFor_, designIcon_).has_value()) {
+      designIconBase_ = designIcon_;
+      designIconSeen_ = designIcon_;
+    }
+  }
 }
 
 bool Ui::outlineEditor(const char* id, ImVec2 min, ImVec2 max, assets::Outline& outline,
@@ -241,13 +303,18 @@ void Ui::drawRevolvePreview(ImDrawList* dl, ImVec2 min, ImVec2 max,
   // Where the symmetry puts the elements, as marks around the piece: a count you can
   // see beats a number you have to believe.
   const int copies = assets::copiesOf(model.symmetry);
-  for (int i = 0; i < copies && !model.elements.empty(); ++i) {
-    const assets::Element& e = model.elements.front();
-    const float a =
-        spin + 6.2831853f * static_cast<float>(i) / static_cast<float>(copies);
-    const ImVec2 q =
-        at(static_cast<float>(e.radius) + 60.0f, static_cast<float>(e.height), a);
-    dl->AddCircleFilled(q, px(4.0f), u32(t.ember, 0.9f), 10);
+  for (const assets::Element& e : model.elements) {
+    for (int i = 0; i < copies; ++i) {
+      const float a =
+          spin + 6.2831853f * static_cast<float>(i) / static_cast<float>(copies);
+      // The element's own outline, in its plane at this copy's angle.
+      dl->PathClear();
+      for (const assets::ModelPoint& p : e.outline.points) {
+        dl->PathLineTo(at(static_cast<float>(e.radius + p.x),
+                          static_cast<float>(e.height + p.y), a));
+      }
+      dl->PathStroke(u32(t.ember, 0.85f), ImDrawFlags_Closed, px(1.4f));
+    }
   }
 }
 
@@ -459,8 +526,8 @@ void Ui::drawMovesTab(app::Shell& shell, const std::string& piece) {
   ImGui::SameLine();
   if (add("queen", px(72))) {
     // Every straight line the board has: one axis, two, three... up to its dimension.
-    for (const MoveAtom& a : straightLineAtoms(
-             kUnlimited, std::max<std::size_t>(2, editor->axes().size()))) {
+    for (const MoveAtom& a :
+         straightLineAtoms(kUnlimited, std::max<std::size_t>(2, editor->axes().size()))) {
       list.push_back(a);
     }
     changed = true;
@@ -538,10 +605,39 @@ void Ui::drawBodyTab(app::Shell& shell) {
   ImGui::Dummy(ImVec2(side, side));
   (void)outlineEditor("profile", gridMin, gridMax, designModel_.profile,
                       designProfilePoint_, true, "radius", "height");
+  // Where each element sits, on the profile it hangs off: an ember diamond, and the
+  // selected one can be dragged - placing a part is pointing at where it goes.
+  if (designModel_.symmetry.kind != assets::SymmetryKind::Full) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 cursorWas = ImGui::GetCursorScreenPos();
+    for (std::size_t i = 0; i < designModel_.elements.size(); ++i) {
+      assets::Element& e = designModel_.elements[i];
+      const ImVec2 at =
+          toScreen(assets::ModelPoint{e.radius, e.height}, gridMin, gridMax, true);
+      const bool sel = static_cast<int>(i) == designElement_;
+      const float g = px(7.0f);
+      ImGui::SetCursorScreenPos(ImVec2(at.x - g, at.y - g));
+      ImGui::PushID(static_cast<int>(1000 + i));
+      ImGui::InvisibleButton("##anchor", ImVec2(g * 2.0f, g * 2.0f));
+      if (ImGui::IsItemClicked()) designElement_ = static_cast<int>(i);
+      if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        const assets::ModelPoint want =
+            fromScreen(ImGui::GetIO().MousePos, gridMin, gridMax, true);
+        e.radius = want.x;
+        e.height = want.y;
+        designElement_ = static_cast<int>(i);
+      }
+      ImGui::PopID();
+      const float d = sel ? px(6.0f) : px(4.5f);
+      dl->AddQuadFilled(ImVec2(at.x, at.y - d), ImVec2(at.x + d, at.y),
+                        ImVec2(at.x, at.y + d), ImVec2(at.x - d, at.y),
+                        u32(sel ? t.ember : t.emberDeep, 0.95f));
+    }
+    ImGui::SetCursorScreenPos(cursorWas);
+  }
   // What the sweep makes, beside the profile it is made from, turning slowly so the
   // facets and the placed elements both read.
-  drawRevolvePreview(ImGui::GetWindowDrawList(),
-                     ImVec2(gridMax.x + px(16.0f), gridMin.y),
+  drawRevolvePreview(ImGui::GetWindowDrawList(), ImVec2(gridMax.x + px(16.0f), gridMin.y),
                      ImVec2(gridMax.x + px(16.0f) + side, gridMax.y), designModel_,
                      clock_ * 0.6f);
 
@@ -573,8 +669,10 @@ void Ui::drawBodyTab(app::Shell& shell) {
   }
   ImGui::SameLine();
   if (button("RESET", t, px(88), false, true, true, display)) {
-    designs_.erase(designFor_);
-    designFor_.clear();
+    // Back to the archetype: the document forgets the body, and the next sync reseeds.
+    if (app::Editor* editor = shell.editor(); editor != nullptr) {
+      (void)editor->setPieceModel(designFor_, std::nullopt);
+    }
   }
 
   sectionHead("STEP 2  REVOLVE AND SYMMETRY", t, fontSmall_, scale_);
@@ -621,6 +719,99 @@ void Ui::drawBodyTab(app::Shell& shell) {
   ImGui::PopStyleColor();
   ImGui::PopFont();
 
+  // ---- step 3: the elements the symmetry group repeats -----------------------------
+  sectionHead("STEP 3  ELEMENTS", t, fontSmall_, scale_);
+  const bool canPlace = designModel_.symmetry.kind != assets::SymmetryKind::Full;
+  auto& els = designModel_.elements;
+  if (designElement_ >= static_cast<int>(els.size())) designElement_ = -1;
+  if (designElement_ < 0 && !els.empty()) designElement_ = 0;
+  if (button("+ ELEMENT", t, px(118), false, true, canPlace, display)) {
+    // A small plate on the shoulder of the profile: somewhere visible, to be dragged.
+    std::int16_t top = 0;
+    for (const assets::ModelPoint& p : designModel_.profile.points)
+      top = std::max(top, p.y);
+    assets::Element e;
+    e.outline.points = {{-60, 0}, {60, 0}, {0, 150}};
+    e.radius = 200;
+    e.height = static_cast<std::int16_t>(std::max(0, top - 150));
+    els.push_back(e);
+    designElement_ = static_cast<int>(els.size()) - 1;
+    designElementPoint_ = -1;
+  }
+  ImGui::SameLine();
+  if (button("- ELEMENT", t, px(118), false, true, canPlace && designElement_ >= 0,
+             display) &&
+      designElement_ >= 0) {
+    els.erase(els.begin() + designElement_);
+    designElement_ = els.empty() ? -1 : 0;
+    designElementPoint_ = -1;
+  }
+  ImGui::SameLine();
+  if (button("NEXT", t, px(84), false, true, els.size() > 1, display) && !els.empty()) {
+    designElement_ = (designElement_ + 1) % static_cast<int>(els.size());
+    designElementPoint_ = -1;
+  }
+  if (!canPlace) {
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextWrapped(
+        "Choose mirror or k-fold first: a radially symmetric piece has no direction to "
+        "place a part along.");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  } else if (designElement_ >= 0) {
+    assets::Element& e = els[static_cast<std::size_t>(designElement_)];
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::Text("element %d of %d   at radius %d, height %d", designElement_ + 1,
+                static_cast<int>(els.size()), static_cast<int>(e.radius),
+                static_cast<int>(e.height));
+    ImGui::TextWrapped(
+        "Its outline, drawn in the plane through the axis: across is outward, up is up. "
+        "Drag the ember diamond on the profile to move it.");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    // The element's own outline may reach either side of its anchor, so it is edited
+    // shifted half a box to the right and shifted back.
+    const ImVec2 eMin = ImGui::GetCursorScreenPos();
+    const ImVec2 eMax(eMin.x + side, eMin.y + side);
+    ImGui::Dummy(ImVec2(side, side));
+    assets::Outline shifted = e.outline;
+    for (assets::ModelPoint& p : shifted.points)
+      p.x = static_cast<std::int16_t>(p.x + 500);
+    if (outlineEditor("element", eMin, eMax, shifted, designElementPoint_, true, "across",
+                      "up")) {
+      for (assets::ModelPoint& p : shifted.points)
+        p.x = static_cast<std::int16_t>(p.x - 500);
+      e.outline = shifted;
+    }
+    ImGui::GetWindowDrawList()->AddLine(ImVec2((eMin.x + eMax.x) * 0.5f, eMin.y),
+                                        ImVec2((eMin.x + eMax.x) * 0.5f, eMax.y),
+                                        u32(t.ember, 0.5f), 1.0f);
+    if (button("+ POINT##el", t, px(92), false, true, true, display)) {
+      auto& pts = e.outline.points;
+      const std::size_t i =
+          designElementPoint_ >= 0 && designElementPoint_ < static_cast<int>(pts.size())
+              ? static_cast<std::size_t>(designElementPoint_)
+              : pts.size() - 1;
+      const assets::ModelPoint& a = pts[i];
+      const assets::ModelPoint& b = pts[(i + 1) % pts.size()];
+      pts.insert(pts.begin() + static_cast<std::ptrdiff_t>(i) + 1,
+                 assets::ModelPoint{static_cast<std::int16_t>((a.x + b.x) / 2),
+                                    static_cast<std::int16_t>((a.y + b.y) / 2)});
+      designElementPoint_ = static_cast<int>(i) + 1;
+    }
+    ImGui::SameLine();
+    if (button("- POINT##el", t, px(92), false, true, true, display)) {
+      auto& pts = e.outline.points;
+      if (pts.size() > 3 && designElementPoint_ >= 0 &&
+          designElementPoint_ < static_cast<int>(pts.size())) {
+        pts.erase(pts.begin() + designElementPoint_);
+        designElementPoint_ = -1;
+      }
+    }
+  }
+
   const Result<void> ok = assets::validate(designModel_);
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(ok.has_value() ? t.moss : t.blood));
@@ -628,6 +819,7 @@ void Ui::drawBodyTab(app::Shell& shell) {
                                           : ok.error().message.c_str());
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  commitDesignAssets(shell);
 }
 
 void Ui::drawIconTab(app::Shell& shell) {
@@ -732,6 +924,219 @@ void Ui::drawIconTab(app::Shell& shell) {
                                           : ok.error().message.c_str());
   ImGui::PopStyleColor();
   ImGui::PopFont();
+  commitDesignAssets(shell);
+}
+
+void Ui::drawRulesTab(app::Shell& shell) {
+  const view::Theme& t = theme_;
+  auto* small = static_cast<ImFont*>(fontSmall_);
+  app::Editor* editor = shell.editor();
+  if (editor == nullptr) return;
+
+  // ---- sync: the document changed underneath (undo, redo) or this is the first look.
+  {
+    auto pf = editor->fields(false);
+    auto cf = editor->fields(true);
+    auto rs = editor->rules();
+    if (!formLoaded_ || pf != formPieceFieldsSeen_ || cf != formCellFieldsSeen_ ||
+        rs != formRulesSeen_) {
+      formPieceFields_ = formPieceFieldsSeen_ = std::move(pf);
+      formCellFields_ = formCellFieldsSeen_ = std::move(cf);
+      formRules_ = formRulesSeen_ = std::move(rs);
+      formLoaded_ = true;
+    }
+  }
+  const auto note = [&](const char* text) {
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+  };
+  const float wide = ImGui::GetContentRegionAvail().x;
+  ImGui::PushFont(small);
+
+  // ---- fields -------------------------------------------------------------------
+  sectionHead("FIELDS", t, fontSmall_, scale_);
+  note(
+      "A field is a number every piece (or every cell) carries. Two ways to say \"has "
+      "not "
+      "moved yet\": the FEN way is a from-rank on the move itself (the pawn's double "
+      "step) - nothing to store, and a position written down says it all. The state way "
+      "is a piece field 'moved' a rule sets - it survives anywhere and is part of the "
+      "position. 'charged' is the worked example: a 'charge' field, a rule that adds one "
+      "on every move, and a rule that transforms at three, in that order.");
+  for (int group = 0; group < 2; ++group) {
+    auto& list = group == 0 ? formPieceFields_ : formCellFields_;
+    ImGui::PushID(group);
+    for (std::size_t i = 0; i < list.size(); ++i) {
+      auto& f = list[i];
+      ImGui::PushID(static_cast<int>(i));
+      ImGui::TextUnformatted(group == 0 ? "piece" : "cell ");
+      ImGui::SameLine();
+      inputString("##name", f.name, px(110));
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(px(70));
+      ImGui::InputInt("##def", &f.defaultValue, 0);
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(px(70));
+      ImGui::InputInt("##min", &f.minValue, 0);
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(px(70));
+      ImGui::InputInt("##max", &f.maxValue, 0);
+      ImGui::SameLine();
+      ImGui::Checkbox("hashed", &f.hashed);
+      ImGui::SameLine();
+      const bool drop = ImGui::SmallButton("x");
+      ImGui::PopID();
+      if (drop) {
+        list.erase(list.begin() + static_cast<std::ptrdiff_t>(i));
+        break;
+      }
+    }
+    ImGui::PopID();
+  }
+  note("name, default, min, max - and whether it is part of the position (hashed).");
+  if (ImGui::SmallButton("+ PIECE FIELD"))
+    formPieceFields_.push_back({"field", 0, 0, 8, true});
+  ImGui::SameLine();
+  if (ImGui::SmallButton("+ CELL FIELD"))
+    formCellFields_.push_back({"mark", 0, 0, 8, true});
+
+  // ---- rules --------------------------------------------------------------------
+  sectionHead("RULES", t, fontSmall_, scale_);
+  note(
+      "Rules run in the order listed, and their effects in the order listed: order is "
+      "meaning. A condition is an S-expression, e.g. (and is_capture (eq (type_at "
+      "move.to) piece:pawn)); leave it empty for \"always\".");
+  const std::vector<std::string> pieces = editor->pieceNames();
+  std::vector<std::string> fieldNames;
+  for (const auto& f : formPieceFields_) fieldNames.push_back(f.name);
+  for (const auto& f : formCellFields_) fieldNames.push_back(f.name);
+  constexpr std::array<std::string_view, 3> kOutcomes{"mover_wins", "mover_loses",
+                                                      "draw"};
+  std::vector<std::string_view> ops;
+  for (const EffectSpec& e : effectCatalogue()) ops.push_back(e.op);
+
+  for (std::size_t ri = 0; ri < formRules_.size(); ++ri) {
+    auto& r = formRules_[ri];
+    ImGui::PushID(static_cast<int>(100 + ri));
+    ImGui::Separator();
+    ImGui::Text("%d.", static_cast<int>(ri + 1));
+    ImGui::SameLine();
+    inputString("##rname", r.name, std::min(wide * 0.45f, px(220)));
+    ImGui::SameLine();
+    if (ImGui::SmallButton(r.when.c_str())) r.when = nextWord(ruleTriggers(), r.when);
+    ImGui::SameLine();
+    const bool up = ImGui::SmallButton("up");
+    ImGui::SameLine();
+    const bool down = ImGui::SmallButton("down");
+    ImGui::SameLine();
+    const bool drop = ImGui::SmallButton("x");
+    ImGui::TextUnformatted("if");
+    ImGui::SameLine();
+    inputString("##cond", r.condition, wide - px(30));
+
+    for (std::size_t ei = 0; ei < r.effects.size(); ++ei) {
+      auto& e = r.effects[ei];
+      ImGui::PushID(static_cast<int>(ei));
+      ImGui::Indent(px(14));
+      if (ImGui::SmallButton(e.op.c_str())) {
+        e.op = nextWord(ops, e.op);
+      }
+      const EffectSpec* spec = findEffect(e.op);
+      // The keys the op takes, in the catalogue's order; keys it does not take go.
+      std::vector<std::pair<std::string, std::string>> args;
+      if (spec != nullptr) {
+        for (const EffectKey& k : spec->keys) {
+          std::string value;
+          for (const auto& [ak, av] : e.args) {
+            if (ak == k.key) value = av;
+          }
+          args.emplace_back(std::string(k.key), std::move(value));
+        }
+      }
+      for (std::size_t ki = 0; spec != nullptr && ki < args.size(); ++ki) {
+        const EffectKey& k = spec->keys[ki];
+        auto& value = args[ki].second;
+        ImGui::SameLine();
+        ImGui::Text("%s%s", std::string(k.key).c_str(), k.required ? "" : "?");
+        ImGui::SameLine();
+        ImGui::PushID(static_cast<int>(ki));
+        if (k.kind == "piece") {
+          if (ImGui::SmallButton(value.empty() ? "(piece)" : value.c_str())) {
+            value = nextWord(pieces, value);
+          }
+        } else if (k.kind == "field") {
+          if (ImGui::SmallButton(value.empty() ? "(field)" : value.c_str())) {
+            value = nextWord(fieldNames, value);
+          }
+        } else if (k.kind == "outcome") {
+          if (ImGui::SmallButton(value.empty() ? "draw" : value.c_str())) {
+            value = nextWord(kOutcomes, value.empty() ? std::string("draw") : value);
+          }
+        } else {
+          inputString("##v", value, k.kind == "number" ? px(50) : px(170));
+        }
+        ImGui::PopID();
+      }
+      e.args = std::move(args);
+      ImGui::SameLine();
+      const bool eup = ImGui::SmallButton("up");
+      ImGui::SameLine();
+      const bool edrop = ImGui::SmallButton("x");
+      ImGui::Unindent(px(14));
+      ImGui::PopID();
+      if (eup && ei > 0) std::swap(r.effects[ei], r.effects[ei - 1]);
+      if (edrop) {
+        r.effects.erase(r.effects.begin() + static_cast<std::ptrdiff_t>(ei));
+        break;
+      }
+    }
+    ImGui::Indent(px(14));
+    if (ImGui::SmallButton("+ EFFECT"))
+      r.effects.push_back({"destroy", {{"at", "move.to"}}});
+    ImGui::Unindent(px(14));
+    ImGui::PopID();
+    if (up && ri > 0) std::swap(formRules_[ri], formRules_[ri - 1]);
+    if (down && ri + 1 < formRules_.size()) std::swap(formRules_[ri], formRules_[ri + 1]);
+    if (drop) {
+      formRules_.erase(formRules_.begin() + static_cast<std::ptrdiff_t>(ri));
+      break;
+    }
+  }
+  ImGui::Separator();
+  if (ImGui::SmallButton("+ RULE")) {
+    formRules_.push_back({"new rule", "on_move_end", "", {{"repeat_turn", {}}}});
+  }
+  note(
+      "Effects: destroy, destroy_region, transform, spawn, set_piece_field, "
+      "set_cell_field, forbid_move (on_move_filter only), repeat_turn, end_game. Cells "
+      "are expressions: move.from, move.to, move.capture_cell.");
+
+  // What the loader thinks, in its own words: the form holds text, and only the one
+  // parser decides whether it means anything.
+  const Result<void> loads = editor->validate();
+  ImGui::PushStyleColor(ImGuiCol_Text, col(loads.has_value() ? t.moss : t.blood));
+  ImGui::TextWrapped("%s", loads.has_value() ? "the variant loads with these rules"
+                                             : loads.error().format().c_str());
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+
+  // ---- commit: once nothing is being typed into, so one edit is one undo step.
+  if (!ImGui::IsAnyItemActive()) {
+    if (formPieceFields_ != formPieceFieldsSeen_ &&
+        editor->setFields(false, formPieceFields_).has_value()) {
+      formPieceFieldsSeen_ = formPieceFields_;
+    }
+    if (formCellFields_ != formCellFieldsSeen_ &&
+        editor->setFields(true, formCellFields_).has_value()) {
+      formCellFieldsSeen_ = formCellFields_;
+    }
+    if (formRules_ != formRulesSeen_ && editor->setRules(formRules_).has_value()) {
+      formRulesSeen_ = formRules_;
+    }
+  }
 }
 
 }  // namespace cb::render

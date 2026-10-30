@@ -158,6 +158,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.confirmMoves = asBool(value);
     else if (key == "hot_seat")
       s.hotSeat = asBool(value);
+    else if (key == "vs_computer")
+      s.vsComputer = asBool(value);
+    else if (key == "computer_plays_white")
+      s.computerPlaysWhite = asBool(value);
     else if (key == "auto_promote_to")
       s.autoPromoteTo = value;
     else if (key == "last_variant")
@@ -236,6 +240,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "follow_strength = " << followStrength << '\n';
   out << "confirm_moves = " << boolText(confirmMoves) << '\n';
   out << "hot_seat = " << boolText(hotSeat) << '\n';
+  out << "vs_computer = " << boolText(vsComputer) << '\n';
+  out << "computer_plays_white = " << boolText(computerPlaysWhite) << '\n';
   out << "auto_promote_to = " << autoPromoteTo << '\n';
   out << "last_variant = " << lastVariant << '\n';
   out << "watch_dwell = " << watchDwell << '\n';

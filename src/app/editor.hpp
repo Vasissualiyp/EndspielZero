@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -58,6 +59,33 @@ class Editor {
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,
                                            const std::vector<MoveAtom>& atoms);
 
+  /// A piece's authored body and icon. Setting one that equals what the document already
+  /// holds is a no-op rather than an undo step, so a screen can commit every frame.
+  [[nodiscard]] Result<std::optional<assets::PieceModel>> pieceModel(
+      std::string_view piece) const;
+  [[nodiscard]] Result<std::optional<assets::IconModel>> pieceIcon(
+      std::string_view piece) const;
+  Result<void> setPieceModel(std::string_view piece,
+                             const std::optional<assets::PieceModel>& m);
+  Result<void> setPieceIcon(std::string_view piece,
+                            const std::optional<assets::IconModel>& m);
+
+  /// Custom fields and rules (M7.2), whole lists at a time: a form edits a working copy
+  /// and commits it, and an unchanged list is a no-op rather than an undo step.
+  using FieldInfo = VariantDoc::FieldInfo;
+  using RuleInfo = VariantDoc::RuleInfo;
+  using EffectInfo = VariantDoc::EffectInfo;
+  [[nodiscard]] std::vector<FieldInfo> fields(bool cellFields) const;
+  Result<void> setFields(bool cellFields, const std::vector<FieldInfo>& fields);
+  [[nodiscard]] std::vector<RuleInfo> rules() const;
+  Result<void> setRules(const std::vector<RuleInfo>& rules);
+
+  /// Would the document load? The editor is a front end to the loader and `finalize()`,
+  /// never a second set of rules (M7.0.3): this loads the serialized text exactly as the
+  /// game would and returns the first error, with its line. Cached per document state,
+  /// so a screen may ask every frame.
+  [[nodiscard]] Result<void> validate() const;
+
   [[nodiscard]] std::string serialize() const;
 
  private:
@@ -75,6 +103,9 @@ class Editor {
   std::vector<std::string> history_;
   std::size_t cursor_{0};
   std::size_t savedCursor_{0};
+  /// The last document text `validate()` checked and what it said.
+  mutable std::string validatedText_;
+  mutable Result<void> validated_{};
 };
 
 }  // namespace cb::app

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <atomic>
 #include <filesystem>
+#include <future>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "ai/search.hpp"
 #include "app/game_runner.hpp"
 #include "app/hotseat.hpp"
 #include "game/game.hpp"
@@ -33,6 +37,7 @@ enum class ActionKind : std::uint8_t {
   Cancel,         ///< discard it
   Resign,         ///< the side to move concedes
   AgreeDraw,      ///< the players agree a draw
+  EngineMove,     ///< the computer plays one move for the side to move, now (scripts)
 };
 
 struct Action {
@@ -56,6 +61,8 @@ class Session {
   /// Takes the variant by value and keeps it at a stable address: Game, Position and
   /// MoveGen all hold pointers into it.
   static Result<std::unique_ptr<Session>> create(VariantSpec variant);
+  /// Stops a running opponent search before the game it reads from goes away.
+  ~Session();
 
   [[nodiscard]] const VariantSpec& variant() const noexcept { return *variant_; }
   [[nodiscard]] const Game& game() const noexcept { return *game_; }
@@ -133,7 +140,30 @@ class Session {
   /// Whether the board refuses input right now: a shot in flight, or a game being watched
   /// (M12.8). One gate for picking, so a watched board and a shot-followed board cannot
   /// disagree about whether a click counts.
-  [[nodiscard]] bool boardLocked() const noexcept { return shotInFlight() || watching_; }
+  [[nodiscard]] bool boardLocked() const noexcept {
+    return shotInFlight() || watching_ || engineToMove();
+  }
+
+  // ---- the computer opponent (M10.2-M10.3) ---------------------------------------
+  /// Which side the computer plays, or none for a game between people. Setting it
+  /// abandons a search in progress.
+  void setEngineSide(std::optional<Color> side);
+  [[nodiscard]] std::optional<Color> engineSide() const noexcept { return engineSide_; }
+  /// How hard it looks (ai::SearchOptions); the shipped default is the demo floor.
+  void setEngineOptions(const ai::SearchOptions& o) noexcept { engineOptions_ = o; }
+  /// The game is in progress and it is the computer's turn.
+  [[nodiscard]] bool engineToMove() const noexcept;
+  /// A search is running on the worker.
+  [[nodiscard]] bool engineThinking() const noexcept { return engineJob_.valid(); }
+  /// Drive the opponent from the frame loop: once the board has settled and the computer
+  /// is to move, start a search on a worker thread (the game is copied, so the frame is
+  /// never held up); when it answers, play its move through the same path a click
+  /// takes. A search whose position has since changed - an undo - is discarded. Returns
+  /// true while the computer is thinking or about to, so the front end keeps drawing.
+  bool advanceEngine(float dt);
+  /// Block until the running search answers and play it: for captures and tests, which
+  /// have no frame loop to wait across.
+  void finishEngineMove();
   /// Move the animation on. Returns true while something is still moving, which is how
   /// the front end knows to keep drawing frames.
   bool advanceAnimation(float dt);
@@ -342,6 +372,20 @@ class Session {
   float previewClock_{0.0f};
   bool previewing_{false};
   std::string message_;
+
+  /// The opponent: its side, its options, the derived evaluator (built on first use,
+  /// per variant), the search in flight and the position it was asked about.
+  std::optional<Color> engineSide_;
+  ai::SearchOptions engineOptions_{};
+  std::unique_ptr<ai::Evaluator> engineEval_;
+  std::future<ai::SearchResult> engineJob_;
+  std::shared_ptr<std::atomic<bool>> engineStop_;
+  std::uint64_t engineAskedHash_{0};
+  std::size_t engineAskedPly_{0};
+  float engineClock_{0.0f};
+  void stopEngine();
+  void startEngine();
+  void takeEngineAnswer(const ai::SearchResult& r);
 };
 
 /// Parse one line of an action script: "click e4", "undo", "reset", "orbit 0.1 0",

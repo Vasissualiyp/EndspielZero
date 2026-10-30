@@ -46,6 +46,16 @@ class Zobrist {
     return z ^ (z >> 31);
   }
 
+  /// Key for "the piece on `cell` is flipped" (Piece::flipped). Derived like field():
+  /// most variants never flip a piece, so a table would be dead weight.
+  [[nodiscard]] std::uint64_t flipped(std::uint32_t cell) const {
+    std::uint64_t z =
+        sideKey_ ^ (static_cast<std::uint64_t>(cell) + 1) * 0xD6E8FEB86659FD93ULL;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+  }
+
   [[nodiscard]] bool initialized() const noexcept { return pieceCodes_ != 0; }
   [[nodiscard]] std::uint32_t pieceCodes() const noexcept { return pieceCodes_; }
 

@@ -18,6 +18,9 @@ enum class MoveFlag : std::uint8_t {
   EnPassant = 1 << 3,
   /// Left an en-passant target behind (a pawn's double step, generalized).
   LeavesEnPassant = 1 << 4,
+  /// The mover crossed an orientation-reversing seam an odd number of times and lands
+  /// with its forward reversed (Piece::flipped toggles).
+  Reorient = 1 << 5,
 };
 
 inline std::uint8_t operator|(MoveFlag a, MoveFlag b) {
@@ -83,6 +86,8 @@ struct FieldChange {
 /// property while an exploding variant can still be undone exactly.
 struct Undo {
   Piece captured{};
+  /// The mover's flags before the move: a reorienting or promoting move changes them.
+  std::uint8_t moverFlagsBefore{0};
   CellId epBefore{kInvalidCell};
   CellId epVictimBefore{kInvalidCell};
   std::uint8_t castleRightsBefore{0};

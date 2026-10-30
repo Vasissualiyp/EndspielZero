@@ -11,6 +11,7 @@
 
 #include "io/fen_order.hpp"
 #include "io/notation.hpp"
+#include "io/piece_model_toml.hpp"
 #include "io/rule_parse.hpp"
 
 namespace cb {
@@ -330,6 +331,7 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
     p.symbol = static_cast<char>(std::toupper(sym[0]));
     p.royal = (*t)["royal"].value_or(false);
     p.resetsDrawClock = (*t)["resets_draw_clock"].value_or(false);
+    p.flipsOnMirror = (*t)["flips_on_mirror"].value_or(true);
     p.shape = (*t)["shape"].value_or(std::string{});
     // Height arrives as a multiplier ("1.15") and is stored in permille: the variant
     // layer is part of the deterministic core and holds no floating point.
@@ -340,6 +342,22 @@ Result<VariantSpec> loadVariantToml(std::string_view text, std::string_view sour
                     "piece '" + p.name + "': height must be between 0.2 and 4.0",
                     lineOf(node));
       }
+    }
+    if (const auto* mt = (*t)["model"].as_table()) {
+      auto model = pieceModelFromToml(*mt);
+      if (!model.has_value()) {
+        return fail(ErrorCode::ValidationError,
+                    "piece '" + p.name + "': " + model.error().message, lineOf(*mt));
+      }
+      p.model = std::move(*model);
+    }
+    if (const auto* it = (*t)["icon"].as_table()) {
+      auto icon = pieceIconFromToml(*it);
+      if (!icon.has_value()) {
+        return fail(ErrorCode::ValidationError,
+                    "piece '" + p.name + "': " + icon.error().message, lineOf(*it));
+      }
+      p.icon = std::move(*icon);
     }
     if (const auto* pr = (*t)["promotes_to"].as_array()) {
       for (const auto& x : *pr) promotesTo[p.name].push_back(x.value_or(std::string{}));

@@ -3,10 +3,13 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "assets/piece_model.hpp"
 #include "base/result.hpp"
 #include "pieces/atom.hpp"
 #include "space/dim_spec.hpp"
@@ -51,6 +54,52 @@ class VariantDoc {
   /// piece has that name.
   [[nodiscard]] Result<void> setPieceAtoms(std::string_view piece,
                                            const std::vector<MoveAtom>& atoms);
+
+  /// A piece's authored body and icon (`[piece.model]`, `[piece.icon]`), or nothing when
+  /// it has none and the renderer assembles one from its archetype. Setting `nullopt`
+  /// removes the table. Fails when no piece has that name; the setters also refuse a
+  /// model `assets::validate` refuses, with its message.
+  [[nodiscard]] Result<std::optional<assets::PieceModel>> pieceModel(
+      std::string_view piece) const;
+  [[nodiscard]] Result<std::optional<assets::IconModel>> pieceIcon(
+      std::string_view piece) const;
+  [[nodiscard]] Result<void> setPieceModel(std::string_view piece,
+                                           const std::optional<assets::PieceModel>& m);
+  [[nodiscard]] Result<void> setPieceIcon(std::string_view piece,
+                                          const std::optional<assets::IconModel>& m);
+
+  /// A custom data field as the editor shows it (M7.2.1): a `[[piece_field]]` or a
+  /// `[[cell_field]]`. Validation is the loader's, through the editor's `validate()`.
+  struct FieldInfo {
+    std::string name;
+    int defaultValue{0};
+    int minValue{-32768};
+    int maxValue{32767};
+    bool hashed{true};
+    friend bool operator==(const FieldInfo&, const FieldInfo&) = default;
+  };
+  [[nodiscard]] std::vector<FieldInfo> fields(bool cellFields) const;
+  void setFields(bool cellFields, const std::vector<FieldInfo>& fields);
+
+  /// A rule as the editor's form holds it (M7.2.2): its trigger word, its condition as
+  /// the S-expression text the file stores, and its ordered effects, each an op word and
+  /// the op's keys as text (rule_catalogue.hpp says which keys an op takes). Kept as
+  /// text, so a form can hold a half-typed expression and the loader - the one parser -
+  /// is what says whether it means anything.
+  struct EffectInfo {
+    std::string op;
+    std::vector<std::pair<std::string, std::string>> args;
+    friend bool operator==(const EffectInfo&, const EffectInfo&) = default;
+  };
+  struct RuleInfo {
+    std::string name;
+    std::string when{"on_move_end"};
+    std::string condition;
+    std::vector<EffectInfo> effects;
+    friend bool operator==(const RuleInfo&, const RuleInfo&) = default;
+  };
+  [[nodiscard]] std::vector<RuleInfo> rules() const;
+  void setRules(const std::vector<RuleInfo>& rules);
 
   /// The author's one-line pitch. Cosmetic: not part of `VariantId`.
   [[nodiscard]] std::string description() const;

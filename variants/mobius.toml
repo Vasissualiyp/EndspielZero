@@ -6,11 +6,12 @@
 # rank comes back on the mirrored rank and needs two circuits to return home. The
 # board is non-orientable: it has no consistent notion of which way is "up".
 #
-# Hence no pawns. On an orientation-reversing board a piece that always moves
-# "forward" is not well defined - a pawn crossing the seam would find its forward
-# direction reversed, and any answer to that is a choice rather than a rule. Rather
-# than bake one in, this variant simply has no oriented pieces, and the question is
-# documented in docs/plan/M3-geometry.md 3.4 for the variants that do want an answer.
+# Pawns are kept, and the twist is their whole story. A pawn's "forward" is carried
+# across the seam like everything else: a pawn that captures across it lands on the
+# mirrored rank facing the other way, and from then on moves, double-steps and promotes
+# like a pawn of the other colour (it is *flipped*; FEN marks it with a trailing ').
+# Cross back and it turns round again. Pushes run along the ranks, which are never
+# glued, so only a diagonal capture across the file seam can flip a pawn.
 
 name = "mobius"
 description = "The files are glued with a half-twist. Ride the board twice and you come home mirrored."
@@ -19,6 +20,7 @@ side_to_move = "white"
 en_passant = false
 stalemate = "draw"
 halfmove_draw_limit = 100
+orientation_axis = "rank"
 
 [[axis]]
 name = "file"
@@ -32,6 +34,38 @@ extent = 8
 axis = "file"
 kind = "periodic"
 flip = ["rank"]
+
+[promotion]
+rank = 7
+
+[[piece]]
+name = "pawn"
+symbol = "P"
+resets_draw_clock = true
+promotes_to = ["knight", "bishop", "rook", "queen"]
+
+  [[piece.move]]
+  vector = [1]
+  max = 1
+  mode = "leap"
+  capture = "cannot"
+  forward = true
+
+  [[piece.move]]
+  vector = [1]
+  min = 2
+  max = 2
+  mode = "slide"
+  capture = "cannot"
+  forward = true
+  from_rank = 1
+
+  [[piece.move]]
+  vector = [1, 1]
+  max = 1
+  mode = "leap"
+  capture = "must"
+  forward = true
 
 [[piece]]
 name = "knight"
@@ -90,4 +124,4 @@ royal = true
   mode = "leap"
 
 [start]
-board = "rnbqkbnr/8/8/8/8/8/8/RNBQKBNR"
+board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"

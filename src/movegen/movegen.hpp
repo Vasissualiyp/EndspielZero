@@ -76,10 +76,16 @@ class MoveGen {
 
  private:
   void generateForPiece(const Position& p, CellId from, MoveList& out) const;
+  /// `orient` is the colour whose forward directions the piece uses: its own, or the
+  /// other one's when it is flipped (Piece::orientation).
   void generateAtom(const Position& p, CellId from, const Coord& fromCoord, Color side,
-                    PieceTypeId type, const MoveAtom& atom, MoveList& out) const;
-  void emit(const Position& p, Move m, PieceTypeId type, Color side, const Coord& toCoord,
-            MoveList& out) const;
+                    Color orient, PieceTypeId type, const MoveAtom& atom,
+                    MoveList& out) const;
+  /// Push `m`, expanded into one move per promotion choice when the piece lands in the
+  /// promotion region of its orientation *after* the move: `orient`, or the other
+  /// colour when `reorient` (which also marks the move MoveFlag::Reorient).
+  void emit(const Position& p, Move m, PieceTypeId type, Color orient, bool reorient,
+            const Coord& toCoord, MoveList& out) const;
   void generateCastles(const Position& p, Color side, MoveList& out) const;
 
   /// The slow, always-correct attack test: generate everything `by` could do and

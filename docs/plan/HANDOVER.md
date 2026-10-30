@@ -256,6 +256,20 @@ worth a human confirming the live feel next time SHAPE is used in play.
 
 ## Next
 
+**Updated 2026-10-29.** Built since the note below: M7.3.4 (authored bodies and icons saved
+in the variant and drawn by the game), the element-placement tool, save gated on the loader,
+the M7.2 fields/rules form, the M10.2-M10.3 baseline opponent (play vs computer), and pawns
+on Möbius that turn round at the twist (ADR-0020). What is next:
+
+1. **Re-author the pieces** in the designer - the human step the editor exists for.
+2. **Fix the broken starts** found by the opponent's self-play (`docs/design/variant-lineup.md`):
+   Möbius to the narrow start, torus to 8x10 walled; then a start-position linter.
+3. **M16.1** - the Coming Soon page (last Wave 1 item).
+4. **M14.3** - the played tutorial, from `docs/design/tutorial.md`.
+5. M7.2's dry run, M7.0.4 packages (saving still overwrites `variants/<name>.toml`).
+
+*The note below is from 2026-10-16.*
+
 **Reprioritised 2026-10-16 (the user's direction):** the **piece editor of M7 is moved into
 Wave 1**, ahead of M16.1's store page. The shipped piece models are placeholder primitive
 archetypes and are not good enough to ship; only a human can redraw them, and they appear in

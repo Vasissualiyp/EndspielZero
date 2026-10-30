@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "assets/piece_model.hpp"
 #include "base/result.hpp"
 #include "base/zobrist.hpp"
 #include "geometry/geometry.hpp"
@@ -45,6 +47,14 @@ struct PieceTypeDef {
   /// Whether moving this piece resets the draw clock. Declared rather than
   /// inferred: "it is a pawn" is not a concept the engine has.
   bool resetsDrawClock{false};
+  /// Declared: whether a directional piece reverses its forward when it crosses a seam
+  /// or wall that reverses the orientation axis (TOML `flips_on_mirror`, default on).
+  bool flipsOnMirror{true};
+  /// Derived by finalize(): the piece has a forward-only atom, flipsOnMirror is set and
+  /// the geometry has an orientation-reversing face - so its moves track the seams they
+  /// cross and its Piece::flipped bit can change. False everywhere else, which is what
+  /// keeps every other variant's move generation exactly as it was.
+  bool reorients{false};
 
   /// Appearance, declared the same way movement is. \`shape\` names an archetype the
   /// renderer assembles from primitives; empty means "derive it from the atoms".
@@ -52,6 +62,11 @@ struct PieceTypeDef {
   /// deterministic core and may not contain floating point.
   std::string shape;
   int heightPermille{0};
+  /// An authored body and flat icon (M7.3.4, `[piece.model]` / `[piece.icon]`). Absent
+  /// means "assemble one from the archetype", which is every shipped piece until
+  /// someone draws it. Cosmetic: neither enters `VariantId`.
+  std::optional<assets::PieceModel> model;
+  std::optional<assets::IconModel> icon;
 };
 
 /// A multi-piece move template. Castling is the familiar instance, but the shape

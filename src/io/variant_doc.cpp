@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "io/variant_doc.hpp"
 
+#include <charconv>
 #include <cstdint>
 #include <sstream>
 #include <string_view>
 #include <utility>
 
 #include <toml++/toml.hpp>
+
+#include "io/piece_model_toml.hpp"
 
 namespace cb {
 namespace {
@@ -198,6 +201,173 @@ Result<void> VariantDoc::setPieceAtoms(std::string_view piece,
   }
   pt->insert_or_assign("move", std::move(moves));
   return {};
+}
+
+Result<std::optional<assets::PieceModel>> VariantDoc::pieceModel(
+    std::string_view piece) const {
+  const toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  const auto* mt = (*pt)["model"].as_table();
+  if (mt == nullptr) return std::optional<assets::PieceModel>{};
+  auto m = pieceModelFromToml(*mt);
+  if (!m.has_value()) return std::unexpected(m.error());
+  return std::optional<assets::PieceModel>{std::move(*m)};
+}
+
+Result<std::optional<assets::IconModel>> VariantDoc::pieceIcon(
+    std::string_view piece) const {
+  const toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  const auto* it = (*pt)["icon"].as_table();
+  if (it == nullptr) return std::optional<assets::IconModel>{};
+  auto m = pieceIconFromToml(*it);
+  if (!m.has_value()) return std::unexpected(m.error());
+  return std::optional<assets::IconModel>{std::move(*m)};
+}
+
+Result<void> VariantDoc::setPieceModel(std::string_view piece,
+                                       const std::optional<assets::PieceModel>& m) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  if (!m) {
+    pt->erase("model");
+    return {};
+  }
+  if (auto ok = assets::validate(*m); !ok.has_value()) return ok;
+  pt->insert_or_assign("model", pieceModelToToml(*m));
+  return {};
+}
+
+Result<void> VariantDoc::setPieceIcon(std::string_view piece,
+                                      const std::optional<assets::IconModel>& m) {
+  toml::table* pt = findPieceTable(impl_->table, piece);
+  if (pt == nullptr) {
+    return fail(ErrorCode::ValidationError,
+                "no piece is called '" + std::string(piece) + "'");
+  }
+  if (!m) {
+    pt->erase("icon");
+    return {};
+  }
+  if (auto ok = assets::validate(*m); !ok.has_value()) return ok;
+  pt->insert_or_assign("icon", pieceIconToToml(*m));
+  return {};
+}
+
+std::vector<VariantDoc::FieldInfo> VariantDoc::fields(bool cellFields) const {
+  std::vector<FieldInfo> out;
+  const auto* arr = impl_->table[cellFields ? "cell_field" : "piece_field"].as_array();
+  if (arr == nullptr) return out;
+  for (const auto& node : *arr) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    FieldInfo f;
+    f.name = (*t)["name"].value_or(std::string{});
+    f.defaultValue = static_cast<int>((*t)["default"].value_or<std::int64_t>(0));
+    f.minValue = static_cast<int>((*t)["min"].value_or<std::int64_t>(-32768));
+    f.maxValue = static_cast<int>((*t)["max"].value_or<std::int64_t>(32767));
+    f.hashed = (*t)["hashed"].value_or(true);
+    out.push_back(std::move(f));
+  }
+  return out;
+}
+
+void VariantDoc::setFields(bool cellFields, const std::vector<FieldInfo>& fields) {
+  const char* key = cellFields ? "cell_field" : "piece_field";
+  if (fields.empty()) {
+    impl_->table.erase(key);
+    return;
+  }
+  toml::array arr;
+  for (const FieldInfo& f : fields) {
+    toml::table t;
+    t.insert("name", f.name);
+    t.insert("default", static_cast<std::int64_t>(f.defaultValue));
+    t.insert("min", static_cast<std::int64_t>(f.minValue));
+    t.insert("max", static_cast<std::int64_t>(f.maxValue));
+    if (!f.hashed) t.insert("hashed", false);
+    arr.push_back(std::move(t));
+  }
+  impl_->table.insert_or_assign(key, std::move(arr));
+}
+
+std::vector<VariantDoc::RuleInfo> VariantDoc::rules() const {
+  std::vector<RuleInfo> out;
+  const auto* arr = impl_->table["rule"].as_array();
+  if (arr == nullptr) return out;
+  for (const auto& node : *arr) {
+    const auto* t = node.as_table();
+    if (t == nullptr) continue;
+    RuleInfo r;
+    r.name = (*t)["name"].value_or(std::string{});
+    r.when = (*t)["when"].value_or(std::string{});
+    r.condition = (*t)["if"].value_or(std::string{});
+    if (const auto* effects = (*t)["effect"].as_array()) {
+      for (const auto& enode : *effects) {
+        const auto* et = enode.as_table();
+        if (et == nullptr) continue;
+        EffectInfo e;
+        e.op = (*et)["op"].value_or(std::string{});
+        for (const auto& [k, v] : *et) {
+          if (k.str() == "op") continue;
+          std::string text;
+          if (const auto sv = v.value<std::string>()) {
+            text = *sv;
+          } else if (const auto iv = v.value<std::int64_t>()) {
+            text = std::to_string(*iv);
+          }
+          e.args.emplace_back(std::string(k.str()), std::move(text));
+        }
+        r.effects.push_back(std::move(e));
+      }
+    }
+    out.push_back(std::move(r));
+  }
+  return out;
+}
+
+void VariantDoc::setRules(const std::vector<RuleInfo>& rules) {
+  if (rules.empty()) {
+    impl_->table.erase("rule");
+    return;
+  }
+  toml::array arr;
+  for (const RuleInfo& r : rules) {
+    toml::table t;
+    t.insert("name", r.name);
+    t.insert("when", r.when);
+    if (!r.condition.empty()) t.insert("if", r.condition);
+    toml::array effects;
+    for (const EffectInfo& e : r.effects) {
+      toml::table et;
+      et.insert("op", e.op);
+      for (const auto& [k, v] : e.args) {
+        if (v.empty()) continue;  // an optional key left blank is an absent key
+        // The one integer key in the catalogue; everything else is a word or an
+        // expression, and the loader reads those as strings.
+        std::int64_t n = 0;
+        const auto [end, ec] = std::from_chars(v.data(), v.data() + v.size(), n);
+        if (k == "radius" && ec == std::errc{} && end == v.data() + v.size()) {
+          et.insert(k, n);
+        } else {
+          et.insert(k, v);
+        }
+      }
+      effects.push_back(std::move(et));
+    }
+    t.insert("effect", std::move(effects));
+    arr.push_back(std::move(t));
+  }
+  impl_->table.insert_or_assign("rule", std::move(arr));
 }
 
 std::string VariantDoc::description() const {

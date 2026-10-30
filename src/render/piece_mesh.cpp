@@ -2,6 +2,7 @@
 #include "render/piece_mesh.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <vector>
@@ -694,7 +695,7 @@ Archetype archetypeFor(const PieceTypeDef& piece) {
       maxDiagonalOrder = std::max(maxDiagonalOrder, a.mags.size());
   }
 
-  if (oriented) return Archetype::Dome;                   // moves only forward: a pawn
+  if (oriented) return Archetype::Dome;  // moves only forward: a pawn
   // Three axes at once *and nothing else* is a unicorn. A queen rides the triagonals too,
   // but she also rides the axes, and that family is what makes her a queen.
   if (maxDiagonalOrder >= 3 && !axisLine) return Archetype::Horn;
@@ -729,7 +730,7 @@ float heightFor(const PieceTypeDef& piece) {
   return std::clamp(scale, 0.85f, 1.6f);
 }
 
-MeshLibrary MeshLibrary::build() {
+MeshLibrary MeshLibrary::build(const VariantSpec* v) {
   MeshLibrary m;
   for (std::size_t i = 0; i < static_cast<std::size_t>(Archetype::Count); ++i) {
     const auto base = static_cast<std::int32_t>(m.vertices.size());
@@ -764,7 +765,246 @@ MeshLibrary MeshLibrary::build() {
     range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
     m.discRanges[i] = range;
   }
+  // The variant's authored bodies (M7.3.4), each in the slot shapeSlots gives it. Its
+  // puck and disc are its archetype's: the shape view's token is a fallback-quality
+  // picture either way, and the Primitive icon set is what a puck is built to extrude.
+  if (v != nullptr) {
+    const std::vector<std::size_t> slots = shapeSlots(*v);
+    for (std::size_t i = 1; i < v->pieces.size(); ++i) {
+      const std::size_t slot = slots[i];
+      if (slot < static_cast<std::size_t>(Archetype::Count)) continue;
+      m.ranges[slot] = m.appendModel(*v->pieces[i].model);
+      const auto fallback = static_cast<std::size_t>(archetypeFor(v->pieces[i]));
+      m.cylinderRanges[slot] = m.cylinderRanges[fallback];
+      m.discRanges[slot] = m.discRanges[fallback];
+    }
+  }
   return m;
+}
+
+std::vector<std::size_t> shapeSlots(const VariantSpec& v) {
+  std::vector<std::size_t> out(v.pieces.size(),
+                               static_cast<std::size_t>(Archetype::Tower));
+  std::size_t next = static_cast<std::size_t>(Archetype::Count);
+  for (std::size_t i = 1; i < v.pieces.size(); ++i) {
+    const PieceTypeDef& def = v.pieces[i];
+    if (def.model && next < kShapeSlots) {
+      out[i] = next++;
+    } else {
+      out[i] = static_cast<std::size_t>(archetypeFor(def));
+    }
+  }
+  return out;
+}
+
+std::uint64_t authoredKey(const VariantSpec& v) {
+  // FNV-1a over every point, in piece order. Collisions only cost a stale mesh until the
+  // next change, and the inputs are a few hundred small integers.
+  std::uint64_t h = 0;
+  bool any = false;
+  const auto mix = [&](std::int64_t x) {
+    h ^= static_cast<std::uint64_t>(x);
+    h *= 0x100000001B3ULL;
+  };
+  const auto outline = [&](const assets::Outline& o) {
+    mix(static_cast<std::int64_t>(o.points.size()));
+    for (const assets::ModelPoint& p : o.points) {
+      mix(p.x);
+      mix(p.y);
+    }
+  };
+  for (std::size_t i = 1; i < v.pieces.size(); ++i) {
+    const PieceTypeDef& def = v.pieces[i];
+    if (!def.model) continue;
+    if (!any) h = 0xCBF29CE484222325ULL;
+    any = true;
+    mix(static_cast<std::int64_t>(i));
+    mix(def.model->segments);
+    mix(static_cast<std::int64_t>(def.model->symmetry.kind));
+    mix(def.model->symmetry.k);
+    outline(def.model->profile);
+    for (const assets::Element& e : def.model->elements) {
+      mix(e.radius);
+      mix(e.height);
+      outline(e.outline);
+    }
+  }
+  return h;
+}
+
+namespace {
+
+/// Ear clipping, for an element's face: a knight's head is not convex. Indices into
+/// `pts`, wound as the outline is. Degenerate input yields whatever ears it can.
+std::vector<std::array<std::uint32_t, 3>> triangulate(
+    const std::vector<std::array<float, 2>>& pts) {
+  std::vector<std::array<std::uint32_t, 3>> tris;
+  const std::size_t n = pts.size();
+  if (n < 3) return tris;
+  float area = 0.0f;
+  for (std::size_t i = 0; i < n; ++i) {
+    const auto& a = pts[i];
+    const auto& b = pts[(i + 1) % n];
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  const float wind = area >= 0.0f ? 1.0f : -1.0f;
+  std::vector<std::uint32_t> idx(n);
+  for (std::size_t i = 0; i < n; ++i) idx[i] = static_cast<std::uint32_t>(i);
+  const auto cross = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+    return ((pts[b][0] - pts[a][0]) * (pts[c][1] - pts[a][1]) -
+            (pts[b][1] - pts[a][1]) * (pts[c][0] - pts[a][0])) *
+           wind;
+  };
+  std::size_t guard = n * n;
+  while (idx.size() > 3 && guard-- > 0) {
+    bool clipped = false;
+    for (std::size_t i = 0; i < idx.size(); ++i) {
+      const std::uint32_t a = idx[(i + idx.size() - 1) % idx.size()];
+      const std::uint32_t b = idx[i];
+      const std::uint32_t c = idx[(i + 1) % idx.size()];
+      if (cross(a, b, c) <= 0.0f) continue;  // reflex: not an ear
+      bool inside = false;
+      for (const std::uint32_t q : idx) {
+        if (q == a || q == b || q == c) continue;
+        if (cross(a, b, q) >= 0.0f && cross(b, c, q) >= 0.0f && cross(c, a, q) >= 0.0f) {
+          inside = true;
+          break;
+        }
+      }
+      if (inside) continue;
+      tris.push_back({a, b, c});
+      idx.erase(idx.begin() + static_cast<std::ptrdiff_t>(i));
+      clipped = true;
+      break;
+    }
+    if (!clipped) break;
+  }
+  if (idx.size() == 3) tris.push_back({idx[0], idx[1], idx[2]});
+  return tris;
+}
+
+}  // namespace
+
+MeshRange MeshLibrary::appendModel(const assets::PieceModel& model) {
+  constexpr float kUnit = 0.001f;  // permille to local units
+  // An element is a slab this thick across the tangent: thin enough to read as a plate
+  // - a crown's point, a knight's ear - and thick enough not to vanish edge-on.
+  constexpr float kHalfThick = 0.045f;
+  const float tau = 2.0f * std::numbers::pi_v<float>;
+  MeshRange range;
+  range.firstIndex = static_cast<std::uint32_t>(indices.size());
+  range.vertexOffset = static_cast<std::int32_t>(vertices.size());
+  const auto base = static_cast<std::uint32_t>(range.vertexOffset);
+
+  const std::vector<assets::ModelPoint>& prof = model.profile.points;
+  float top = 0.0f;
+  for (const assets::ModelPoint& p : prof) top = std::max(top, static_cast<float>(p.y));
+  for (const assets::Element& e : model.elements) {
+    for (const assets::ModelPoint& p : e.outline.points) {
+      top = std::max(top, static_cast<float>(e.height + p.y));
+    }
+  }
+  const float totalHeight = std::max(top * kUnit, 0.05f);
+
+  // ---- the revolve -----------------------------------------------------------------
+  // Each profile edge sweeps a band of quads. The profile's own winding says which side
+  // of an edge is outside, so the normals face out whichever way it was drawn.
+  float area = 0.0f;
+  for (std::size_t i = 0; i < prof.size(); ++i) {
+    const assets::ModelPoint& a = prof[i];
+    const assets::ModelPoint& b = prof[(i + 1) % prof.size()];
+    area += static_cast<float>(a.x) * b.y - static_cast<float>(b.x) * a.y;
+  }
+  const float outward = area >= 0.0f ? 1.0f : -1.0f;
+  const int segs = std::max<int>(3, model.segments);
+  for (std::size_t i = 0; i < prof.size(); ++i) {
+    const assets::ModelPoint& a = prof[i];
+    const assets::ModelPoint& b = prof[(i + 1) % prof.size()];
+    if (a.x == 0 && b.x == 0) continue;  // on the axis: sweeps to nothing
+    const float ar = a.x * kUnit, az = a.y * kUnit;
+    const float br = b.x * kUnit, bz = b.y * kUnit;
+    float nr = (bz - az) * outward;
+    float nz = -(br - ar) * outward;
+    const float len = std::hypot(nr, nz);
+    if (len <= 0.0f) continue;
+    nr /= len;
+    nz /= len;
+    for (int j = 0; j < segs; ++j) {
+      const float a0 = tau * static_cast<float>(j) / static_cast<float>(segs);
+      const float a1 = tau * static_cast<float>(j + 1) / static_cast<float>(segs);
+      const float c0 = std::cos(a0), s0 = std::sin(a0);
+      const float c1 = std::cos(a1), s1 = std::sin(a1);
+      // Faceted on purpose: one normal per facet, so a low segment count reads as a cut
+      // stone rather than a badly smoothed cylinder.
+      const float cm = std::cos((a0 + a1) * 0.5f), sm = std::sin((a0 + a1) * 0.5f);
+      const auto put = [&](float r, float z, float c, float s) {
+        return pushVertex(*this, c * r, s * r, z, cm * nr, sm * nr, nz, z / totalHeight);
+      };
+      const std::uint32_t v0 = put(ar, az, c0, s0);
+      const std::uint32_t v1 = put(ar, az, c1, s1);
+      const std::uint32_t v2 = put(br, bz, c1, s1);
+      const std::uint32_t v3 = put(br, bz, c0, s0);
+      pushTri(*this, v0 - base, v1 - base, v2 - base);
+      pushTri(*this, v0 - base, v2 - base, v3 - base);
+    }
+  }
+
+  // ---- the elements, placed by the symmetry group -----------------------------------
+  // An element is drawn in the plane of (radial, up) at its copy's angle and extruded
+  // across the tangent. k-fold puts copy i at i/k of a turn; mirror puts the second copy
+  // half a turn round, which is the element reflected through the axis.
+  const int copies = assets::copiesOf(model.symmetry);
+  for (const assets::Element& e : model.elements) {
+    std::vector<std::array<float, 2>> pts;  // (radial, up), local units
+    for (const assets::ModelPoint& p : e.outline.points) {
+      pts.push_back({(e.radius + p.x) * kUnit, (e.height + p.y) * kUnit});
+    }
+    const auto tris = triangulate(pts);
+    float earea = 0.0f;
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+      const auto& a = pts[i];
+      const auto& b = pts[(i + 1) % pts.size()];
+      earea += a[0] * b[1] - b[0] * a[1];
+    }
+    const float eout = earea >= 0.0f ? 1.0f : -1.0f;
+    for (int c = 0; c < copies; ++c) {
+      const float phi = tau * static_cast<float>(c) / static_cast<float>(copies);
+      const float rx = std::cos(phi), ry = std::sin(phi);  // radial
+      const float tx = -ry, ty = rx;                       // tangent
+      const auto put = [&](const std::array<float, 2>& q, float t, float nx, float ny,
+                           float nz) {
+        return pushVertex(*this, rx * q[0] + tx * t, ry * q[0] + ty * t, q[1], nx, ny, nz,
+                          q[1] / totalHeight);
+      };
+      for (const float side : {1.0f, -1.0f}) {
+        std::vector<std::uint32_t> ids;
+        ids.reserve(pts.size());
+        for (const auto& q : pts)
+          ids.push_back(put(q, side * kHalfThick, tx * side, ty * side, 0));
+        for (const auto& tri : tris) {
+          pushTri(*this, ids[tri[0]] - base, ids[tri[1]] - base, ids[tri[2]] - base);
+        }
+      }
+      for (std::size_t i = 0; i < pts.size(); ++i) {
+        const auto& a = pts[i];
+        const auto& b = pts[(i + 1) % pts.size()];
+        float nrad = (b[1] - a[1]) * eout;
+        float nup = -(b[0] - a[0]) * eout;
+        const float len = std::hypot(nrad, nup);
+        if (len <= 0.0f) continue;
+        nrad /= len;
+        nup /= len;
+        const std::uint32_t v0 = put(a, kHalfThick, rx * nrad, ry * nrad, nup);
+        const std::uint32_t v1 = put(b, kHalfThick, rx * nrad, ry * nrad, nup);
+        const std::uint32_t v2 = put(b, -kHalfThick, rx * nrad, ry * nrad, nup);
+        const std::uint32_t v3 = put(a, -kHalfThick, rx * nrad, ry * nrad, nup);
+        pushTri(*this, v0 - base, v1 - base, v2 - base);
+        pushTri(*this, v0 - base, v2 - base, v3 - base);
+      }
+    }
+  }
+  range.indexCount = static_cast<std::uint32_t>(indices.size()) - range.firstIndex;
+  return range;
 }
 
 }  // namespace cb::render

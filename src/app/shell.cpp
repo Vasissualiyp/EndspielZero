@@ -321,7 +321,13 @@ Result<void> Shell::saveEditor() {
   if (editorPath_.empty()) {
     return fail(ErrorCode::Internal, "no save path is installed for the editor");
   }
-  return editor_->saveFile(editorPath_);
+  if (auto ok = editor_->saveFile(editorPath_); !ok.has_value()) return ok;
+  // The file on disk changed under the cached preview; the next look loads it afresh.
+  if (previewName_ == editorVariant_) {
+    previewName_.clear();
+    preview_.reset();
+  }
+  return {};
 }
 
 Result<void> Shell::startGame(const std::string& variantName) {
@@ -461,6 +467,12 @@ void Shell::advanceWatching(float dt) {
   if (!session_->advanceWatching(dt)) go(Screen::MainMenu);
 }
 
+bool Shell::advanceEngine(float dt) {
+  // Only on the board itself: a paused game, or one behind a menu, does not move on.
+  if (session_ == nullptr || screen_ != Screen::Game) return false;
+  return session_->advanceEngine(dt);
+}
+
 namespace {
 /// The standard board's centre: what a recorded keyframe's target is measured from.
 const view::Vec3 kBoardCentre{3.5f, 3.5f, 0.7f};
@@ -586,7 +598,8 @@ Result<void> Shell::startAttractStep(std::size_t index) {
     if (carriedAspect > 0.0f) session_->setBoardAspect(carriedAspect);
     view::OrbitCamera c = *carried;
     // The shape renderer's flat board sits a half turn about the vertical from the
-    // ordinary board; turning the view with it keeps the picture identical across the cut.
+    // ordinary board; turning the view with it keeps the picture identical across the
+    // cut.
     if (fromFlatBoard && step.formedFrom == 0.0f) c.yaw += 3.14159265f;
     session_->setOrbitCamera(c);
   }
@@ -1137,19 +1150,19 @@ void Shell::applySplineAt(float g, bool toEditPose) {
   cam.yaw += flatBoardYaw();
   session_->setOrbitCamera(cam);
   // The slide follows the spline all the way, never stepping in at the first keyframe; on
-  // a beat that rises from the flat board it comes in with the roll (the flat board has no
-  // slide to carry).
+  // a beat that rises from the flat board it comes in with the roll (the flat board has
+  // no slide to carry).
   float slideRamp = 1.0f;
   const float firstKey = poseKeysFrom(attractIndex_);
   if (attract_[attractIndex_].formedFrom == 0.0f && std::isfinite(firstKey)) {
     // A beat's first move starts at once, so its clock begins one unit in.
     const float start = beatOffset(attractIndex_) + 1.0f;
-    const float t = std::clamp((g - trailerShift_ - start) / std::max(0.25f, firstKey - start),
-                               0.0f, 1.0f);
+    const float t = std::clamp(
+        (g - trailerShift_ - start) / std::max(0.25f, firstKey - start), 0.0f, 1.0f);
     slideRamp = t * t * (3.0f - 2.0f * t);  // smoothstep, arriving exactly at the key
   }
-  // A slide only matters modulo one lap round the tube, so only the remainder is eased in:
-  // easing the whole of a slide of several laps would spin the board round and round.
+  // A slide only matters modulo one lap round the tube, so only the remainder is eased
+  // in: easing the whole of a slide of several laps would spin the board round and round.
   const float lap = static_cast<float>(session_->variant().dims.extent(0));
   const float rawU = view::splineScalar(slideU, g);
   // The laps are taken from the beat's first keyframe, once, so the remainder never flips
@@ -1164,7 +1177,8 @@ void Shell::applySplineAt(float g, bool toEditPose) {
   const float wholeLaps = lap > 0.0f ? std::round(anchorU / lap) * lap : 0.0f;
   // Whole laps are the same picture only once the tube has closed; on the rolling sheet
   // they would be a translation.
-  const bool closed = attract_[attractIndex_].formedFrom != 0.0f || settings_.geometryFormed >= 0.9999f;
+  const bool closed =
+      attract_[attractIndex_].formedFrom != 0.0f || settings_.geometryFormed >= 0.9999f;
   settings_.geometrySlideU = (rawU - wholeLaps) * slideRamp + (closed ? wholeLaps : 0.0f);
   settings_.geometrySlideV = view::splineScalar(slideV, g) * slideRamp;
   // The rest of the pose (morph, ghost, piece style, invert) is only the keyframes' once
@@ -1186,8 +1200,9 @@ void Shell::applySplineAt(float g, bool toEditPose) {
 
 float Shell::flatBoardYaw() const {
   // The shape renderer's flat board is the ordinary board turned a half turn about the
-  // vertical, so a keyframe's yaw means the same picture on both only with this turn added
-  // on the ordinary board's beat - which is what makes the cut into the cylinder seamless.
+  // vertical, so a keyframe's yaw means the same picture on both only with this turn
+  // added on the ordinary board's beat - which is what makes the cut into the cylinder
+  // seamless.
   return attracting() && attractIndex_ < attract_.size() &&
                  attract_[attractIndex_].variant == "standard"
              ? 3.14159265f
@@ -1296,6 +1311,11 @@ void Shell::applySettings() {
   if (session_ != nullptr) {
     session_->setFlatView(settings_.flatView);
     session_->setHotSeat(settings_.hotSeat);
+    session_->setEngineSide(settings_.vsComputer
+                                ? std::optional<Color>(settings_.computerPlaysWhite
+                                                           ? Color::White
+                                                           : Color::Black)
+                                : std::nullopt);
     session_->setConfirmMoves(settings_.confirmMoves);
     session_->setCameraMode(settings_.cameraMode);
     session_->setFollowStrength(settings_.followStrength);

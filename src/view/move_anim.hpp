@@ -77,7 +77,8 @@ struct MovePath {
 /// Trace the route a move took. `type` and `side` are the piece that moved, read from
 /// the position *before* the move is applied - which is also the position `pos` must be,
 /// because a sliding ray cannot pass through a piece, and the route a player watched is
-/// the clear one, not whichever ray the atom table happens to list first.
+/// the clear one, not whichever ray the atom table happens to list first. `side` picks
+/// the forward directions, so for a flipped piece it is `Piece::orientation()`.
 MovePath tracePath(const VariantSpec& v, const Position& pos, PieceTypeId type,
                    Color side, const Move& m);
 

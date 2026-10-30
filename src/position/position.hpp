@@ -44,7 +44,7 @@ class Position {
 
   // ---- setup (not for use during play) ------------------------------------
   void clear();
-  void place(CellId c, PieceTypeId type, Color color);
+  void place(CellId c, PieceTypeId type, Color color, std::uint8_t flags = 0);
   void removeAt(CellId c);
   void setSideToMove(Color c);
   void setEpTarget(CellId target, CellId victim = kInvalidCell);

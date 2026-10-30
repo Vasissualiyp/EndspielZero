@@ -44,10 +44,12 @@ and assert the ray comes home.
 
 Read `docs/plan/M3-geometry.md` §3.4 before giving a glued board pawns.
 
-- **"Forward"** needs a globally consistent orientation. Non-orientable boards have
-  none, and the shipped variants therefore field no oriented pieces there. If your
-  variant needs pawns on such a board, you are choosing a policy, not applying a rule -
-  say so in its docs page.
+- **"Forward"** needs a globally consistent orientation, and non-orientable boards have
+  none. The policy is ADR-0020: a piece with a `forward = true` atom turns round when a
+  seam reverses its orientation axis (`Piece::flipped`, FEN `P'`) - mobius.toml is the
+  example. A piece that should ignore the twist declares `flips_on_mirror = false`. Note
+  that only a seam that flips the *orientation axis* turns a pawn: a Klein bottle whose
+  rank seam flips the file never does.
 - **"The last rank"** does not exist on a glued axis: omit `[promotion]`.
 - **Castling** is ambiguous once the files wrap: omit it.
 - **Bishop colour binding** is a theorem about orientable boards only.

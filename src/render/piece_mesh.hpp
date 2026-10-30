@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "assets/piece_model.hpp"
 #include "variant/variant.hpp"
 
 namespace cb::render {
@@ -103,24 +104,50 @@ Archetype archetypeFor(const PieceTypeDef& piece);
 /// board is the one that matters most even in an army you have never seen.
 float heightFor(const PieceTypeDef& piece);
 
+/// How many pieces of one variant can carry an authored body (M7.3.4). A shape slot is
+/// either an `Archetype` (below `Archetype::Count`) or `Archetype::Count + j` for the
+/// j-th authored model; a piece past the cap falls back to its archetype, exactly as a
+/// piece with no model does.
+inline constexpr std::size_t kAuthoredSlots = 32;
+inline constexpr std::size_t kShapeSlots =
+    static_cast<std::size_t>(Archetype::Count) + kAuthoredSlots;
+
+/// The shape slot each piece type of `v` draws with, indexed by `PieceTypeId` (entry 0,
+/// the empty piece, is Tower and unused). Pure: the renderer's instance building and its
+/// mesh library both derive from it, so they cannot disagree about which slot is whose.
+std::vector<std::size_t> shapeSlots(const VariantSpec& v);
+
+/// A fingerprint of every authored model and icon in `v`, in slot order - what decides
+/// whether the GPU mesh library has to be rebuilt. Zero for a variant with none.
+std::uint64_t authoredKey(const VariantSpec& v);
+
 /// Build every archetype into one vertex and index buffer, with a range per shape.
 struct MeshLibrary {
   std::vector<MeshVertex> vertices;
   std::vector<std::uint16_t> indices;
-  MeshRange ranges[static_cast<std::size_t>(Archetype::Count)];
+  MeshRange ranges[kShapeSlots];
   /// The shape view's alternate piece mesh (M17.25): each archetype's **Primitive** icon
   /// extruded into a two-sided puck, the same outline on both faces. Empty for the
   /// archetypes that are not pieces - Cell, Portal, Arrow, Fillet and Disc. Lives in the
   /// same vertex and index buffers as `ranges`, so the draw loop binds one buffer either
   /// way and only the range changes.
-  MeshRange cylinderRanges[static_cast<std::size_t>(Archetype::Count)];
+  MeshRange cylinderRanges[kShapeSlots];
   /// The shape view's token discs (M17.26): a plain white circular puck under each icon
   /// decal, one per archetype, in the same buffers. The disc's colour is the *instance's*
   /// - read live off `theme_.pieceToken` every build - never baked here, exactly like the
   /// icon mesh. Empty for the archetypes that are not pieces.
-  MeshRange discRanges[static_cast<std::size_t>(Archetype::Count)];
+  MeshRange discRanges[kShapeSlots];
 
-  static MeshLibrary build();
+  /// Every archetype, plus - when `v` is given - each of its authored bodies in its own
+  /// slot (see shapeSlots). An authored slot's puck and disc are its authored icon's when
+  /// it has one, otherwise its archetype's.
+  static MeshLibrary build(const VariantSpec* v = nullptr);
+
+  /// Sweep an authored model into the buffers and return its range: the profile revolved
+  /// about the height axis in `segments` steps, and each element extruded and placed by
+  /// the symmetry group. Permille map to local units at 1/1000, so a profile foot of 340
+  /// is the archetypes' shared foot radius.
+  MeshRange appendModel(const assets::PieceModel& model);
 };
 
 }  // namespace cb::render

@@ -140,6 +140,8 @@ castling and en passant on exotic surfaces. What exists instead:
   **Done.**
 - Pawn direction across an orientation-reversing seam has **no policy**: the
   non-orientable variants field no oriented pieces at all, and a test asserts that.
+  *(Superseded 2026-10-29 by ADR-0020: a directional piece turns round - `Piece::flipped`
+  - when a seam reverses its orientation axis, and `mobius.toml` ships with pawns.)*
   This is honest rather than complete - it means EndspielZero cannot yet express "pawns on
   a Klein bottle", and the options are still written up in §3.4 above for whoever
   needs them.

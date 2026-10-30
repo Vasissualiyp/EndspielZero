@@ -91,7 +91,7 @@ TEST_CASE("shipped variant node counts", "[golden][variants]") {
   };
   const Expect cases[] = {
       {"standard", 20, 400},       {"cylinder", 20, 392},  {"torus", 54, 2535},
-      {"mobius", 69, 4003},        {"klein", 48, 1977},    {"torus3d", 34, 1028},
+      {"mobius", 24, 576},         {"klein", 48, 1977},    {"torus3d", 34, 1028},
       {"torus3d_twist", 42, 1616}, {"mirrorbox", 20, 396}, {"cube5", 56, 3095},
       {"hyper4", 39, 1380},        {"t6", 41, 2216},
   };
@@ -115,7 +115,8 @@ TEST_CASE("the queen moves along every straight line, the king one or two axes",
     const auto loaded = loadVariantFile(test::variantPath(name));
     REQUIRE(loaded.has_value());
     for (const PieceTypeDef& p : loaded->pieces) {
-      if (p.name == "queen") CHECK(p.atoms == straightLineAtoms(kUnlimited, loaded->dims.dims()));
+      if (p.name == "queen")
+        CHECK(p.atoms == straightLineAtoms(kUnlimited, loaded->dims.dims()));
       if (p.name == "king") CHECK(p.atoms == straightLineAtoms(1));
     }
   }
@@ -198,7 +199,9 @@ TEST_CASE("the geometry of each shipped board is what its file claims",
   SECTION("mobius reverses orientation after one circuit") {
     const VariantSpec v = test::loadVariant("mobius");
     REQUIRE_FALSE(v.geom.isOrientable());
-    REQUIRE(v.findPiece("pawn") == kNoPiece);
+    // Its pawns are the exception to "no oriented pieces on a non-orientable board":
+    // they turn round on crossing the seam (Piece::flipped, tests/unit/movegen).
+    REQUIRE(v.pieces[v.findPiece("pawn")].reorients);
     // Eight steps along the glued axis land on the mirrored rank, not at home.
     Walker w = v.geom.start(v.dims.toCell(Coord::of({0, 0})), test::dir(v.dims, {1, 0}));
     for (int i = 0; i < 8; ++i) REQUIRE(v.geom.step(w));

@@ -3,8 +3,9 @@
 
 #include <array>
 #include <cstdint>
-#include <memory>
 #include <map>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -144,8 +145,8 @@ class Ui {
   /// reviewable without a mouse.
   void setPreviewDims(int dims) noexcept { previewDims_ = dims; }
   /// The piece the designer opens on, by name. For `--shot --piece`.
-  /// Drive the pointer without a display, for `--shot --ui-click`: where it is and whether
-  /// the left button is down on the next frame.
+  /// Drive the pointer without a display, for `--shot --ui-click`: where it is and
+  /// whether the left button is down on the next frame.
   void injectMouse(float x, float y, bool down) noexcept {
     inject_ = true;
     injectPos_ = ImVec2(x, y);
@@ -267,10 +268,14 @@ class Ui {
   void drawBodyTab(app::Shell& shell);
   /// The flat outline the board draws when it is drawn flat (M7.3.5).
   void drawIconTab(app::Shell& shell);
+  /// M7.2: the variant's custom fields and its rules, as a form over the rule catalogue.
+  void drawRulesTab(app::Shell& shell);
   /// Load the working model and icon for whichever piece is selected, once per
   /// selection. Seeded from the shipped archetype, so "start from the queen" always
   /// gives something editable rather than an empty canvas.
   void syncDesignAssets(app::Shell& shell);
+  /// Write the working body and icon into the editor's document when they changed.
+  void commitDesignAssets(app::Shell& shell);
   /// One editable closed outline on a grid. Returns true when the author changed it.
   ///
   /// Shared by both designers because they are the same job on different axes - which
@@ -316,25 +321,39 @@ class Ui {
   int editorPage_{0};
 
   /// The piece body and flat icon being designed, and which piece they were loaded for.
-  /// Editing state, like `editorPiece_`: the document the shell owns is the variant, and
-  /// these are not part of it until they are saved.
+  /// A working copy of what the editor's document holds (`[piece.model]`/`[piece.icon]`),
+  /// or of the archetype seed when it holds nothing; committed back to the document -
+  /// one undo step - whenever it differs and the mouse is up (commitDesignAssets).
   assets::PieceModel designModel_{};
   assets::IconModel designIcon_{};
   std::string designFor_;
   int designProfilePoint_{-1};
+  /// The element the body tab's element tool is editing, and the point selected in its
+  /// outline; -1 for none.
+  /// The fields and rules tab's working copy, and what the document held when it was
+  /// loaded or last committed - the same discipline as the body and icon above.
+  std::vector<app::Editor::FieldInfo> formPieceFields_, formCellFields_;
+  std::vector<app::Editor::RuleInfo> formRules_;
+  std::vector<app::Editor::FieldInfo> formPieceFieldsSeen_, formCellFieldsSeen_;
+  std::vector<app::Editor::RuleInfo> formRulesSeen_;
+  bool formLoaded_{false};
+  int designElement_{-1};
+  int designElementPoint_{-1};
   int designIconPoint_{-1};
   std::size_t designIconPoly_{0};
   /// Draw the right half and mirror it: an authoring aid, not a model operation. What
   /// is stored is always the finished outline, so an icon stays as dumb as the shipped
   /// tables.
   bool designIconMirror_{false};
-  /// Bodies and icons authored this session, by piece name, so moving to another piece
-  /// and back (or between the three tabs) does not throw the work away.
-  struct Design {
-    assets::PieceModel model;
-    assets::IconModel icon;
-  };
-  std::map<std::string, Design> designs_;
+  /// What the document held when the working copy was last loaded or committed, so a
+  /// change made underneath it - undo, redo, reset - reloads the working copy instead of
+  /// being overwritten by it.
+  std::optional<assets::PieceModel> designModelSeen_;
+  std::optional<assets::IconModel> designIconSeen_;
+  /// The working copy as loaded, so only a real edit is committed: opening a piece that
+  /// has no model must not write the archetype seed into the file.
+  assets::PieceModel designModelBase_{};
+  assets::IconModel designIconBase_{};
   /// A note from the last move edit that did not take, shown in red under the list.
   std::string moveNote_;
   std::string pendingPiece_;

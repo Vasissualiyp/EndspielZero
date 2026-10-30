@@ -2,6 +2,7 @@
 #include "app/session.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <sstream>
 
@@ -43,6 +44,10 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
   }
   if (verb == "undo") {
     a.kind = ActionKind::Undo;
+    return a;
+  }
+  if (verb == "engine") {
+    a.kind = ActionKind::EngineMove;
     return a;
   }
   if (verb == "reset") {
@@ -388,7 +393,9 @@ Result<void> Session::playChecked(const Move& m) {
   view::MovePath path;
   const bool animating = animSeconds_ > 0.0f && !mover.empty();
   if (animating) {
-    path = view::tracePath(*variant_, game_->position(), mover.type, mover.colorOf(),
+    // The piece's orientation, not its colour: a pawn a seam has turned round walks the
+    // other colour's forward directions (Piece::flipped), and so does its route.
+    path = view::tracePath(*variant_, game_->position(), mover.type, mover.orientation(),
                            chosen);
   }
   if (auto ok = game_->play(chosen); !ok.has_value()) {
@@ -488,10 +495,17 @@ Result<void> Session::apply(const Action& a) {
       case ActionKind::AgreeDraw:
       case ActionKind::Confirm:
       case ActionKind::Cancel:
+      case ActionKind::EngineMove:
         return {};
       default:
         break;
     }
+  }
+  // The computer's turn: its pieces are not the player's to move. Undo is still the
+  // player's - it takes back to the player's own last turn (below).
+  if (engineToMove() &&
+      (a.kind == ActionKind::ClickCell || a.kind == ActionKind::Confirm)) {
+    return {};
   }
   switch (a.kind) {
     case ActionKind::None:
@@ -569,12 +583,29 @@ Result<void> Session::apply(const Action& a) {
       cancelMove();
       return {};
 
+    case ActionKind::EngineMove: {
+      // Synchronous, for scripts and captures: the same search the opponent runs, for
+      // whichever side is to move.
+      stopEngine();
+      if (game_->result() != GameResult::InProgress) return {};
+      if (!engineEval_) engineEval_ = std::make_unique<ai::Evaluator>(*variant_);
+      const ai::SearchResult r = ai::chooseMove(*game_, *engineEval_, engineOptions_);
+      if (!r.found) return {};
+      return playChecked(r.best);
+    }
+
     case ActionKind::Undo:
       pending_ = PendingPromotion{};
       pendingMove_ = PendingMove{};
+      stopEngine();
       if (!game_->undo()) {
         message_ = "nothing to undo";
         return {};
+      }
+      // Against the computer, undo goes back to the player's own turn: taking back only
+      // the computer's reply would just have it play the same reply again.
+      while (engineSide_ && game_->position().sideToMove() == *engineSide_ &&
+             game_->undo()) {
       }
       selected_ = kInvalidCell;
       message_ = "undone";
@@ -583,6 +614,7 @@ Result<void> Session::apply(const Action& a) {
       return {};
 
     case ActionKind::Reset:
+      stopEngine();
       game_->reset();
       pending_ = PendingPromotion{};
       pendingMove_ = PendingMove{};
@@ -880,6 +912,89 @@ std::string Session::statusLine() const {
   std::string s = game_->statusLine();
   if (!message_.empty()) s += "  |  " + message_;
   return s;
+}
+
+// ---- the computer opponent (M10.2-M10.3) ------------------------------------------
+
+Session::~Session() {
+  stopEngine();
+}
+
+void Session::setEngineSide(std::optional<Color> side) {
+  if (side == engineSide_) return;
+  stopEngine();
+  engineSide_ = side;
+  engineClock_ = 0.0f;
+}
+
+bool Session::engineToMove() const noexcept {
+  return engineSide_.has_value() && !watching_ && game_ != nullptr &&
+         game_->result() == GameResult::InProgress &&
+         game_->position().sideToMove() == *engineSide_;
+}
+
+void Session::stopEngine() {
+  if (!engineJob_.valid()) return;
+  if (engineStop_) engineStop_->store(true);
+  engineJob_.wait();
+  engineJob_ = {};
+}
+
+void Session::startEngine() {
+  if (!engineEval_) engineEval_ = std::make_unique<ai::Evaluator>(*variant_);
+  engineStop_ = std::make_shared<std::atomic<bool>>(false);
+  engineAskedHash_ = game_->position().hash();
+  engineAskedPly_ = game_->plyCount();
+  ai::SearchOptions opts = engineOptions_;
+  opts.stop = engineStop_.get();
+  // The worker owns a copy of the game and of the stop flag; the evaluator and the
+  // variant are the session's and outlive it, because stopEngine() waits for it.
+  engineJob_ = std::async(std::launch::async, [game = *game_, eval = engineEval_.get(),
+                                               opts, stop = engineStop_]() {
+    (void)stop;  // held so the flag outlives an abandoned search
+    return ai::chooseMove(game, *eval, opts);
+  });
+}
+
+void Session::takeEngineAnswer(const ai::SearchResult& r) {
+  // The question was about a position that is no longer on the board: drop the answer.
+  if (!r.found || game_->position().hash() != engineAskedHash_ ||
+      game_->plyCount() != engineAskedPly_ || !engineToMove()) {
+    return;
+  }
+  (void)playChecked(r.best);
+}
+
+bool Session::advanceEngine(float dt) {
+  if (engineJob_.valid()) {
+    if (engineJob_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+      return true;
+    const ai::SearchResult r = engineJob_.get();
+    engineJob_ = {};
+    takeEngineAnswer(r);
+    engineClock_ = 0.0f;
+    return true;
+  }
+  if (!engineToMove()) {
+    engineClock_ = 0.0f;
+    return false;
+  }
+  // Let the player's move land and be seen before the reply starts moving.
+  if (anim_.active()) return true;
+  engineClock_ += dt;
+  if (engineClock_ < 0.25f) return true;
+  startEngine();
+  return true;
+}
+
+void Session::finishEngineMove() {
+  if (!engineJob_.valid()) {
+    if (!engineToMove()) return;
+    startEngine();
+  }
+  const ai::SearchResult r = engineJob_.get();
+  engineJob_ = {};
+  takeEngineAnswer(r);
 }
 
 }  // namespace cb::app

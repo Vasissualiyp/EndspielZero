@@ -577,6 +577,26 @@ Result<void> BoardRenderer::uploadGeometry() {
   return {};
 }
 
+Result<void> BoardRenderer::ensureAuthored(const VariantSpec& v) {
+  const std::uint64_t key = authoredKey(v);
+  if (key == meshesKey_) return {};
+  // A different set of authored bodies: rebuild the library and replace the buffers.
+  // Frames still in flight may be reading the old ones, hence the wait - paid once per
+  // change of variant or model, never per frame.
+  vkDeviceWaitIdle(ctx_->device());
+  for (VkBuffer* b : {&vertexBuffer_, &indexBuffer_}) {
+    if (*b != VK_NULL_HANDLE) vkDestroyBuffer(ctx_->device(), *b, nullptr);
+    *b = VK_NULL_HANDLE;
+  }
+  for (VkDeviceMemory* m : {&vertexMem_, &indexMem_}) {
+    if (*m != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), *m, nullptr);
+    *m = VK_NULL_HANDLE;
+  }
+  meshes_ = MeshLibrary::build(key == 0 ? nullptr : &v);
+  meshesKey_ = key;
+  return uploadGeometry();
+}
+
 Result<void> BoardRenderer::ensureInstanceCapacity(std::uint32_t frame,
                                                    std::size_t count) {
   if (count <= instanceCapacity_[frame]) return {};
@@ -668,12 +688,9 @@ InstanceSet BoardRenderer::buildInstances(
     pose.shellSpread = options_.surfaceShellSpread;
     const PlaySurface surf = PlaySurface::build(v, pose);
 
-    std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);
+    const std::vector<std::size_t> shape = shapeSlots(v);
     std::vector<float> height(v.pieces.size(), 1.0f);
-    for (std::size_t i = 1; i < v.pieces.size(); ++i) {
-      shape[i] = archetypeFor(v.pieces[i]);
-      height[i] = heightFor(v.pieces[i]);
-    }
+    for (std::size_t i = 1; i < v.pieces.size(); ++i) height[i] = heightFor(v.pieces[i]);
     const auto highlighted = p.highlighted();
     const auto isHighlighted = [&](CellId c) {
       return std::find(highlighted.begin(), highlighted.end(), c) != highlighted.end();
@@ -834,13 +851,11 @@ InstanceSet BoardRenderer::buildInstances(
       }
     }
 
-    std::vector<std::vector<Instance>> byShape(
-        static_cast<std::size_t>(Archetype::Count));
+    std::vector<std::vector<Instance>> byShape(kShapeSlots);
     // The token discs (M17.26) live in their own groups and are concatenated ahead of the
     // icons in each archetype's batch, so `record` draws the first `discCounts[s]` from
     // the disc mesh and the rest from the icon mesh.
-    std::vector<std::vector<Instance>> byShapeDisc(
-        static_cast<std::size_t>(Archetype::Count));
+    std::vector<std::vector<Instance>> byShapeDisc(kShapeSlots);
     const auto emitSurfacePiece = [&](std::vector<std::vector<Instance>>& into,
                                       std::vector<std::vector<Instance>>& discInto,
                                       const Piece& piece, const view::Vec3& centre,
@@ -892,8 +907,7 @@ InstanceSet BoardRenderer::buildInstances(
     // the seat's own frame, exactly where the piece stands. The travelling piece's shadow
     // is pinned to the surface under it - `ground`, never the hovered `position` - so the
     // contact stays true while the piece rides above the board.
-    std::vector<std::vector<Instance>> byShapeShadow(
-        static_cast<std::size_t>(Archetype::Count));
+    std::vector<std::vector<Instance>> byShapeShadow(kShapeSlots);
     const auto emitSurfaceShadow = [&](const view::Vec3& centre, const view::Vec3& normal,
                                        const std::array<float, 4>& quat, float fit) {
       Instance sh{};
@@ -937,10 +951,8 @@ InstanceSet BoardRenderer::buildInstances(
 
     // M18.1: the same capture flourish as the flat board, on its own square of the
     // surface - the captured piece shrinking and fading, and a blood flash at its foot.
-    std::vector<std::vector<Instance>> byShapeFlourish(
-        static_cast<std::size_t>(Archetype::Count));
-    std::vector<std::vector<Instance>> byShapeFlourishDisc(
-        static_cast<std::size_t>(Archetype::Count));
+    std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
+    std::vector<std::vector<Instance>> byShapeFlourishDisc(kShapeSlots);
     if (anim != nullptr && anim->active() && anim->captures()) {
       const float t = anim->progress();
       const float fade = view::captureFade(t);
@@ -1057,6 +1069,7 @@ InstanceSet BoardRenderer::buildInstances(
     identity.color[3] = 1.0f;
     out.surfaceInstance = static_cast<std::uint32_t>(out.instances.size());
     out.instances.push_back(identity);
+    out.variant = &v;
     return out;
   }
 #endif
@@ -1072,12 +1085,10 @@ InstanceSet BoardRenderer::buildInstances(
 
   // Appearance per piece type, resolved once: a variant may declare a shape and a
   // height, and anything it leaves out is derived from how the piece moves.
-  std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);
+  // An authored body (M7.3.4) has a slot of its own past the archetypes; see shapeSlots.
+  const std::vector<std::size_t> shape = shapeSlots(v);
   std::vector<float> height(v.pieces.size(), 1.0f);
-  for (std::size_t i = 1; i < v.pieces.size(); ++i) {
-    shape[i] = archetypeFor(v.pieces[i]);
-    height[i] = heightFor(v.pieces[i]);
-  }
+  for (std::size_t i = 1; i < v.pieces.size(); ++i) height[i] = heightFor(v.pieces[i]);
 
   const auto highlighted = p.highlighted();
   const auto isHighlighted = [&](CellId c) {
@@ -1085,12 +1096,11 @@ InstanceSet BoardRenderer::buildInstances(
   };
 
   // Two passes so instances of the same shape are contiguous: one draw call per shape.
-  std::vector<std::vector<Instance>> byShape(static_cast<std::size_t>(Archetype::Count));
+  std::vector<std::vector<Instance>> byShape(kShapeSlots);
   // M18.2: the contact shadows, kept apart from the opaque batches because they blend.
   // The flat (`options_.flat`) board draws its pieces in the interface, so the renderer
   // has no shadow to ground and emits none - the same cut the M18.1 flourish takes.
-  std::vector<std::vector<Instance>> byShapeShadow(
-      static_cast<std::size_t>(Archetype::Count));
+  std::vector<std::vector<Instance>> byShapeShadow(kShapeSlots);
   const view::Vec3 half = cellHalfExtent();
 
   // One soft decal on the cell under a piece, at the cell's own surface point.
@@ -1539,8 +1549,7 @@ InstanceSet BoardRenderer::buildInstances(
   // and fades out as a pure function of `t`, so a clip stays reproducible, and a blood
   // flash marks the square at the moment the pieces meet. Both are drawn blended further
   // down, which is why their alpha is the fade rather than a number nothing reads.
-  std::vector<std::vector<Instance>> byShapeFlourish(
-      static_cast<std::size_t>(Archetype::Count));
+  std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
   if (anim != nullptr && anim->active() && anim->captures() && !options_.flat) {
     const float t = anim->progress();
     const float fade = view::captureFade(t);
@@ -1610,6 +1619,7 @@ InstanceSet BoardRenderer::buildInstances(
     out.shadows.insert(out.shadows.end(), byShapeShadow[s].begin(),
                        byShapeShadow[s].end());
   }
+  out.variant = &v;
   return out;
 }
 
@@ -1663,6 +1673,11 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                                    const std::function<void(VkCommandBuffer)>& overlay,
                                    const std::function<void(VkCommandBuffer)>& background,
                                    BoardRect boardRect, std::uint32_t frame) {
+  // Before anything is bound: an authored body's slot must exist in the buffers it is
+  // about to be drawn from.
+  if (set.variant != nullptr) {
+    if (auto r = ensureAuthored(*set.variant); !r.has_value()) return r;
+  }
   // The scaffold, the contact shadows and the flourish all ride the same buffer,
   // immediately after the opaque ones, so each blended pass is one more draw group rather
   // than a second buffer. Their order is the order they are drawn in: the scaffold first,
@@ -2077,6 +2092,7 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(colorFormat_, o.colorFormat_);
   std::swap(theme_, o.theme_);
   std::swap(meshes_, o.meshes_);
+  std::swap(meshesKey_, o.meshesKey_);
   std::swap(lastFrom_, o.lastFrom_);
   std::swap(lastTo_, o.lastTo_);
   std::swap(checkCell_, o.checkCell_);

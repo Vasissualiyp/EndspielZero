@@ -128,6 +128,8 @@ bool Geometry::stepBoundary(Walker& w) const {
   // two seams, hence the loop; the cap bounds it for any well-formed geometry.
   Coord q = w.coord;
   Direction d = w.dir;
+  std::uint8_t upAxis = w.upAxis;
+  std::int8_t upSign = w.upSign;
   for (std::uint8_t k = 0; k < d.nsup; ++k) {
     const std::uint8_t a = d.sup[k];
     q.c[a] = static_cast<std::int16_t>(q.c[a] + d.v[a]);
@@ -153,6 +155,8 @@ bool Geometry::stepBoundary(Walker& w) const {
       w.cell = dims_.toCell(q);
       w.dir = d;
       w.delta = dims_.delta(d);
+      w.upAxis = upAxis;
+      w.upSign = upSign;
       return true;
     }
 
@@ -163,6 +167,17 @@ bool Geometry::stepBoundary(Walker& w) const {
     }
     q = xf->applyToCoord(q);
     d = xf->applyToDir(d);
+    if (upSign != 0) {
+      // out[i] = sign[i] * in[src[i]], so the tracked unit vector lands on the axis
+      // whose source it is.
+      for (std::uint8_t i = 0; i < xf->n; ++i) {
+        if (xf->src[i] == upAxis) {
+          upAxis = i;
+          upSign = static_cast<std::int8_t>(upSign * xf->sign[i]);
+          break;
+        }
+      }
+    }
   }
 
   // Unreachable for a validated geometry: a step of bounded length cannot cross

@@ -586,6 +586,13 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   // as well as from Settings; both write the one saved setting.
   ImGui::Checkbox("Two players, one keyboard", &shell.settings().hotSeat);
   if (ImGui::IsItemDeactivatedAfterEdit()) request.settingsChanged = true;
+  ImGui::Checkbox("Play against the computer", &shell.settings().vsComputer);
+  if (ImGui::IsItemDeactivatedAfterEdit()) request.settingsChanged = true;
+  if (shell.settings().vsComputer) {
+    ImGui::SameLine();
+    ImGui::Checkbox("it plays White", &shell.settings().computerPlaysWhite);
+    if (ImGui::IsItemDeactivatedAfterEdit()) request.settingsChanged = true;
+  }
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
   ImGui::TextUnformatted("each player types their own half of the keyboard");
@@ -802,7 +809,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::Spacing();
     ImGui::TextUnformatted(
         "Build a piece by adding moves. A rook plus a bishop is a queen on a flat board; "
-        "the queen button adds every straight line - triagonals and beyond in more dimensions. "
+        "the queen button adds every straight line - triagonals and beyond in more "
+        "dimensions. "
         "The board on the left shows the piece in white at the centre and where it can "
         "go: green for a quiet move, red for a capture. Click the board to place black "
         "and white pieces - a pawn's capture only lights up when there is something to "
@@ -896,8 +904,20 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopFont();
 
     ImGui::Dummy(ImVec2(0, px(8)));
+    // The editor is a front end to the loader: a board the game would refuse cannot be
+    // saved, and the reason is the loader's own, shown where the button is (M7.0.3).
+    const Result<void> loads = editor->validate();
+    if (!loads.has_value()) {
+      ImGui::PushFont(small);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+      ImGui::TextWrapped("%s", loads.error().format().c_str());
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+    }
     ImGui::PushFont(small);
-    if (chip("SAVE", t.ember, px(90))) (void)shell.saveEditor();
+    if (button("SAVE", t, px(90), editor->dirty(), false, loads.has_value(), display)) {
+      (void)shell.saveEditor();
+    }
     ImGui::SameLine();
     if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
     ImGui::PopFont();
@@ -931,7 +951,8 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::SameLine();
   if (button("REDO", t, px(84), false, true, true, display)) editor->redo();
   ImGui::SameLine();
-  if (button("SAVE", t, px(84), editor->dirty(), false, true, display)) {
+  const Result<void> loads = editor->validate();
+  if (button("SAVE", t, px(84), editor->dirty(), false, loads.has_value(), display)) {
     (void)shell.saveEditor();
   }
   ImGui::SameLine();
@@ -939,6 +960,14 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::SameLine();
   if (button("CLEAR", t, px(88), false, true, true, display)) {
     for (auto& row : previewCells_) row.fill(0);
+  }
+  if (!loads.has_value()) {
+    // Why SAVE is off, in the loader's own words - there is no "save anyway".
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
+    ImGui::TextWrapped("cannot save: %s", loads.error().format().c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
   }
 
   // The controls are ImGui's, but they wear the game's clothes: rounded, panel-coloured,
@@ -992,16 +1021,18 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     // Three jobs on one piece - how it moves, what its body is, what its flat outline
     // is - so three tabs rather than three screens. Moving between them must not feel
     // like leaving the piece behind.
-    designTab_ = std::clamp(designTab_, 0, 2);
-    tabRow({"MOVES", "BODY", "FLAT ICON"}, designTab_, t, fontDisplay_, scale_);
+    designTab_ = std::clamp(designTab_, 0, 3);
+    tabRow({"MOVES", "BODY", "FLAT ICON", "RULES"}, designTab_, t, fontDisplay_, scale_);
 
     const std::string piece = names[static_cast<std::size_t>(editorPiece_)];
     if (designTab_ == 0) {
       drawMovesTab(shell, piece);
     } else if (designTab_ == 1) {
       drawBodyTab(shell);
-    } else {
+    } else if (designTab_ == 2) {
       drawIconTab(shell);
+    } else {
+      drawRulesTab(shell);
     }
   }
   ImGui::PopStyleColor(9);
@@ -1199,6 +1230,11 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   heading("GAMEPLAY", t, small);
   ImGui::Checkbox("Confirm before moving", &s.confirmMoves);
   ImGui::Checkbox("Two players, one keyboard", &s.hotSeat);
+  ImGui::Checkbox("Play against the computer", &s.vsComputer);
+  if (s.vsComputer) {
+    ImGui::SameLine();
+    ImGui::Checkbox("it plays White", &s.computerPlaysWhite);
+  }
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
   ImGui::TextUnformatted(

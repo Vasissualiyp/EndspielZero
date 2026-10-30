@@ -193,6 +193,10 @@ struct Settings {
   /// Two players share one keyboard, one half each: player one types squares with
   /// qwertasdfgzxcvb, player two with the other half.
   bool hotSeat{false};
+  /// Play against the computer (M10.2-M10.3): it takes Black, or White when
+  /// `computerPlaysWhite` is set. Off is a game between people at one screen.
+  bool vsComputer{false};
+  bool computerPlaysWhite{false};
   /// Piece name to promote to without asking; empty means always ask.
   std::string autoPromoteTo;
   std::string lastVariant{"standard"};

@@ -121,7 +121,7 @@ TEST_CASE("the engine core contains no floating-point arithmetic", "[arch]") {
   // classic way to lose that silently (ARCH section 12, AGENTS.md rule 5).
   const std::vector<std::string> coreDirs{"base",     "diag",     "space",   "geometry",
                                           "position", "pieces",   "variant", "movegen",
-                                          "rules",    "temporal", "game"};
+                                          "rules",    "temporal", "game",    "ai"};
   std::vector<std::string> offenders;
   for (const std::string& d : coreDirs) {
     for (const fs::path& f : sourcesUnder(kRoot / "src" / d)) {
