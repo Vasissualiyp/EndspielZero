@@ -1197,6 +1197,13 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
 
   heading("BOARD", t, small);
   ImGui::Checkbox("Highlight legal moves", &s.showLegalMoves);
+  ImGui::Checkbox("Ctrl over a piece shows its moves", &s.peekMovesOnCtrl);
+  ImGui::Checkbox("Ctrl over a square shows what attacks and defends it", &s.showAttackHints);
+  ImGui::PushFont(small);
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::TextUnformatted("Ctrl hints only; the opponent's moves ignore check");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
   ImGui::Checkbox("Mark the last move", &s.showLastMove);
   ImGui::Checkbox("Warn when in check", &s.showCheck);
   ImGui::Checkbox("Show seams on glued boards", &s.showSeams);
@@ -1403,6 +1410,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.guiScale != s.guiScale || before.fullscreen != s.fullscreen ||
       before.vsync != s.vsync || before.frameCap != s.frameCap ||
       before.showLegalMoves != s.showLegalMoves ||
+      before.peekMovesOnCtrl != s.peekMovesOnCtrl ||
+      before.showAttackHints != s.showAttackHints ||
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showSeamLegend != s.showSeamLegend ||
       before.showCoordinates != s.showCoordinates ||

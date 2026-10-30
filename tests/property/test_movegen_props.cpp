@@ -97,6 +97,25 @@ TEST_CASE("the reverse-walk attack query agrees with a forward scan",
   });
 }
 
+TEST_CASE("attackers agrees with isAttacked", "[property][movegen]") {
+  // The path-reporting query and the boolean one must never drift apart.
+  const auto seed = static_cast<std::uint64_t>(GENERATE(range(1, 25)));
+  const VariantSpec v = test::randomVariant(seed);
+  INFO("variant: " << describe(v));
+  const MoveGen gen(v);
+  Position p = Position::startPosition(v);
+  Rng rng(seed * 104729 + 11);
+  randomPlayout(p, rng, 4, [&](Position& pos) {
+    for (CellId c = 0; c < v.dims.cellCount(); ++c) {
+      for (int ci = 0; ci < kNumColors; ++ci) {
+        const auto by = static_cast<Color>(ci);
+        INFO("cell " << c << " by " << ci);
+        REQUIRE(gen.attackers(pos, c, by).empty() == !gen.isAttacked(pos, c, by));
+      }
+    }
+  });
+}
+
 TEST_CASE("the optimised generator agrees with the oracle - wide sweep",
           "[property][movegen][slow]") {
   // The same invariant over far more of the variant space. Kept out of the fast

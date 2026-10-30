@@ -24,6 +24,12 @@ float wrapAngle(float a) noexcept {
   return a;
 }
 
+/// Half-extent of a cell's pick box. Slightly over half a cell, so neighbouring boxes
+/// overlap and there is no dead strip on a divider line: the nearer cell wins, which puts
+/// the switch at the middle of the line. (It was 0.45, leaving a 0.1 gap where nothing was
+/// picked, and the hover flickered off between two squares.)
+const view::Vec3 kPickHalfExtent{0.505f, 0.505f, 0.06f};
+
 }  // namespace
 
 Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
@@ -40,6 +46,19 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
     if (!cell.has_value()) return fail(cell.error().code, cell.error().message);
     a.kind = ActionKind::ClickCell;
     a.cell = *cell;
+    return a;
+  }
+  if (verb == "hover") {
+    std::string where;
+    in >> where;
+    a.kind = ActionKind::Hover;
+    if (where == "off") return a;
+    auto cell = parseCell(v.dims, where);
+    if (!cell.has_value()) return fail(cell.error().code, cell.error().message);
+    a.cell = *cell;
+    std::string mod;
+    in >> mod;
+    a.ctrl = mod == "ctrl";
     return a;
   }
   if (verb == "undo") {
@@ -467,7 +486,19 @@ void Session::cancelMove() {
 }
 
 void Session::refreshSnapshot() {
+  // A piece that arrives on the square under the pointer (the player's own move, the
+  // computer's, an undo) is not hover-tinted until the pointer leaves the square and
+  // comes back: the tint would otherwise sit on the piece that just landed.
+  Piece before{};
+  if (hoverCell_ < snapshot_.cellCount()) before = snapshot_.at(hoverCell_);
   snapshot_ = view::PositionView::capture(game_->position());
+  if (hoverCell_ < snapshot_.cellCount()) {
+    const Piece after = snapshot_.at(hoverCell_);
+    if (!after.empty() &&
+        (after.type != before.type || after.colorOf() != before.colorOf())) {
+      suppressedHover_ = hoverCell_;
+    }
+  }
   snapshot_.setSelected(selected_);
 
   std::vector<CellId> targets;
@@ -479,6 +510,106 @@ void Session::refreshSnapshot() {
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
   }
   snapshot_.setHighlighted(std::move(targets));
+  refreshHints();
+}
+
+bool Session::cancelSelection() {
+  if (boardLocked()) return false;
+  if (pending_.active) {
+    cancelPromotion();
+    return true;
+  }
+  if (pendingMove_.active) {
+    cancelMove();
+    return true;
+  }
+  if (selected_ == kInvalidCell) return false;
+  selected_ = kInvalidCell;
+  refreshSnapshot();
+  return true;
+}
+
+void Session::setHintOptions(const HintOptions& o) {
+  if (o.ctrlPeek == hints_.ctrlPeek && o.attackHints == hints_.attackHints) return;
+  hints_ = o;
+  refreshHints();
+}
+
+void Session::setHover(CellId cell, bool ctrl) {
+  if (cell == hoverCell_ && ctrl == hoverCtrl_) return;
+  hoverCell_ = cell;
+  hoverCtrl_ = ctrl;
+  if (cell != suppressedHover_) suppressedHover_ = kInvalidCell;
+  refreshHints();
+}
+
+void Session::refreshHints() {
+  snapshot_.setPeekMoves({});
+  snapshot_.setHint({}, {}, {}, {});
+  snapshot_.setHover(kInvalidCell);
+  const CellId cell = hoverCell_;
+  if (cell >= variant_->dims.cellCount()) return;
+  if (shotInFlight() || watching_ || cell == suppressedHover_) return;
+  // The hovered square is always marked, whatever the options say.
+  snapshot_.setHover(cell);
+  // The attack, defence and peek hints are Ctrl-only.
+  if (!hoverCtrl_ || game_->isTemporal() || game_->result() != GameResult::InProgress ||
+      pending_.active || pendingMove_.active) {
+    return;
+  }
+  const Position& pos = game_->position();
+  const MoveGen& gen = game_->moveGen();
+  const auto distinct = [](std::vector<CellId> v) {
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
+    return v;
+  };
+  const auto fold = [&](const std::vector<MoveGen::Attacker>& as, std::vector<CellId>& from,
+                        std::vector<CellId>& path) {
+    for (const auto& a : as) {
+      from.push_back(a.from);
+      path.insert(path.end(), a.path.begin(), a.path.end());
+    }
+    from = distinct(std::move(from));
+    path = distinct(std::move(path));
+  };
+
+  const auto highlighted = snapshot_.highlighted();
+  const bool isTarget = std::find(highlighted.begin(), highlighted.end(), cell) !=
+                        highlighted.end();
+  std::vector<CellId> af, ap, df, dp;
+  if (hints_.attackHints && isTarget && selected_ != kInvalidCell) {
+    // A legal destination: judged on the position after the move.
+    const Move* m = findMove(selected_, cell);
+    if (m == nullptr) return;
+    const Color mover = pos.sideToMove();
+    Game after = *game_;
+    if (!after.play(*m).has_value()) return;
+    fold(after.moveGen().attackers(after.position(), cell, opponent(mover)), af, ap);
+    fold(after.moveGen().attackers(after.position(), cell, mover), df, dp);
+  } else if (!pos.at(cell).empty()) {
+    // Ctrl over a piece: its moves, either side's.
+    if (!hints_.ctrlPeek) return;
+    std::vector<CellId> to;
+    if (pos.at(cell).colorOf() == pos.sideToMove()) {
+      for (const Move& m : game_->legalMoves()) {
+        if (m.from == cell) to.push_back(m.to);
+      }
+    } else {
+      MoveList l(variant_->moveUpperBound());
+      gen.movesFrom(pos, cell, l);
+      for (const Move& m : l) to.push_back(m.to);
+    }
+    snapshot_.setPeekMoves(distinct(std::move(to)));
+    return;
+  } else if (hints_.attackHints) {
+    // An empty square: who attacks it, and who could recapture there.
+    fold(gen.attackers(pos, cell, opponent(pos.sideToMove())), af, ap);
+    fold(gen.attackers(pos, cell, pos.sideToMove()), df, dp);
+  } else {
+    return;
+  }
+  snapshot_.setHint(std::move(af), std::move(ap), std::move(df), std::move(dp));
 }
 
 Result<void> Session::apply(const Action& a) {
@@ -509,6 +640,10 @@ Result<void> Session::apply(const Action& a) {
   }
   switch (a.kind) {
     case ActionKind::None:
+      return {};
+
+    case ActionKind::Hover:
+      setHover(a.cell, a.ctrl);
       return {};
 
     case ActionKind::ClickCell: {
@@ -869,6 +1004,13 @@ Result<void> Session::watchSeek(std::size_t index) {
   return {};
 }
 
+CellId Session::pickPixel(float px, float py, float width, float height) const {
+  if (boardLocked()) return kInvalidCell;
+  const auto ray = camera().pickRay(px, py, width, height);
+  const int hit = view::pickBox(ray, placements_, kPickHalfExtent);
+  return hit < 0 ? kInvalidCell : placements_[static_cast<std::size_t>(hit)].cell;
+}
+
 CellId Session::clickPixel(float px, float py, float width, float height) {
   // While a shot owns the view, or while the engine is playing a game for a watcher, the
   // board is locked: the pose may be moving, and in either case the position is not the
@@ -877,7 +1019,7 @@ CellId Session::clickPixel(float px, float py, float width, float height) {
   // The effective camera, not the raw member: the pause pull-back moves the board, and
   // the ray has to move with it or a click lands beside the cell under the cursor.
   const auto ray = camera().pickRay(px, py, width, height);
-  const int hit = view::pickBox(ray, placements_, view::Vec3{0.45f, 0.45f, 0.06f});
+  const int hit = view::pickBox(ray, placements_, kPickHalfExtent);
   if (hit < 0) {
     selected_ = kInvalidCell;
     refreshSnapshot();

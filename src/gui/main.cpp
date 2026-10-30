@@ -1452,6 +1452,10 @@ int main(int argc, char** argv) {
   bool panning = false;
   /// Middle-dragging the board around its own surface, in the geometry view.
   bool sliding = false;
+  // Where the right button went down, and whether it has since dragged: a click that did
+  // not drag cancels the selected move instead of orbiting.
+  float rightDownX = 0.0f, rightDownY = 0.0f;
+  bool rightDragged = false;
   /// Whether the board was its own shape last frame, so the camera can be put round
   /// whatever it has just become.
   bool wasSurface = false;
@@ -1465,6 +1469,34 @@ int main(int argc, char** argv) {
   int renderPoll = 0;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
+  // Hover aids (M20): events only mark the pointer dirty; the cell is resolved once per
+  // frame, because the shape view's pick builds a whole surface.
+  bool hoverDirty = false;
+  bool hoverOver = false;  // the pointer is over the board (not the interface / window)
+  float hoverX = 0.0f, hoverY = 0.0f;
+  // The cell under a pixel of the window, on the flat/3-D board or the shape.
+  const auto hoverPick = [&](float x, float y) -> CellId {
+    const app::Session* session = shell->session();
+    if (session == nullptr || x < boardRect.x || y < boardRect.y ||
+        x >= boardRect.x + boardRect.width || y >= boardRect.y + boardRect.height) {
+      return kInvalidCell;
+    }
+#ifdef CB_HAVE_IMGUI
+    if (optionsFor(*shell).surface) {
+      if (session->boardLocked()) return kInvalidCell;
+      const render::PlaySurface surf = render::PlaySurface::build(
+          session->variant(), poseFrom(shell->settings(), session->variant()));
+      return surf.pick(session->cameraOver(surfacePlacements(surf), surf.bounds(),
+                                           view::ViewConfig{}),
+                       boardRect.width, boardRect.height, x - boardRect.x,
+                       y - boardRect.y, shell->settings().geometryGhost,
+                       &session->snapshot(), shell->settings().pieceHeightScale,
+                       shell->settings().shapePieceCylinders);
+    }
+#endif
+    return session->pickPixel(x - boardRect.x, y - boardRect.y, boardRect.width,
+                              boardRect.height);
+  };
 
   while (running && !shell->quitRequested()) {
     SDL_Event e;
@@ -1485,6 +1517,19 @@ int main(int argc, char** argv) {
 #endif
       const app::Settings& settings = shell->settings();
       const bool inGame = shell->screen() == app::Screen::Game && shell->hasGame();
+
+      if (e.type == SDL_EVENT_MOUSE_MOTION) {
+        hoverDirty = true;
+        hoverOver = !consumed;
+        hoverX = e.motion.x;
+        hoverY = e.motion.y;
+      } else if (e.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
+        hoverDirty = true;
+        hoverOver = false;
+      } else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) &&
+                 (e.key.key == SDLK_LCTRL || e.key.key == SDLK_RCTRL)) {
+        hoverDirty = true;
+      }
 
       switch (e.type) {
         case SDL_EVENT_QUIT:
@@ -1537,6 +1582,9 @@ int main(int argc, char** argv) {
             }
           } else if (e.button.button == SDL_BUTTON_RIGHT) {
             orbiting = true;
+            rightDownX = e.button.x;
+            rightDownY = e.button.y;
+            rightDragged = false;
           } else if (e.button.button == SDL_BUTTON_MIDDLE) {
             // On the shape, the middle button slides the board *along* the surface rather
             // than sliding the view about. Nothing is lost: the shape is framed and
@@ -1551,13 +1599,23 @@ int main(int argc, char** argv) {
           }
           break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
-          if (e.button.button == SDL_BUTTON_RIGHT) orbiting = false;
+          if (e.button.button == SDL_BUTTON_RIGHT) {
+            // A right-click that did not turn the camera cancels the selected move.
+            if (orbiting && !rightDragged && !consumed && shell->hasGame() &&
+                shell->screen() == app::Screen::Game) {
+              (void)shell->session()->cancelSelection();
+            }
+            orbiting = false;
+          }
           if (e.button.button == SDL_BUTTON_MIDDLE) {
             panning = false;
             sliding = false;
           }
           break;
         case SDL_EVENT_MOUSE_MOTION:
+          if (orbiting && std::hypot(e.motion.x - rightDownX, e.motion.y - rightDownY) > 4.0f) {
+            rightDragged = true;
+          }
           // Reaching for the camera in the trailer pauses it into edit mode, so the hand
           // is not fought by keyframes or the trailer's own framing.
           if ((sliding || panning || orbiting) && shell->hasGame()) {
@@ -1739,6 +1797,16 @@ int main(int argc, char** argv) {
           break;
       }
     } while (SDL_PollEvent(&e));
+    if (hoverDirty && shell->hasGame()) {
+      hoverDirty = false;
+      const bool inGameNow = shell->screen() == app::Screen::Game;
+      const bool dragging = orbiting || panning || sliding;
+      CellId cell = kInvalidCell;
+      if (inGameNow && hoverOver && !dragging && !shell->attracting()) {
+        cell = hoverPick(hoverX, hoverY);
+      }
+      shell->session()->setHover(cell, (SDL_GetModState() & SDL_KMOD_CTRL) != 0);
+    }
 
     const auto now = std::chrono::steady_clock::now();
     const float dt = std::chrono::duration<float>(now - lastFrame).count();

@@ -24,6 +24,7 @@
 #include "render/play_surface.hpp"
 #include "render/ui_widgets.hpp"
 #include "shaders.hpp"
+#include "view/piece_tint.hpp"
 #include "view/seams.hpp"
 
 namespace cb::render {
@@ -2191,7 +2192,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     const float cellPx = std::max(px(6.0f), std::hypot(o1.x - o0.x, o1.y - o0.y));
     const float radius = cellPx * 0.34f;
 
-    const auto drawToken = [&](const Piece& piece, const view::Vec3& world) {
+    const auto drawToken = [&](const Piece& piece, const view::Vec3& world, CellId cell,
+                               bool travelling) {
       if (piece.empty()) return;
       const view::OrbitCamera::ScreenPoint sp = cam.project(world, w / h, w, h);
       if (!sp.visible) return;
@@ -2203,8 +2205,10 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // to sit on - and the thing being read is the figure.
       dl->AddCircleFilled(centre, radius, u32(t.pieceToken, focus), 24);
       dl->AddCircle(centre, radius, u32(t.boardRim, focus), 24, px(1.5f));
+      const view::Rgba figure = view::tintedPiece(white ? t.whitePiece : t.blackPiece,
+                                                  session.snapshot(), cell, travelling, t);
       drawPieceOf(
-          dl, centre, radius * 0.82f, u32(white ? t.whitePiece : t.blackPiece, focus),
+          dl, centre, radius * 0.82f, u32(figure, focus),
           u32(t.pieceToken, focus), v.pieces[piece.type], iconStyle_, piece.flipped());
     };
 
@@ -2212,12 +2216,14 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     const CellId movingTo = anim.active() ? anim.travellingTo() : kInvalidCell;
     for (const view::Placement& pl : session.placements()) {
       if (pl.cell == movingTo) continue;  // the moving piece is drawn at its own point
-      drawToken(session.snapshot().at(pl.cell), view::Vec3{pl.x, pl.y, pl.z});
+      drawToken(session.snapshot().at(pl.cell), view::Vec3{pl.x, pl.y, pl.z}, pl.cell,
+                false);
     }
     if (movingTo != kInvalidCell) {
       const view::MoveAnimation::Sample at = anim.sample();
       if (at.moving) {
-        drawToken(session.snapshot().at(movingTo), view::Vec3{at.x, at.y, at.z});
+        drawToken(session.snapshot().at(movingTo), view::Vec3{at.x, at.y, at.z}, kInvalidCell,
+                  true);
       }
     }
   }

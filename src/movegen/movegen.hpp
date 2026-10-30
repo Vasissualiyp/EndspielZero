@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <vector>
+
 #include "movegen/move_list.hpp"
 #include "position/position.hpp"
 
@@ -57,6 +59,27 @@ class MoveGen {
   /// against the naive oracle (ADR-0009).
   [[nodiscard]] bool isAttacked(const Position& p, CellId target, Color by) const;
 
+  /// One attacking piece and the cells its ray crosses on the way to the target.
+  struct Attacker {
+    CellId from{kInvalidCell};  ///< the attacking piece's cell
+    std::vector<CellId> path;   ///< cells strictly between `from` and the target, in walk order
+  };
+
+  /// Every piece of `by` that attacks `target` - the same meaning as isAttacked, including
+  /// the hypothetical-enemy reading for an empty or own-occupied target - with the cells
+  /// each ray crosses. One entry per (piece, route): a rook on a torus that reaches the
+  /// target both ways round appears twice with the same `from`. Empty path for a single
+  /// step, a leap, an offset capture (captureAt / en passant) or when the route cannot be
+  /// re-traced. Not on any hot path: it copies the position and allocates. Ordered by
+  /// `from`, then route.
+  [[nodiscard]] std::vector<Attacker> attackers(const Position& p, CellId target,
+                                                Color by) const;
+
+  /// Pseudo-legal moves of the single piece on `from`, whichever side it belongs to,
+  /// appended to `out` (castling and compound moves excluded - they are side-level). No-op
+  /// on an empty cell. May contain duplicates on a non-box board.
+  void movesFrom(const Position& p, CellId from, MoveList& out) const;
+
   /// Is any royal piece of `c` attacked? False for variants with no royals.
   [[nodiscard]] bool inCheck(const Position& p, Color c) const;
 
@@ -76,6 +99,16 @@ class MoveGen {
 
  private:
   void generateForPiece(const Position& p, CellId from, MoveList& out) const;
+  /// The position isAttackedByForwardScan probes: `p` with a piece of opponent(by) of the
+  /// last declared type on `target` when the target is empty or holds a piece of `by`.
+  [[nodiscard]] Position probePosition(const Position& p, CellId target, Color by) const;
+  /// Every route along `atom` (of the piece standing on `from` in `probe`) whose walk lands
+  /// on `target`, as the cells strictly between. Mirrors generateAtom's walk, with no
+  /// emission. Empty result = no route found.
+  [[nodiscard]] std::vector<std::vector<CellId>> tracePaths(const Position& probe,
+                                                            CellId from,
+                                                            const MoveAtom& atom,
+                                                            CellId target) const;
   /// `orient` is the colour whose forward directions the piece uses: its own, or the
   /// other one's when it is flipped (Piece::orientation).
   void generateAtom(const Position& p, CellId from, const Coord& fromCoord, Color side,

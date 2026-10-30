@@ -337,6 +337,8 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().geometryFormSpeed = 2.5f;
     shell->settings().shapePieceCylinders = true;
     shell->settings().frameCap = 60;
+    shell->settings().peekMovesOnCtrl = false;
+    shell->settings().showAttackHints = false;
     REQUIRE(shell->startGame("klein").has_value());  // also records the last variant
     shell->applySettings();
     // The session takes the level from the setting, for its next move.
@@ -366,6 +368,8 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     // The shape view's piece style round-trips with the other geometry settings (M17.25).
     REQUIRE(shell->settings().shapePieceCylinders);
     REQUIRE(shell->settings().frameCap == 60);
+    REQUIRE_FALSE(shell->settings().peekMovesOnCtrl);
+    REQUIRE_FALSE(shell->settings().showAttackHints);
   }
 }
 

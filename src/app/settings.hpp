@@ -33,6 +33,11 @@ struct Settings {
 
   // ---- board --------------------------------------------------------------
   bool showLegalMoves{true};
+  /// Holding Ctrl over a piece shows its moves (either side; the opponent's ignore check).
+  bool peekMovesOnCtrl{true};
+  /// Holding Ctrl over an empty square, or a highlighted destination, shows what attacks
+  /// and defends it.
+  bool showAttackHints{true};
   bool showLastMove{true};
   bool showCheck{true};
   /// Draw cyan edges where the board is glued to itself. Off only for a player who

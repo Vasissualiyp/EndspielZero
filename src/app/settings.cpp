@@ -80,6 +80,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.frameCap = asInt(value, s.frameCap);
     else if (key == "show_legal_moves")
       s.showLegalMoves = asBool(value);
+    else if (key == "peek_moves_on_ctrl")
+      s.peekMovesOnCtrl = asBool(value);
+    else if (key == "show_attack_hints")
+      s.showAttackHints = asBool(value);
     else if (key == "show_last_move")
       s.showLastMove = asBool(value);
     else if (key == "show_check")
@@ -203,6 +207,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "vsync = " << boolText(vsync) << '\n';
   out << "frame_cap = " << frameCap << '\n';
   out << "show_legal_moves = " << boolText(showLegalMoves) << '\n';
+  out << "peek_moves_on_ctrl = " << boolText(peekMovesOnCtrl) << '\n';
+  out << "show_attack_hints = " << boolText(showAttackHints) << '\n';
   out << "show_last_move = " << boolText(showLastMove) << '\n';
   out << "show_check = " << boolText(showCheck) << '\n';
   out << "show_seams = " << boolText(showSeams) << '\n';

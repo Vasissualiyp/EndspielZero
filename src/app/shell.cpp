@@ -1349,6 +1349,7 @@ void Shell::applySettings() {
                                 : std::nullopt);
     session_->setEngineLevel(settings_.computerLevel);
     session_->setConfirmMoves(settings_.confirmMoves);
+    session_->setHintOptions({settings_.peekMovesOnCtrl, settings_.showAttackHints});
     session_->setCameraMode(settings_.cameraMode);
     session_->setFollowStrength(settings_.followStrength);
     session_->setTheme(view::themeFromName(settings_.theme));

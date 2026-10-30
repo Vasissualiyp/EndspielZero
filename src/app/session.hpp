@@ -26,6 +26,7 @@ namespace cb::app {
 enum class ActionKind : std::uint8_t {
   None,
   ClickCell,  ///< the user clicked a cell (already resolved from a pixel)
+  Hover,      ///< the pointer is over `cell` (kInvalidCell: off the board); `ctrl` held
   Undo,
   Reset,
   Orbit,          ///< dx, dy in radians
@@ -48,6 +49,14 @@ struct Action {
   std::string text;
   /// For SetScreenAxes: lay the sub-board grid down the screen instead of across it.
   bool gridVertical{false};
+  /// For Hover: whether Ctrl is held.
+  bool ctrl{false};
+};
+
+/// Which hover aids are on (M20).
+struct HintOptions {
+  bool ctrlPeek{true};
+  bool attackHints{true};
 };
 
 /// Everything a front end needs, with no front end in it.
@@ -260,6 +269,18 @@ class Session {
   Result<void> confirmMove();
   void cancelMove();
   void setConfirmMoves(bool on) noexcept { confirmMoves_ = on; }
+
+  // ---- hover aids (M20) ----------------------------------------------------------
+  /// Right-click: drop the selected piece, or the promotion / confirmation waiting on it.
+  /// True when something was cancelled.
+  bool cancelSelection();
+  void setHintOptions(const HintOptions& o);
+  /// The pointer is over `cell` (kInvalidCell: off the board). Cheap when unchanged.
+  void setHover(CellId cell, bool ctrl);
+  [[nodiscard]] CellId hoverCell() const noexcept { return hoverCell_; }
+  /// The cell under a pixel of the board rectangle, or kInvalidCell. Pure: no selection
+  /// change, no snapshot rebuild. Refuses (kInvalidCell) when boardLocked().
+  [[nodiscard]] CellId pickPixel(float px, float py, float width, float height) const;
   [[nodiscard]] bool confirmMoves() const noexcept { return confirmMoves_; }
 
   /// Replace the current position from FEN-N, discarding history. Used for setting up a
@@ -330,6 +351,7 @@ class Session {
   /// cannot show a depth axis because a top-down camera would stack the boards unseen.
   [[nodiscard]] view::ViewConfig effectiveViewConfig() const;
   [[nodiscard]] const Move* findMove(CellId from, CellId to) const;
+  void refreshHints();
   [[nodiscard]] std::vector<PieceTypeId> promotionChoicesFor(CellId from,
                                                              CellId to) const;
   Result<void> playChecked(const Move& m);
@@ -366,6 +388,12 @@ class Session {
   PendingPromotion pending_;
   PendingMove pendingMove_;
   bool confirmMoves_{false};
+  HintOptions hints_{};
+  CellId hoverCell_{kInvalidCell};
+  bool hoverCtrl_{false};
+  /// A square a piece just arrived on under the pointer: not hover-marked until the pointer
+  /// has left it.
+  CellId suppressedHover_{kInvalidCell};
   std::string promotionPreference_;
   /// The watching mode (M12.8): the file, the runner over it, and the dwell clock. The
   /// file is heap-held so the runner's reference to it cannot be invalidated by a move.

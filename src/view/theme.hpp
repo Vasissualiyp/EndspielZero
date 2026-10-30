@@ -73,6 +73,9 @@ struct Theme {
   // Semantic, deliberately separate from the accent.
   Rgba moss{Rgba::hex(0x8FB65C)};
   Rgba blood{Rgba::hex(0xD4483B)};
+  /// The Ctrl-peek destinations and the faint "defended by" hint; distinct from moss,
+  /// blood and the selection colour `ember`.
+  Rgba peek{Rgba::hex(0x9B7BEA)};
 
   // Difficulty, reserved for the library's entries: one hue per level, from the
   // reassuring green of a game anyone can sit down to, through amber and red, to the
@@ -165,6 +168,7 @@ struct Theme {
 
     t.moss = Rgba::hex(0x17937A);
     t.blood = Rgba::hex(0xD24A6A);
+    t.peek = Rgba::hex(0xE0A030);
 
     t.boardLight = Rgba::hex(0x98A4BE);
     t.boardDark = Rgba::hex(0x59637E);

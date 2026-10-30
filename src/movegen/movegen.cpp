@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "movegen/movegen.hpp"
 
+#include <algorithm>
+
 #include "diag/counters.hpp"
 
 namespace cb {
@@ -331,7 +333,7 @@ void MoveGen::generatePseudoLegalFor(const Position& p, Color side, bool include
   if (!v_->geom.isBox()) out.sortAndUnique();
 }
 
-bool MoveGen::isAttackedByForwardScan(const Position& p, CellId target, Color by) const {
+Position MoveGen::probePosition(const Position& p, CellId target, Color by) const {
   // A hypothetical enemy piece on the target, so that an empty cell can still be
   // "attacked" - castling safety depends on exactly that reading.
   Position probePos = p;
@@ -340,12 +342,116 @@ bool MoveGen::isAttackedByForwardScan(const Position& p, CellId target, Color by
     probePos.removeAt(target);
     probePos.place(target, static_cast<PieceTypeId>(v_->pieces.size() - 1), opponent(by));
   }
+  return probePos;
+}
+
+bool MoveGen::isAttackedByForwardScan(const Position& p, CellId target, Color by) const {
+  const Position probePos = probePosition(p, target, by);
   MoveList probe(v_->moveUpperBound());
   generatePseudoLegalFor(probePos, by, /*includeCastles=*/false, probe);
   for (const Move& m : probe) {
     if (m.captureCell == target) return true;
   }
   return false;
+}
+
+void MoveGen::movesFrom(const Position& p, CellId from, MoveList& out) const {
+  if (p.at(from).empty()) return;
+  generateForPiece(p, from, out);
+}
+
+std::vector<std::vector<CellId>> MoveGen::tracePaths(const Position& probe, CellId from,
+                                                     const MoveAtom& atom,
+                                                     CellId target) const {
+  std::vector<std::vector<CellId>> result;
+  const Piece piece = probe.at(from);
+  const std::size_t ci = static_cast<std::size_t>(piece.orientation());
+  const Coord fromCoord = v_->dims.toCoord(from);
+  const Region& gate = atom.fromRegion[ci];
+  if (gate.active() && !gate.contains(fromCoord)) return result;
+  if (atom.unmoved && piece.hasMoved()) return result;
+
+  const Geometry& geom = v_->geom;
+  for (std::uint32_t di = atom.dirBegin[ci]; di < atom.dirEnd[ci]; ++di) {
+    const Direction startDir = v_->dirTable[di];
+    Walker w = geom.start(from, startDir);
+    std::vector<CellId> cells;
+    bool hurdle = false;
+    const std::uint32_t steps = atom.maxK == kUnlimited ? rayCap_ : atom.maxK;
+    for (std::uint32_t k = 1; k <= steps; ++k) {
+      if (!geom.step(w)) break;
+      if (rayClosed(w, from, startDir)) break;
+      const CellId c = w.cell;
+      const bool blocked = v_->hasBlockingMarks && probe.blockedAt(c);
+      if (c == target && !blocked) {
+        const bool ok = atom.mode == MoveMode::Hop ? hurdle : k >= atom.minK;
+        if (ok) {
+          result.push_back(cells);
+          break;
+        }
+        if (atom.mode != MoveMode::Leap) break;
+      }
+      if (blocked) {
+        if (atom.mode == MoveMode::Leap) {
+          cells.push_back(c);
+          continue;
+        }
+        break;
+      }
+      const bool occupied = !probe.at(c).empty();
+      if (atom.mode == MoveMode::Hop) {
+        if (hurdle) break;  // the landing cell must be the very next one
+        cells.push_back(c);
+        if (occupied) hurdle = true;
+        continue;
+      }
+      if (atom.mode == MoveMode::Slide) {
+        if (occupied) break;
+        cells.push_back(c);
+      } else {
+        cells.push_back(c);  // a leaping rider passes over everything
+      }
+    }
+  }
+  return result;
+}
+
+std::vector<MoveGen::Attacker> MoveGen::attackers(const Position& p, CellId target,
+                                                  Color by) const {
+  const Position probe = probePosition(p, target, by);
+  MoveList list(v_->moveUpperBound());
+  generatePseudoLegalFor(probe, by, /*includeCastles=*/false, list);
+
+  std::vector<CellId> froms;
+  std::vector<CellId> landsOnTarget;
+  for (const Move& m : list) {
+    if (m.captureCell != target) continue;
+    froms.push_back(m.from);
+    if (m.to == target) landsOnTarget.push_back(m.from);
+  }
+  std::sort(froms.begin(), froms.end());
+  froms.erase(std::unique(froms.begin(), froms.end()), froms.end());
+
+  std::vector<Attacker> out;
+  for (const CellId from : froms) {
+    // An offset capture (checkers jump, en passant) never lands on the target.
+    if (std::find(landsOnTarget.begin(), landsOnTarget.end(), from) == landsOnTarget.end()) {
+      out.push_back(Attacker{from, {}});
+      continue;
+    }
+    std::vector<std::vector<CellId>> routes;
+    for (const MoveAtom& atom : v_->pieces[probe.at(from).type].atoms) {
+      if (atom.capture == CapturePolicy::Cannot || !atom.captureAt.empty()) continue;
+      for (auto& r : tracePaths(probe, from, atom, target)) {
+        if (std::find(routes.begin(), routes.end(), r) == routes.end()) {
+          routes.push_back(std::move(r));
+        }
+      }
+    }
+    if (routes.empty()) out.push_back(Attacker{from, {}});
+    for (auto& r : routes) out.push_back(Attacker{from, std::move(r)});
+  }
+  return out;
 }
 
 bool MoveGen::isAttacked(const Position& p, CellId target, Color by) const {

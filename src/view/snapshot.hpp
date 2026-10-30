@@ -37,6 +37,25 @@ class PositionView {
     return highlight_;
   }
   void setHighlighted(std::vector<CellId> cells) { highlight_ = std::move(cells); }
+  /// Hover aids (M20): where the piece under Ctrl can go, and the faint hint of what
+  /// attacks / defends the hovered square (the pieces, and the cells their rays cross).
+  /// All sorted and unique; empty when the aid is off or nothing is hovered.
+  [[nodiscard]] std::span<const CellId> peekMoves() const noexcept { return peek_; }
+  [[nodiscard]] std::span<const CellId> hintAttackers() const noexcept { return hintFrom_; }
+  [[nodiscard]] std::span<const CellId> hintPath() const noexcept { return hintPath_; }
+  [[nodiscard]] std::span<const CellId> hintDefenders() const noexcept { return defFrom_; }
+  [[nodiscard]] std::span<const CellId> hintDefendPath() const noexcept { return defPath_; }
+  /// The cell under the pointer, drawn a little brighter always; kInvalidCell if none.
+  [[nodiscard]] CellId hover() const noexcept { return hover_; }
+  void setHover(CellId c) noexcept { hover_ = c; }
+  void setPeekMoves(std::vector<CellId> c) { peek_ = std::move(c); }
+  void setHint(std::vector<CellId> attackers, std::vector<CellId> path,
+               std::vector<CellId> defenders, std::vector<CellId> defendPath) {
+    hintFrom_ = std::move(attackers);
+    hintPath_ = std::move(path);
+    defFrom_ = std::move(defenders);
+    defPath_ = std::move(defendPath);
+  }
   [[nodiscard]] CellId selected() const noexcept { return selected_; }
   void setSelected(CellId c) noexcept { selected_ = c; }
 
@@ -44,7 +63,9 @@ class PositionView {
   const VariantSpec* variant_{nullptr};
   std::vector<Piece> cells_;
   std::vector<CellId> highlight_;
+  std::vector<CellId> peek_, hintFrom_, hintPath_, defFrom_, defPath_;
   CellId selected_{kInvalidCell};
+  CellId hover_{kInvalidCell};
   Color side_{Color::White};
   CellId ep_{kInvalidCell};
   std::uint64_t hash_{0};

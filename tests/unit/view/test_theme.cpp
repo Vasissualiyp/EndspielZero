@@ -29,6 +29,18 @@ float contrast(const Rgba& a, const Rgba& b) {
 
 }  // namespace
 
+TEST_CASE("the peek colour is not confusable with the other board marks", "[unit][view]") {
+  for (const Theme& t : {Theme::manifold(), Theme::console()}) {
+    const auto far = [&](const Rgba& o) {
+      return std::abs(t.peek.r - o.r) + std::abs(t.peek.g - o.g) + std::abs(t.peek.b - o.b) >
+             0.4f;
+    };
+    CHECK(far(t.moss));
+    CHECK(far(t.blood));
+    CHECK(far(t.ember));
+  }
+}
+
 TEST_CASE("both piece colours read on both squares", "[unit][view]") {
   // This is the constraint that set the two board values, in both themes. A piece the
   // player cannot pick out of the square it stands on is not a style choice.

@@ -7,6 +7,7 @@
 
 #include "shaders.hpp"
 #ifdef CB_HAVE_IMGUI
+#include "view/piece_tint.hpp"
 #include "render/play_surface.hpp"  // the board as its shape (M17)
 #endif
 
@@ -44,6 +45,16 @@ static_assert(sizeof(BlurPush) == 32);
 // (about 0.27) so the contact shows around the base, and still inside the cell (half
 // extent 0.46). Lifted a hair above the board so it never z-fights the square it grounds.
 constexpr float kShadowScale = 0.68f;
+// Hover aids (M20). The hints are deliberately faint: under the 0.22 last-move tint.
+constexpr float kPeekTint = 0.55f;
+constexpr float kHintAttackerTint = 0.32f;
+constexpr float kHintPathTint = 0.18f;
+// The square under the pointer is always a little brighter.
+constexpr float kHoverBrighten = 0.14f;
+
+bool cellIn(std::span<const CellId> s, CellId c) {
+  return std::find(s.begin(), s.end(), c) != s.end();
+}
 constexpr float kShadowLift = 0.004f;
 
 void toFloat4(const view::Rgba& c, float out[4]) {
@@ -56,6 +67,21 @@ void toFloat4(const view::Rgba& c, float out[4]) {
 view::Rgba mix(const view::Rgba& a, const view::Rgba& b, float t) {
   return view::Rgba{a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t,
                     a.a + (b.a - a.a) * t};
+}
+
+view::Rgba withHover(view::Rgba fill, const view::PositionView& p, CellId c) {
+  if (c == kInvalidCell || c != p.hover()) return fill;
+  return mix(fill, view::Rgba{1.0f, 1.0f, 1.0f, fill.a}, kHoverBrighten);
+}
+
+/// Layer the hover hint over `fill`: attackers in blood, defenders in the peek colour.
+view::Rgba withHint(view::Rgba fill, const view::PositionView& p, CellId c,
+                    const view::Theme& t) {
+  if (cellIn(p.hintAttackers(), c)) return mix(fill, t.blood, kHintAttackerTint);
+  if (cellIn(p.hintPath(), c)) return mix(fill, t.blood, kHintPathTint);
+  if (cellIn(p.hintDefenders(), c)) return mix(fill, t.peek, kHintAttackerTint);
+  if (cellIn(p.hintDefendPath(), c)) return mix(fill, t.peek, kHintPathTint);
+  return fill;
 }
 
 Result<void> makeBuffer(const VulkanContext& ctx, VkDeviceSize size,
@@ -767,15 +793,21 @@ InstanceSet BoardRenderer::buildInstances(
       view::Rgba fill = (squareParity(co, kPlane, 2, options_.swapLayerColors) % 2 == 0)
                             ? theme_.boardDark
                             : theme_.boardLight;
-      if (cell == p.selected()) return theme_.ember;
+      if (cell == p.selected()) return withHover(theme_.ember, p, cell);
       if (options_.showLegalMoves && isHighlighted(cell)) {
-        return p.at(cell).empty() ? mix(fill, theme_.moss, 0.72f)
-                                  : mix(fill, theme_.blood, 0.62f);
+        return withHover(p.at(cell).empty() ? mix(fill, theme_.moss, 0.72f)
+                                            : mix(fill, theme_.blood, 0.62f),
+                         p, cell);
+      }
+      if (cellIn(p.peekMoves(), cell)) {
+        return withHover(
+            mix(fill, theme_.peek, p.at(cell).empty() ? kPeekTint : kPeekTint + 0.15f), p,
+            cell);
       }
       if (options_.showLastMove && (cell == lastFrom_ || cell == lastTo_)) {
-        return mix(fill, theme_.ember, 0.22f);
+        fill = mix(fill, theme_.ember, 0.22f);
       }
-      return fill;
+      return withHover(withHint(fill, p, cell, theme_), p, cell);
     };
 
     constexpr int kSide = PlaySurface::kSubdiv + 1;
@@ -928,10 +960,12 @@ InstanceSet BoardRenderer::buildInstances(
                                       const view::Vec3& normal,
                                       const std::array<float, 4>& quat, float fit,
                                       bool inCheck, float alpha = 1.0f,
-                                      float scaleMul = 1.0f) {
+                                      float scaleMul = 1.0f, CellId tintCell = kInvalidCell,
+                                      bool travelling = false) {
       view::Rgba pc =
           piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
       if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
+      pc = view::tintedPiece(pc, p, tintCell, travelling, theme_);
       Instance body{};
       // Standing on the square, not in it: the piece's foot is its own local z = 0. The
       // icon-faced puck (M17.25) is the exception - it is centred *on* the surface so it
@@ -1001,7 +1035,7 @@ InstanceSet BoardRenderer::buildInstances(
         continue;
       const float fit = std::min(std::sqrt(seat.stepU * seat.stepV), 1.0f);
       emitSurfacePiece(byShape, byShapeDisc, piece, seat.centre, seat.normal, seat.quat,
-                       fit, seat.cell == checkCell_);
+                       fit, seat.cell == checkCell_, 1.0f, 1.0f, seat.cell, false);
       emitSurfaceShadow(seat.centre, seat.normal, seat.quat, fit);
     }
     // The mover, part-way along the surface between its start and its end.
@@ -1011,7 +1045,8 @@ InstanceSet BoardRenderer::buildInstances(
         const SurfaceMoveSample s =
             surfaceMoveSample(anim->path(), surf, anim->progress());
         emitSurfacePiece(byShape, byShapeDisc, moving, s.position, s.normal, s.quat,
-                         s.fit, anim->travellingTo() == checkCell_);
+                         s.fit, anim->travellingTo() == checkCell_, 1.0f, 1.0f,
+                         kInvalidCell, true);
         emitSurfaceShadow(s.ground, s.normal, s.quat, s.fit);
       }
     }
@@ -1192,10 +1227,12 @@ InstanceSet BoardRenderer::buildInstances(
   // One piece, wherever it happens to be this frame. A travelling piece is the same
   // call with a different position, which is what keeps the animation from being a
   // second, subtly different way of drawing a piece.
-  const auto emitPiece = [&](Piece piece, float x, float y, float z, bool inCheck) {
+  const auto emitPiece = [&](Piece piece, float x, float y, float z, bool inCheck,
+                             CellId tintCell, bool travelling) {
     view::Rgba pieceColor =
         piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
     if (options_.showCheck && inCheck) pieceColor = mix(pieceColor, theme_.blood, 0.65f);
+    pieceColor = view::tintedPiece(pieceColor, p, tintCell, travelling, theme_);
 
     if (options_.flat) {
       // Seen from straight above, a model is a blob, so the flat board's pieces are
@@ -1246,10 +1283,16 @@ InstanceSet BoardRenderer::buildInstances(
       // empty one, so a capture never comes as a surprise.
       fill = p.at(pl.cell).empty() ? mix(fill, theme_.moss, 0.72f)
                                    : mix(fill, theme_.blood, 0.62f);
-    } else if (options_.showLastMove && (pl.cell == lastFrom_ || pl.cell == lastTo_)) {
-      fill = mix(fill, theme_.ember, 0.22f);
+    } else if (cellIn(p.peekMoves(), pl.cell)) {
+      fill = mix(fill, theme_.peek,
+                 p.at(pl.cell).empty() ? kPeekTint : kPeekTint + 0.15f);
+    } else {
+      if (options_.showLastMove && (pl.cell == lastFrom_ || pl.cell == lastTo_)) {
+        fill = mix(fill, theme_.ember, 0.22f);
+      }
+      fill = withHint(fill, p, pl.cell, theme_);
     }
-    toFloat4(fill, cell.color);
+    toFloat4(withHover(fill, p, pl.cell), cell.color);
 
     byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(cell);
 
@@ -1279,7 +1322,7 @@ InstanceSet BoardRenderer::buildInstances(
     // arrived; skipping it here is what stops it being drawn twice.
     if (anim != nullptr && anim->active() && pl.cell == anim->travellingTo()) continue;
 
-    emitPiece(piece, pl.x, pl.y, pl.z, pl.cell == checkCell_);
+    emitPiece(piece, pl.x, pl.y, pl.z, pl.cell == checkCell_, pl.cell, false);
     if (!options_.flat) emitShadow(pl.x, pl.y, pl.z);
   }
 
@@ -1577,7 +1620,7 @@ InstanceSet BoardRenderer::buildInstances(
     const view::MoveAnimation::Sample at = anim->sample();
     const Piece moving = p.at(anim->travellingTo());
     if (at.moving && !moving.empty()) {
-      emitPiece(moving, at.x, at.y, at.z + at.lift, false);
+      emitPiece(moving, at.x, at.y, at.z + at.lift, false, kInvalidCell, true);
       // The shadow stays on the board under a piece that is lifting or leaping over a
       // seam; following it up would turn the contact into a lie (M18.2).
       if (!options_.flat) emitShadow(at.x, at.y, at.z);
