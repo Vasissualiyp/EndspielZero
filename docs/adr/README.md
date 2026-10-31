@@ -30,3 +30,4 @@ Template: [`template.md`](template.md).
 | [0019](0019-the-play-surface-is-posed-not-only-shaped.md) | A square on the play surface is a patch of it, and the board is posed | Accepted |
 | [0020](0020-a-directional-piece-turns-round-at-a-reversing-seam.md) | A directional piece turns round at a seam that reverses its forward | Accepted |
 | [0021](0021-theme-materials-are-presentation-only.md) | Theme materials are presentation-only per-instance shading | Accepted |
+| [0022](0022-explicit-presentation-time-and-holograms.md) | Explicit presentation time and opaque holographic pieces | Accepted |

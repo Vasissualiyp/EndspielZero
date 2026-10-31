@@ -70,6 +70,14 @@ if(TARGET endspielzero_gui)
     set_tests_properties(gui-manifold-${screen} PROPERTIES LABELS "render;gui"
       TIMEOUT 120 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   endforeach()
+  add_test(NAME gui-visual-time
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR}
+            -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_visual_time.cmake
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-visual-time PROPERTIES LABELS "render;gui" TIMEOUT 180
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   # The play board as its own shape (M17): a glued variant drawn on its surface, still
   # validation-clean and still a picture. `standard --geometry` is a no-op, checked in the
   # scene tests rather than here because it is about geometry, not about the window.

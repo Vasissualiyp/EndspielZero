@@ -2,13 +2,15 @@
 #include "render/board_renderer.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <map>
 
 #include "shaders.hpp"
 #ifdef CB_HAVE_IMGUI
-#include "view/piece_tint.hpp"
 #include "render/play_surface.hpp"  // the board as its shape (M17)
+#include "view/piece_tint.hpp"
 #endif
 
 namespace cb::render {
@@ -24,8 +26,10 @@ struct PushConstants {
   float eyePos[4]{0.0f, 0.0f, 0.0f, 1.0f};
   /// Theme-controlled cool rim and glow strength; unused by matte, metal and wood.
   float material[4]{0.21f, 0.88f, 1.0f, 1.35f};
+  float visual[4]{};
 };
-static_assert(sizeof(PushConstants) == 112);
+static_assert(sizeof(PushConstants) == 128);
+static_assert(offsetof(PushConstants, visual) == 112);
 
 struct BackdropPush {
   float inner[4]{};
@@ -73,7 +77,7 @@ float shaderMaterial(view::Material m, Cut cut, float variation) {
     return (cut == Cut::Plank ? 2.0f : 6.0f) + std::clamp(variation, 0.0f, 0.99f);
   if (m == view::Material::Metal) return 1.0f;
   if (m == view::Material::Glass) return 3.0f;
-  if (m == view::Material::Crystal) return 4.0f;
+  if (m == view::Material::Hologram) return 4.0f;
   if (m == view::Material::Glow) return 5.0f;
   return 0.0f;
 }
@@ -107,8 +111,8 @@ view::Rgba mix(const view::Rgba& a, const view::Rgba& b, float t) {
                     a.a + (b.a - a.a) * t};
 }
 
-/// The slab a board stands on: `halfSpanX/Y` are measured to the slab's edge, its top face
-/// `depth` under `cellBottomZ`. One construction for the ordinary board and for the
+/// The slab a board stands on: `halfSpanX/Y` are measured to the slab's edge, its top
+/// face `depth` under `cellBottomZ`. One construction for the ordinary board and for the
 /// surface's flat sheet, so the two draw the same table (M21).
 Instance plinthInstance(const view::Vec3& centre, float halfSpanX, float halfSpanY,
                         float cellBottomZ, float depth, bool present,
@@ -191,6 +195,10 @@ Result<VkShaderModule> makeShader(const VulkanContext& ctx,
 
 view::Vec3 BoardRenderer::cellHalfExtent() {
   return view::Vec3{0.46f, 0.46f, 0.055f};
+}
+
+void BoardRenderer::setVisualTime(double seconds) noexcept {
+  visualTime_ = std::isfinite(seconds) && seconds >= 0 ? seconds : 0;
 }
 
 Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx,
@@ -726,7 +734,8 @@ Result<void> BoardRenderer::ensureSurfaceCapacity(std::uint32_t frame,
 namespace {
 
 /// A fingerprint of the bodies and icons a variant's pieces carry; zero for none. Not a
-/// security hash - a change detector, so a body edited in the designer reaches the screen.
+/// security hash - a change detector, so a body edited in the designer reaches the
+/// screen.
 std::uint64_t bodiesSignature(const VariantSpec& v) {
   std::uint64_t h = 1469598103934665603ull;
   bool any = false;
@@ -789,9 +798,11 @@ Result<void> BoardRenderer::syncBodies(const VariantSpec& v) {
   }
   meshes_ = MeshLibrary::build(custom);
   vkDeviceWaitIdle(ctx_->device());
-  if (vertexBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(ctx_->device(), vertexBuffer_, nullptr);
+  if (vertexBuffer_ != VK_NULL_HANDLE)
+    vkDestroyBuffer(ctx_->device(), vertexBuffer_, nullptr);
   if (vertexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), vertexMem_, nullptr);
-  if (indexBuffer_ != VK_NULL_HANDLE) vkDestroyBuffer(ctx_->device(), indexBuffer_, nullptr);
+  if (indexBuffer_ != VK_NULL_HANDLE)
+    vkDestroyBuffer(ctx_->device(), indexBuffer_, nullptr);
   if (indexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), indexMem_, nullptr);
   vertexBuffer_ = indexBuffer_ = VK_NULL_HANDLE;
   vertexMem_ = indexMem_ = VK_NULL_HANDLE;
@@ -839,8 +850,8 @@ InstanceSet BoardRenderer::buildInstances(
     std::vector<float> height(v.pieces.size(), 1.0f);
     for (std::size_t i = 1; i < v.pieces.size(); ++i) {
       shape[i] = useCustom && i < customSlot_.size() && customSlot_[i] >= 0
-                   ? customShape(static_cast<std::size_t>(customSlot_[i]))
-                   : archetypeFor(v.pieces[i]);
+                     ? customShape(static_cast<std::size_t>(customSlot_[i]))
+                     : archetypeFor(v.pieces[i]);
       height[i] = heightFor(v.pieces[i]);
     }
     const auto highlighted = p.highlighted();
@@ -908,7 +919,7 @@ InstanceSet BoardRenderer::buildInstances(
       // as `1 - (1-a)^4`, much darker than the plain torus the shape has just been. Give
       // each level the alpha that composites to `a` when they coincide, and ease back to
       // `a` each as they spread into their own nested shells.
-       float ghostAlpha = surfaceOpacity(theme_, options_);
+      float ghostAlpha = surfaceOpacity(theme_, options_);
       if (surf.stacked() && v.dims.dims() >= 3 && ghostAlpha < 0.99f) {
         const float levels = static_cast<float>(std::max<int>(1, v.dims.extent(2)));
         const float single = 1.0f - std::pow(1.0f - ghostAlpha, 1.0f / levels);
@@ -1017,70 +1028,69 @@ InstanceSet BoardRenderer::buildInstances(
       }
     }
 
-    std::vector<std::vector<Instance>> byShape(
-        kShapeSlots);
+    std::vector<std::vector<Instance>> byShape(kShapeSlots);
     // The token discs (M17.26) live in their own groups and are concatenated ahead of the
     // icons in each archetype's batch, so `record` draws the first `discCounts[s]` from
     // the disc mesh and the rest from the icon mesh.
-    std::vector<std::vector<Instance>> byShapeDisc(
-        kShapeSlots);
-    const auto emitSurfacePiece = [&](std::vector<std::vector<Instance>>& into,
-                                      std::vector<std::vector<Instance>>& discInto,
-                                      const Piece& piece, const view::Vec3& centre,
-                                      const view::Vec3& normal,
-                                      const std::array<float, 4>& quat, float fit,
-                                      bool inCheck, float alpha = 1.0f,
-                                      float scaleMul = 1.0f, CellId tintCell = kInvalidCell,
-                                      bool travelling = false) {
-      view::Rgba pc =
-          piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
-      if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
-      pc = view::tintedPiece(pc, p, tintCell, travelling, theme_);
-      Instance body{};
-      // Standing on the square, not in it: the piece's foot is its own local z = 0. The
-      // icon-faced puck (M17.25) is the exception - it is centred *on* the surface so it
-      // protrudes on both sides, which is what lets a flipped seat show the same icon.
-      const float lift = options_.shapePieceCylinders ? 0.0f : kHalf;
-      body.center[0] = centre.x + normal.x * lift;
-      body.center[1] = centre.y + normal.y * lift;
-      body.center[2] = centre.z + normal.z * lift;
-      const float hgt = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
-      // Never bigger than the flat board's piece, and smaller where the square is. The
-      // measure is the square's mean side rather than its shorter one: an embedding
-      // squeezes one axis and stretches the other - a Moebius square is four times longer
-      // than it is wide - and a piece sized to the short side there is a speck.
-      body.scale[0] = 0.8f * fit * scaleMul;
-      body.scale[1] = 0.8f * fit * scaleMul;
-      body.scale[2] = 0.8f * fit * hgt * scaleMul;
-      body.quat[0] = quat[0];
-      body.quat[1] = quat[1];
-      body.quat[2] = quat[2];
-      body.quat[3] = quat[3];
-      toFloat4(pc, body.color);
-      body.color[3] = alpha;
-      body.material = pieceMaterial(theme_, piece);
-      const std::size_t sh = static_cast<std::size_t>(shape[piece.type]);
-      // The disc is the token, in the theme's one shared furniture colour, read live so a
-      // palette switch repaints it the same frame it repaints everything else. It carries
-      // no check tint - only the figure does, exactly as in the flat view - but it does
-      // carry GHOST/fade alpha, so a ghosted or captured piece fades as one object, disc
-      // and figure together.
-      if (options_.shapePieceCylinders) {
-        Instance disc =
-            body;  // same centre/scale/quat, so it sits exactly under the icon
-        toFloat4(theme_.pieceToken, disc.color);
-        disc.color[3] = alpha;
-        discInto[sh].push_back(disc);
-        body.material = 0.0f;  // the icon decal is ink, not a second wooden surface
-      }
-      into[sh].push_back(body);
-    };
+    std::vector<std::vector<Instance>> byShapeDisc(kShapeSlots);
+    const auto emitSurfacePiece =
+        [&](std::vector<std::vector<Instance>>& into,
+            std::vector<std::vector<Instance>>& discInto, const Piece& piece,
+            const view::Vec3& centre, const view::Vec3& normal,
+            const std::array<float, 4>& quat, float fit, bool inCheck, float alpha = 1.0f,
+            float scaleMul = 1.0f, CellId tintCell = kInvalidCell,
+            bool travelling = false) {
+          view::Rgba pc =
+              piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
+          if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
+          pc = view::tintedPiece(pc, p, tintCell, travelling, theme_);
+          Instance body{};
+          // Standing on the square, not in it: the piece's foot is its own local z = 0.
+          // The icon-faced puck (M17.25) is the exception - it is centred *on* the
+          // surface so it protrudes on both sides, which is what lets a flipped seat show
+          // the same icon.
+          const float lift = options_.shapePieceCylinders ? 0.0f : kHalf;
+          body.center[0] = centre.x + normal.x * lift;
+          body.center[1] = centre.y + normal.y * lift;
+          body.center[2] = centre.z + normal.z * lift;
+          const float hgt =
+              1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
+          // Never bigger than the flat board's piece, and smaller where the square is.
+          // The measure is the square's mean side rather than its shorter one: an
+          // embedding squeezes one axis and stretches the other - a Moebius square is
+          // four times longer than it is wide - and a piece sized to the short side there
+          // is a speck.
+          body.scale[0] = 0.8f * fit * scaleMul;
+          body.scale[1] = 0.8f * fit * scaleMul;
+          body.scale[2] = 0.8f * fit * hgt * scaleMul;
+          body.quat[0] = quat[0];
+          body.quat[1] = quat[1];
+          body.quat[2] = quat[2];
+          body.quat[3] = quat[3];
+          toFloat4(pc, body.color);
+          body.color[3] = alpha;
+          body.material = pieceMaterial(theme_, piece);
+          const std::size_t sh = static_cast<std::size_t>(shape[piece.type]);
+          // The disc is the token, in the theme's one shared furniture colour, read live
+          // so a palette switch repaints it the same frame it repaints everything else.
+          // It carries no check tint - only the figure does, exactly as in the flat view
+          // - but it does carry GHOST/fade alpha, so a ghosted or captured piece fades as
+          // one object, disc and figure together.
+          if (options_.shapePieceCylinders) {
+            Instance disc =
+                body;  // same centre/scale/quat, so it sits exactly under the icon
+            toFloat4(theme_.pieceToken, disc.color);
+            disc.color[3] = alpha;
+            discInto[sh].push_back(disc);
+            body.material = 0.0f;  // the icon decal is ink, not a second wooden surface
+          }
+          into[sh].push_back(body);
+        };
     // M18.2: a soft decal under each occupied seat, lying on the surface and turned to
     // the seat's own frame, exactly where the piece stands. The travelling piece's shadow
     // is pinned to the surface under it - `ground`, never the hovered `position` - so the
     // contact stays true while the piece rides above the board.
-    std::vector<std::vector<Instance>> byShapeShadow(
-        kShapeSlots);
+    std::vector<std::vector<Instance>> byShapeShadow(kShapeSlots);
     const auto emitSurfaceShadow = [&](const view::Vec3& centre, const view::Vec3& normal,
                                        const std::array<float, 4>& quat, float fit) {
       Instance sh{};
@@ -1125,16 +1135,15 @@ InstanceSet BoardRenderer::buildInstances(
 
     // M18.1: the same capture flourish as the flat board, on its own square of the
     // surface - the captured piece shrinking and fading, and a blood flash at its foot.
-    std::vector<std::vector<Instance>> byShapeFlourish(
-        kShapeSlots);
-    std::vector<std::vector<Instance>> byShapeFlourishDisc(
-        kShapeSlots);
+    std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
+    std::vector<std::vector<Instance>> byShapeFlourishDisc(kShapeSlots);
     // The slab the board stands on fades out while the flat sheet starts to curl, instead
-    // of vanishing at the cut from the ordinary board (M21). It is the ordinary board's own
-    // plinth, laid under the sheet as it lies flat; a table, not part of the board, so it
-    // does not follow the curl.
+    // of vanishing at the cut from the ordinary board (M21). It is the ordinary board's
+    // own plinth, laid under the sheet as it lies flat; a table, not part of the board,
+    // so it does not follow the curl.
     if (!surf.stacked()) {
-      const float wp = plinthOpacity(app::overtureSignature(v).surface, options_.surfaceFormed);
+      const float wp =
+          plinthOpacity(app::overtureSignature(v).surface, options_.surfaceFormed);
       if (wp > 0.0f && !surf.seats().empty()) {
         SurfacePose flatPose = pose;
         flatPose.formed = 0.0f;
@@ -1155,10 +1164,10 @@ InstanceSet BoardRenderer::buildInstances(
         const float pitchU = sumU / n;
         const float pitchV = sumV / n;
         mean = mean * (1.0f / n);
-        Instance plinth = plinthInstance(
-            mean, (maxX - minX) * 0.5f + 0.78f * pitchU, (maxY - minY) * 0.5f + 0.78f * pitchV,
-            mean.z - PlaySurface::kThickness * 0.5f, 0.13f * wp, false, cellHalfExtent(),
-            theme_);
+        Instance plinth = plinthInstance(mean, (maxX - minX) * 0.5f + 0.78f * pitchU,
+                                         (maxY - minY) * 0.5f + 0.78f * pitchV,
+                                         mean.z - PlaySurface::kThickness * 0.5f,
+                                         0.13f * wp, false, cellHalfExtent(), theme_);
         if (wp >= 1.0f) {
           byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinth);
         } else {
@@ -1318,8 +1327,7 @@ InstanceSet BoardRenderer::buildInstances(
   // M18.2: the contact shadows, kept apart from the opaque batches because they blend.
   // The flat (`options_.flat`) board draws its pieces in the interface, so the renderer
   // has no shadow to ground and emits none - the same cut the M18.1 flourish takes.
-  std::vector<std::vector<Instance>> byShapeShadow(
-      kShapeSlots);
+  std::vector<std::vector<Instance>> byShapeShadow(kShapeSlots);
   const view::Vec3 half = cellHalfExtent();
 
   // One soft decal on the cell under a piece, at the cell's own surface point.
@@ -1396,8 +1404,8 @@ InstanceSet BoardRenderer::buildInstances(
       fill = p.at(pl.cell).empty() ? mix(fill, theme_.moss, 0.72f)
                                    : mix(fill, theme_.blood, 0.62f);
     } else if (cellIn(p.peekMoves(), pl.cell)) {
-      fill = mix(fill, theme_.peek,
-                 p.at(pl.cell).empty() ? kPeekTint : kPeekTint + 0.15f);
+      fill =
+          mix(fill, theme_.peek, p.at(pl.cell).empty() ? kPeekTint : kPeekTint + 0.15f);
     } else {
       if (options_.showLastMove && (pl.cell == lastFrom_ || pl.cell == lastTo_)) {
         fill = mix(fill, theme_.ember, 0.22f);
@@ -1405,9 +1413,9 @@ InstanceSet BoardRenderer::buildInstances(
       fill = withHint(fill, p, pl.cell, theme_);
     }
     toFloat4(withHover(fill, p, pl.cell), cell.color);
-    cell.material = shaderMaterial(theme_.materials.cells, Cut::Plank,
-                                   0.5f * static_cast<float>(parity & 1) +
-                                       0.49f * hash01(pl.cell));
+    cell.material =
+        shaderMaterial(theme_.materials.cells, Cut::Plank,
+                       0.5f * static_cast<float>(parity & 1) + 0.49f * hash01(pl.cell));
 
     byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(cell);
 
@@ -1426,12 +1434,11 @@ InstanceSet BoardRenderer::buildInstances(
         rail.scale[2] = 0.055f / half.z;
         toFloat4(f.color, rail.color);
         // A mirror is drawn as metal; a glued portal keeps the matte seam colour.
-        rail.material = shaderMaterial(f.kind == view::SeamKind::Mirror
-                                            ? view::Material::Metal
-                                            : theme_.materials.cells == view::Material::Glass
-                                                  ? view::Material::Glow
-                                                  : view::Material::Matte,
-                                        Cut::Plank, 0.0f);
+        rail.material = shaderMaterial(
+            f.kind == view::SeamKind::Mirror                  ? view::Material::Metal
+            : theme_.materials.cells == view::Material::Glass ? view::Material::Glow
+                                                              : view::Material::Matte,
+            Cut::Plank, 0.0f);
         byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
       }
     }
@@ -1772,8 +1779,7 @@ InstanceSet BoardRenderer::buildInstances(
   // and fades out as a pure function of `t`, so a clip stays reproducible, and a blood
   // flash marks the square at the moment the pieces meet. Both are drawn blended further
   // down, which is why their alpha is the fade rather than a number nothing reads.
-  std::vector<std::vector<Instance>> byShapeFlourish(
-      kShapeSlots);
+  std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
   if (anim != nullptr && anim->active() && anim->captures() && !options_.flat) {
     const float t = anim->progress();
     const float fade = view::captureFade(t);
@@ -1944,7 +1950,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                               : BoardRect{0, 0, static_cast<float>(target.width()),
                                           static_cast<float>(target.height())};
   PushConstants push{};
-  push.viewProj = camera.withNearClip(options_.nearClip).viewProj(board.width / board.height);
+  push.viewProj =
+      camera.withNearClip(options_.nearClip).viewProj(board.width / board.height);
   const view::Vec3 eye = camera.eye();
   push.eyePos[0] = eye.x;
   push.eyePos[1] = eye.y;
@@ -1952,6 +1959,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   push.material[0] = theme_.ember.r;
   push.material[1] = theme_.ember.g;
   push.material[2] = theme_.ember.b;
+  push.visual[0] = static_cast<float>(std::fmod(visualTime_, 120.0));
 
   {
     const auto barrier = [&](VkImage image, VkImageAspectFlags aspectMask,
@@ -2102,7 +2110,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       if (!set.surfaceIndices.empty()) {
         vkCmdBindPipeline(
             cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-             surfaceOpacity(theme_, options_) < 0.99f ? surfaceBlendPipeline_ : pipeline_);
+            surfaceOpacity(theme_, options_) < 0.99f ? surfaceBlendPipeline_ : pipeline_);
         vkCmdBindVertexBuffers(cmd, 0, 1, &surfaceVertexBuffer_[frame], &zero);
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
@@ -2313,6 +2321,7 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(ctx_, o.ctx_);
   std::swap(colorFormat_, o.colorFormat_);
   std::swap(theme_, o.theme_);
+  std::swap(visualTime_, o.visualTime_);
   std::swap(meshes_, o.meshes_);
   std::swap(lastFrom_, o.lastFrom_);
   std::swap(lastTo_, o.lastTo_);

@@ -55,7 +55,8 @@ struct Instance {
   /// buffer (M17).
   float quat[4]{0.0f, 0.0f, 0.0f, 1.0f};
   /// Shader material: integer part selects matte (0), metal (1), plank wood (2),
-  /// or turned wood (6); ids 3-5 are reserved. Fractional part varies wood grain.
+  /// glass (3), hologram (4), glow (5), or turned wood (6).
+  /// Fractional part varies wood grain.
   float material{0};
 };
 static_assert(sizeof(Instance) == 84);
@@ -169,8 +170,7 @@ struct InstanceSet {
   std::array<Batch, kShapeSlots> flourishBatches{};
   /// M17.26: the flourish's token discs, ahead of its icon decals in the same batch -
   /// `flourishBatches[s]`'s first `flourishDiscCounts[s]` draw from `discRanges[s]`.
-  std::array<std::uint32_t, kShapeSlots>
-      flourishDiscCounts{};
+  std::array<std::uint32_t, kShapeSlots> flourishDiscCounts{};
 
   /// The contact shadows (M18.2): one soft, dark decal under each occupied cell, flat or
   /// on a shape. Kept apart from `instances` for the same reason as the flourish - their
@@ -213,6 +213,8 @@ class BoardRenderer {
 
   [[nodiscard]] const view::Theme& theme() const noexcept { return theme_; }
   void setTheme(const view::Theme& t) noexcept { theme_ = t; }
+  /// Explicit presentation seconds; invalid or negative input resets to zero.
+  void setVisualTime(double seconds) noexcept;
   /// How far out of focus the board is, 0 to 1.
   ///
   /// Pause steps the camera back and throws the board out of focus so the menu in front
@@ -297,6 +299,7 @@ class BoardRenderer {
   VkFormat colorFormat_{OffscreenTarget::kColorFormat};
   view::Theme theme_{view::Theme::manifold()};
   BoardOptions options_{};
+  double visualTime_{0};
   MeshLibrary meshes_;
   /// Which custom slot each piece type of the synced variant draws from (-1 for none),
   /// and the signature of the bodies that built them.

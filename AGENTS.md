@@ -36,6 +36,10 @@ current conversation beats everything here.
 
 If neither role matches what you are being asked to do right now, follow the user.
 
+For Codex, the requested workflow is: have GPT-6 Astra at medium effort think through
+design decisions and write the spec for each new part; implement it, test extensively
+and review the real artifact; commit that slice before proceeding to the next feature.
+
 ## When there is no spec yet **[opencode, read this before a bare "fix X" / "add Y"]**
 
 Everything above assumes a spec already exists. Claude's `docs/plan/` entries are written
@@ -153,6 +157,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
                                  # --dwell S, --fps N, --play-at S, --width W --height H
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --theme manifold # dark glass alternative
+./build/dev/src/gui/endspielzero_gui standard --theme manifold --visual-time 0.75 --shot holo.ppm
+                                 # explicit presentation seconds for hologram capture
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --matte          # material-free A/B capture
 ./build/dev/src/gui/endspielzero_gui standard --screen welcome --ui-scale 3 --shot o.ppm # scaling review
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen designer --dims 4
@@ -264,7 +270,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
 | UI panel treatment and action labels | `Theme::panelStyle`, `monoLabels` and `interfaceRule`; `widgets::panelCorners` in `src/render/ui_widgets.cpp` and `Ui::actionFont` in `src/render/ui.cpp`. Settings → Looks → Theme selects the whole look, including the backdrop | |
 | Ambient background (drifting shapes or a perspective grid floor) | `Theme::backdrop` in `src/view/theme.hpp`, dispatched by `DepthField::draw` in `src/render/deco.cpp`; the same field draws behind menus and behind the board | |
-| A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021 | |
+| A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021 and ADR-0022; `--visual-time` samples hologram light | |
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
@@ -364,7 +370,7 @@ These are the ones that have actually cost time here, not hypotheticals.
   leaves out is derived from how the piece moves. An unknown name falls back rather
   than failing - a variant is never unplayable for want of a model.
 - The palette is `view::Theme`, one struct, and there are two of them: `console()` is
-  the shipped candlelit wooden set and `manifold()` the dark glass/crystal alternative.
+  the shipped candlelit wooden set and `manifold()` the dark glass/hologram alternative.
   Colours live in the theme; shader material branches live in the renderer.
   `tests/unit/view/test_theme.cpp` pins the load-bearing part: both piece colours must
   read on both squares. That test found the old board pair sitting at 1.2:1.

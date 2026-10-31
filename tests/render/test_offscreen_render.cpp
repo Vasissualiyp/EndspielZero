@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <utility>
@@ -79,7 +80,7 @@ struct Frame {
 };
 
 Frame renderVariant(const std::string& name, std::uint32_t w = 512, std::uint32_t h = 384,
-                    bool highlight = false) {
+                    bool highlight = false, double visualTime = 0) {
   const VariantSpec& v = *new VariantSpec(test::loadVariant(name));  // outlives the frame
   Position p = Position::startPosition(v);
   view::PositionView snap = view::PositionView::capture(p);
@@ -93,6 +94,7 @@ Frame renderVariant(const std::string& name, std::uint32_t w = 512, std::uint32_
   auto renderer = BoardRenderer::create(gpu().ctx);
   REQUIRE(renderer.has_value());
 
+  renderer->setVisualTime(visualTime);
   const view::ViewConfig cfg = view::ViewConfig::forBoard(v.dims);
   const view::OrbitCamera cam =
       view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
@@ -252,7 +254,7 @@ TEST_CASE("wood is confined to board and pieces and never moves with a piece",
   }
 }
 
-TEST_CASE("manifold dispatches glass, crystal and portal glow", "[render]") {
+TEST_CASE("manifold dispatches glass, holograms and portal glow", "[render]") {
   const VariantSpec v = test::loadVariant("torus");
   const Position p = Position::startPosition(v);
   const auto snap = view::PositionView::capture(p);
@@ -303,6 +305,172 @@ TEST_CASE("manifold shape glass reveals the far side by default", "[render]") {
   CHECK(set.surfaceVertices.front().color[3] < 0.8f);
 }
 #endif
+
+TEST_CASE("hologram scan descends along the piece in upright and rotated poses",
+          "[render][gpu][hologram]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  auto target = OffscreenTarget::create(gpu().ctx, 512, 512);
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(target.has_value());
+  REQUIRE(renderer.has_value());
+  renderer->setTheme(view::Theme::manifold());
+  InstanceSet set;
+  Instance body;
+  body.scale[0] = body.scale[1] = 1;
+  body.scale[2] = 2;
+  body.color[0] = 0.32f;
+  body.color[1] = 0.48f;
+  body.color[2] = 0.66f;
+  body.color[3] = 1;
+  body.material = 4;
+  set.instances.push_back(body);
+  set.batches[static_cast<std::size_t>(Archetype::Tower)] = {0, 1};
+  for (bool rotated : {false, true}) {
+    const std::string pose = rotated ? "sideways" : "upright";
+    INFO(pose);
+    set.instances[0].quat[1] = rotated ? std::sqrt(0.5f) : 0;
+    set.instances[0].quat[3] = rotated ? std::sqrt(0.5f) : 1;
+    view::OrbitCamera cam;
+    cam.target = rotated ? view::Vec3{0.86f, 0, 0} : view::Vec3{0, 0, 0.86f};
+    cam.distance = 3.2f;
+    cam.yaw = cam.pitch = 0;
+    cam.orthographic = true;
+    const auto foot = cam.project({0, 0, 0}, 1, 512, 512);
+    const auto crown = cam.project(
+        rotated ? view::Vec3{1.72f, 0, 0} : view::Vec3{0, 0, 1.72f}, 1, 512, 512);
+    REQUIRE(foot.visible);
+    REQUIRE(crown.visible);
+    const float dx = crown.x - foot.x, dy = crown.y - foot.y;
+    const float span = dx * dx + dy * dy;
+    REQUIRE(span > 200 * 200);
+    if (rotated) {
+      CHECK(std::abs(dx) > 200);
+      CHECK(std::abs(dy) < 2);
+    }
+    const auto shot = [&](double seconds) {
+      renderer->setVisualTime(seconds);
+      REQUIRE(renderer->render(*target, set, cam).has_value());
+      auto pixels = target->readPixels();
+      REQUIRE(pixels.has_value());
+      REQUIRE(gpu().ctx.takeValidationMessages().empty());
+      return Image{512, 512, std::move(*pixels)};
+    };
+    (void)gpu().ctx.takeValidationMessages();
+    const auto baseline = shot(0);
+    const auto upper = shot(0.9);
+    const auto lower = shot(2.8);
+    CHECK(shot(0.9).rgba == upper.rgba);
+    CHECK(shot(4).rgba == baseline.rgba);
+    CHECK(shot(120.9).rgba == upper.rgba);
+    CHECK(shot(-1).rgba == baseline.rgba);
+    CHECK(shot(std::numeric_limits<double>::quiet_NaN()).rgba == baseline.rgba);
+    CHECK(shot(std::numeric_limits<double>::infinity()).rgba == baseline.rgba);
+    REQUIRE(writePpm(baseline, capturePath("hologram-" + pose + "-rest")).has_value());
+    REQUIRE(writePpm(upper, capturePath("hologram-" + pose + "-upper")).has_value());
+    REQUIRE(writePpm(lower, capturePath("hologram-" + pose + "-lower")).has_value());
+    struct Energy {
+      double total{0}, height{0}, high{0}, low{0};
+      int pixels{0};
+    };
+    const auto measure = [&](const Image& img) {
+      Energy e;
+      const auto corner = baseline.at(0, 0);
+      const int bg = corner.r + corner.g + corner.b;
+      for (std::uint32_t y = 1; y < 511; ++y) {
+        for (std::uint32_t x = 1; x < 511; ++x) {
+          const float px = static_cast<float>(x) + 0.5f - foot.x;
+          const float py = static_cast<float>(y) + 0.5f - foot.y;
+          const float u = (px * dx + py * dy) / span;
+          if (u <= 0.08f || u >= 0.95f ||
+              std::abs(px * dy - py * dx) / std::sqrt(span) >= 18)
+            continue;
+          bool interior = true;
+          for (int oy = -1; oy <= 1; ++oy) {
+            for (int ox = -1; ox <= 1; ++ox) {
+              const auto p =
+                  baseline.at(static_cast<std::uint32_t>(static_cast<int>(x) + ox),
+                              static_cast<std::uint32_t>(static_cast<int>(y) + oy));
+              interior = interior && p.r + p.g + p.b > bg + 30;
+            }
+          }
+          if (!interior) continue;
+          const auto a = baseline.at(x, y), b = img.at(x, y);
+          const int d = std::max(int(b.r) - int(a.r) - 1, 0) +
+                        std::max(int(b.g) - int(a.g) - 1, 0) +
+                        std::max(int(b.b) - int(a.b) - 1, 0);
+          e.total += d;
+          e.height += static_cast<double>(u) * d;
+          if (u > 0.55f) e.high += d;
+          if (u < 0.50f) e.low += d;
+          if (d >= 6) ++e.pixels;
+        }
+      }
+      return e;
+    };
+    const auto hi = measure(upper), lo = measure(lower), wrap = measure(shot(3.95));
+    CAPTURE(hi.total, hi.pixels, lo.total, lo.pixels);
+    REQUIRE(hi.total > 500);
+    REQUIRE(lo.total > 500);
+    CHECK(hi.pixels >= 30);
+    CHECK(lo.pixels >= 30);
+    CHECK(hi.height / hi.total > 0.60);
+    CHECK(lo.height / lo.total < 0.45);
+    CHECK(hi.height / hi.total - lo.height / lo.total > 0.30);
+    CHECK(hi.high / hi.total > 0.75);
+    CHECK(lo.low / lo.total > 0.75);
+    CHECK(wrap.high < 1);  // reset is outside the body, never a whole-body flash
+    for (float material : {0.0f, 6.0f}) {
+      set.instances[0].material = material;
+      CHECK(shot(0.75).rgba == shot(2.75).rgba);
+    }
+    set.instances[0].material = 4;
+  }
+}
+
+TEST_CASE("hologram scans leave portal colours visually dominant",
+          "[render][gpu][hologram]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  for (double seconds : {0.0, 0.75, 1.5, 2.75, 3.95}) {
+    CAPTURE(seconds);
+    const auto frame = renderVariant("standard", 256, 192, false, seconds);
+    CHECK(frame.validationErrors == 0);
+    CHECK(frame.image.saturatedPixels() < 256u * 192u / 100u);
+  }
+}
+
+TEST_CASE("visual time changes hologram pixels without changing instances",
+          "[render][gpu][hologram]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  const auto v = test::loadVariant("standard");
+  const auto snap = view::PositionView::capture(Position::startPosition(v));
+  const auto cfg = view::ViewConfig::forBoard(v.dims);
+  const auto cam = view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
+  auto target = OffscreenTarget::create(gpu().ctx, 640, 400);
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(target.has_value());
+  REQUIRE(renderer.has_value());
+  for (auto theme : {view::Theme::manifold(), view::Theme::console()}) {
+    renderer->setTheme(theme);
+    const auto shot = [&](double t) {
+      renderer->setVisualTime(t);
+      auto img = renderer->renderToImage(*target, snap, cfg, cam);
+      REQUIRE(img.has_value());
+      REQUIRE(gpu().ctx.takeValidationMessages().empty());
+      return *img;
+    };
+    const auto before = renderer->buildInstances(snap, cfg);
+    const auto first = shot(0.75), second = shot(2.75), again = shot(0.75);
+    CHECK(first.rgba == again.rgba);
+    if (theme.materials.pieces == view::Material::Wood)
+      CHECK(first.rgba == second.rgba);
+    else
+      CHECK(first.rgba != second.rgba);
+    const auto after = renderer->buildInstances(snap, cfg);
+    REQUIRE(before.instances.size() == after.instances.size());
+    CHECK(std::memcmp(before.instances.data(), after.instances.data(),
+                      before.instances.size() * sizeof(Instance)) == 0);
+  }
+}
 
 TEST_CASE("wood and glass change the rendered board without changing its geometry",
           "[render]") {

@@ -54,7 +54,7 @@ TEST_CASE("manifold is a dark, legible glass alternative", "[unit][view]") {
   CHECK_FALSE(t.light);
   CHECK(luminance(t.ink) < 0.02f);
   CHECK(t.materials.cells == Material::Glass);
-  CHECK(t.materials.pieces == Material::Crystal);
+  CHECK(t.materials.pieces == Material::Hologram);
   CHECK(t.materials.plinth == Material::Glass);
 }
 

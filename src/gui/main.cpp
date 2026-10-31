@@ -53,8 +53,8 @@ float resolveUiScale(const app::Settings& settings) {
 }
 
 view::Theme resolveTheme(const app::Settings& settings) {
-  view::Theme theme = view::themeFromName(
-      gThemeOverride.empty() ? settings.theme : gThemeOverride);
+  view::Theme theme =
+      view::themeFromName(gThemeOverride.empty() ? settings.theme : gThemeOverride);
   if (gMatteCapture) theme.materials = view::Materials{};
   return theme;
 }
@@ -289,7 +289,8 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
 render::BoardOptions optionsFor(const app::Shell& shell) {
   render::BoardOptions o = optionsFrom(shell.settings());
   // The trailer clips further in (see `Settings::trailerNearClip`).
-  if (shell.attracting()) o.nearClip = std::max(o.nearClip, shell.settings().trailerNearClip);
+  if (shell.attracting())
+    o.nearClip = std::max(o.nearClip, shell.settings().trailerNearClip);
 #ifdef CB_HAVE_IMGUI
   const app::Session* session = shell.session();
   const app::Settings& s = shell.settings();
@@ -507,7 +508,8 @@ void applyAttractLook(app::Shell& shell) {
 
 /// Tell the renderer what the engine says just happened, so the board can show it.
 void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
-  // The variant's own piece bodies, if it brings any, before the board is built from them.
+  // The variant's own piece bodies, if it brings any, before the board is built from
+  // them.
   if (auto ok = renderer.syncBodies(session.variant()); !ok.has_value()) {
     std::fprintf(stderr, "%s\n", ok.error().format().c_str());
   }
@@ -560,8 +562,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  bool geometry, float evert, float formed, bool flatCapture, float slideU,
                  float slideV, float ghost, const std::string& playFile, float dwell,
                  int fps, float playAt, bool framesGiven, int width, int height,
-                 const std::string& watchName, bool pieceCylinders,
-                 bool attractTimeGiven) {
+                 const std::string& watchName, bool pieceCylinders, bool attractTimeGiven,
+                 double visualOrigin) {
   // Captures use default settings, never the person's own. A screenshot that changes
   // because whoever ran it likes a larger interface is not a screenshot of the game -
   // and `ctest -R gui-` would then pass or fail by whose machine it ran on.
@@ -633,8 +635,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::Settings);
   else if (screen == "editor")
     shell->go(app::Screen::Editor);
-  else if (screen == "designer" || screen == "body" || screen == "flat" || screen == "identity" ||
-           screen == "castling" || screen == "marks" || screen == "fields" || screen == "rules") {
+  else if (screen == "designer" || screen == "body" || screen == "flat" ||
+           screen == "identity" || screen == "castling" || screen == "marks" ||
+           screen == "fields" || screen == "rules") {
     // The designers need a document open, which the editor's own entry does for them.
     (void)shell->openEditor(variantName);
     shell->go(app::Screen::Editor);
@@ -777,8 +780,13 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // writing so `--clip` can call it once per frame. `dt` is the interface's own clock:
   // the warm-up gives it enough to settle a screen transition, and the real frames give
   // it none so the drifting field is the same in every frame of a clip.
-  const auto renderFrame = [&](float dt, const render::ShapeMoveSequence* playSeq =
-                                             nullptr) -> std::optional<render::Image> {
+  struct VisualSample {
+    double seconds;
+  };
+  const auto renderFrame = [&](float dt, VisualSample sample = {0},
+                               const render::ShapeMoveSequence* playSeq =
+                                   nullptr) -> std::optional<render::Image> {
+    renderer->setVisualTime(visualOrigin + sample.seconds);
     // A fixed step rather than a real clock: the shell animates, and a capture has to be
     // the same picture every time it is taken.
     (*ui)->tick(dt);
@@ -943,7 +951,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
       easeTrailerFraming(*shell, step);
       shell->session()->advanceAnimation(step);
       renderer->setOptions(optionsFor(*shell));
-      auto img = renderFrame(0.0f);
+      auto img =
+          renderFrame(0.0f, {static_cast<double>(written) * static_cast<double>(step)});
       if (!img.has_value()) return 1;
       if (videoPipe != nullptr) {
         if (std::fwrite(img->rgba.data(), 1, img->rgba.size(), videoPipe) !=
@@ -1042,7 +1051,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
         shell->session()->setMoveProgress(cursor.elapsed / travel);
       }
     }
-    return renderFrame(0.0f, seqArg);
+    return renderFrame(0.0f, {globalSeconds}, seqArg);
   };
 
   // Two thrown-away frames, in this order: the first lets a screen-change reset the pane
@@ -1077,8 +1086,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
         if (!renderFrame(0.0f).has_value()) return 1;
       } else if (one == "key:delete" || one == "key:escape" || one == "key:enter" ||
                  one == "key:f12") {
-        const int key = one == "key:delete" ? ImGuiKey_Delete
-                        : one == "key:f12" ? ImGuiKey_F12
+        const int key = one == "key:delete"   ? ImGuiKey_Delete
+                        : one == "key:f12"    ? ImGuiKey_F12
                         : one == "key:escape" ? ImGuiKey_Escape
                                               : ImGuiKey_Enter;
         for (const bool down : {true, false}) {
@@ -1168,7 +1177,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
       }
       char name[32];
       std::snprintf(name, sizeof(name), "frame_%04d.ppm", i);
-      const std::optional<render::Image> img = renderFrame(0.0f);
+      const std::optional<render::Image> img =
+          renderFrame(0.0f, {static_cast<double>(i) / std::max(1, fps)});
       if (!img.has_value() ||
           !writeFrame(*img, (std::filesystem::path(path) / name).string())) {
         return 1;
@@ -1176,6 +1186,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     }
   }
 #else
+  renderer->setVisualTime(visualOrigin);
   const auto instances = renderer->buildInstances(
       shell->session()->snapshot(), shell->session()->viewConfig(),
       &shell->session()->seams(), &shell->session()->animation(),
@@ -1235,6 +1246,8 @@ int main(int argc, char** argv) {
   std::string playFile;
   float dwell = app::kDefaultDwellSeconds;
   int captureFps = 30;
+  double visualTime = 0;
+  bool visualTimeGiven = false;
   float playAt = -1.0f;
   bool framesGiven = false;
   std::string watchName;
@@ -1269,6 +1282,8 @@ int main(int argc, char** argv) {
           "board every variant starts from, 1 the shape it becomes.\n"
           "--clip DIR renders a sequence of numbered PPM frames instead of one shot,\n"
           "sweeping t from --t0 to --t1 over --frames frames (default 0..1, 96).\n"
+          "--visual-time SECONDS sets capture presentation time (finite, nonnegative; "
+          "default 0).\n"
           "--cinema drops the interface and fills the frame with the board.\n"
           "--follow off|piece|route and --move-t 0..1 show the move camera in a "
           "capture;\n"
@@ -1293,10 +1308,12 @@ int main(int argc, char** argv) {
           "so\n"
           "the reviewable screens include it; --screen watch is the bundled-game "
           "picker.\n"
-           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
-           "--theme console|manifold overrides the theme for this run; --matte disables materials.\n"
-           "--ui-scale 0.6..3.0 overrides interface size for this run (not saved).\n"
-          "--ui-click \"x,y;x,y,button;drag:x1,y1,x2,y2,button\" replays pointer clicks and\n"
+          "--width W --height H set the capture/window resolution (default 1920x1080).\n"
+          "--theme console|manifold overrides the theme for this run; --matte disables "
+          "materials.\n"
+          "--ui-scale 0.6..3.0 overrides interface size for this run (not saved).\n"
+          "--ui-click \"x,y;x,y,button;drag:x1,y1,x2,y2,button\" replays pointer clicks "
+          "and\n"
           "drags (pixels; button 0 left, 1 right, 2 middle) before the capture.\n"
           "--variants-dir DIR reads and saves the player's own variants there.\n"
           "--piece NAME opens the designer captures on that piece.\n"
@@ -1327,7 +1344,20 @@ int main(int argc, char** argv) {
       geometry = true;
     else if (arg == "--theme" && i + 1 < argc)
       gThemeOverride = argv[++i];
-    else if (arg == "--matte")
+    else if (arg == "--visual-time") {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "--visual-time requires finite nonnegative seconds\n");
+        return 1;
+      }
+      char* end = nullptr;
+      const char* value = argv[++i];
+      visualTime = std::strtod(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(visualTime) || visualTime < 0) {
+        std::fprintf(stderr, "--visual-time requires finite nonnegative seconds\n");
+        return 1;
+      }
+      visualTimeGiven = true;
+    } else if (arg == "--matte")
       gMatteCapture = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
       gUiScaleOverride = std::strtof(argv[++i], nullptr);
@@ -1404,14 +1434,19 @@ int main(int argc, char** argv) {
     setMovesetDirs(std::move(dirs));
   }
   if (!targetPath.empty() || benchFrames > 0 || !gTrailerClipDir.empty()) {
-    return captureFrame(
-        variantName.empty() ? "standard" : variantName, targetPath, script, screen,
-        overtureT, previewDims, !clipDir.empty(), clipFrames, clipT0, clipT1, cinema,
-        followMode, shapeFollow, moveT, benchFrames, geometry || formedGiven, evert,
-        formed, flatCapture, slideU, slideV, ghost, playFile, dwell, captureFps, playAt,
-        framesGiven, width, height, watchName, pieceCylinders, overtureTGiven);
+    return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
+                        script, screen, overtureT, previewDims, !clipDir.empty(),
+                        clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
+                        moveT, benchFrames, geometry || formedGiven, evert, formed,
+                        flatCapture, slideU, slideV, ghost, playFile, dwell, captureFps,
+                        playAt, framesGiven, width, height, watchName, pieceCylinders,
+                        overtureTGiven, visualTime);
   }
 
+  if (visualTimeGiven) {
+    std::fprintf(stderr, "--visual-time is a capture-only option\n");
+    return 1;
+  }
   auto shell = makeShell();
   // Naming a variant on the command line starts it directly; otherwise the game opens
   // where a game should, on its menu.
@@ -1495,6 +1530,7 @@ int main(int argc, char** argv) {
   int renderPoll = 0;
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
+  double visualSeconds = 0;
   // Hover aids (M20): events only mark the pointer dirty; the cell is resolved once per
   // frame, because the shape view's pick builds a whole surface.
   bool hoverDirty = false;
@@ -1512,12 +1548,11 @@ int main(int argc, char** argv) {
       if (session->boardLocked()) return kInvalidCell;
       const render::PlaySurface surf = render::PlaySurface::build(
           session->variant(), poseFrom(shell->settings(), session->variant()));
-      return surf.pick(session->cameraOver(surfacePlacements(surf), surf.bounds(),
-                                           view::ViewConfig{}),
-                       boardRect.width, boardRect.height, x - boardRect.x,
-                       y - boardRect.y, shell->settings().geometryGhost,
-                       &session->snapshot(), shell->settings().pieceHeightScale,
-                       shell->settings().shapePieceCylinders);
+      return surf.pick(
+          session->cameraOver(surfacePlacements(surf), surf.bounds(), view::ViewConfig{}),
+          boardRect.width, boardRect.height, x - boardRect.x, y - boardRect.y,
+          shell->settings().geometryGhost, &session->snapshot(),
+          shell->settings().pieceHeightScale, shell->settings().shapePieceCylinders);
     }
 #endif
     return session->pickPixel(x - boardRect.x, y - boardRect.y, boardRect.width,
@@ -1531,8 +1566,10 @@ int main(int argc, char** argv) {
     // the wait shortens to roughly one.
     // The trailer moves the camera and the shape on every frame, with or without a piece
     // in flight; waiting for events would draw it at the idle ten frames a second.
-    const bool animating = shell->hasGame() && (shell->session()->animation().active() ||
-                                                shell->attracting());
+    const bool animating =
+        resolveTheme(shell->settings()).materials.pieces == view::Material::Hologram ||
+        (shell->hasGame() &&
+         (shell->session()->animation().active() || shell->attracting()));
     if (!SDL_WaitEventTimeout(&e, animating ? 8 : 100)) e.type = SDL_EVENT_POLL_SENTINEL;
     do {
       if (e.type == SDL_EVENT_POLL_SENTINEL) continue;
@@ -1639,7 +1676,8 @@ int main(int argc, char** argv) {
           }
           break;
         case SDL_EVENT_MOUSE_MOTION:
-          if (orbiting && std::hypot(e.motion.x - rightDownX, e.motion.y - rightDownY) > 4.0f) {
+          if (orbiting &&
+              std::hypot(e.motion.x - rightDownX, e.motion.y - rightDownY) > 4.0f) {
             rightDragged = true;
           }
           // Reaching for the camera in the trailer pauses it into edit mode, so the hand
@@ -1835,7 +1873,10 @@ int main(int argc, char** argv) {
     }
 
     const auto now = std::chrono::steady_clock::now();
-    const float dt = std::chrono::duration<float>(now - lastFrame).count();
+    const double elapsed = std::chrono::duration<double>(now - lastFrame).count();
+    const float dt = static_cast<float>(elapsed);
+    visualSeconds += std::max(0.0, elapsed);
+    renderer->setVisualTime(visualSeconds);
     lastFrame = now;
     if (dt > 0.0f) fps = fps * 0.9f + (1.0f / dt) * 0.1f;
 

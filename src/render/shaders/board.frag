@@ -20,6 +20,7 @@ layout(push_constant) uniform Push {
     vec4 lightDir;
     vec4 eyePos;
     vec4 material;
+    vec4 visual;
 } push;
 
 layout(location = 0) out vec4 outColor;
@@ -122,16 +123,22 @@ void main() {
     }
 
     if (matId == 4) {
-        vec3 facet = normalize(cross(dFdx(fragWorld), dFdy(fragWorld)));
-        if (dot(facet, n) < 0.0) facet = -facet;
+        float height = clamp(fragHeight, 0.0, 1.0);
         vec3 viewDir = normalize(push.eyePos.xyz - fragWorld);
         vec3 coolKey = normalize(vec3(0.35, 0.6, 0.72));
-        float face = max(dot(facet, coolKey), 0.0);
-        float fresnel = pow(1.0 - max(dot(facet, viewDir), 0.0), 3.0);
-        vec3 halfV = normalize(coolKey + viewDir);
-        float spec = pow(max(dot(facet, halfV), 0.0), 72.0);
-        rgb = fragColor.rgb * (0.56 + 0.62 * face) +
-              push.material.rgb * (0.34 * fresnel + 0.30 * spec);
+        float face = max(dot(n, coolKey), 0.0);
+        float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+        float lineCoord = height * 28.0;
+        float footprint = fwidth(lineCoord);
+        float lines = 0.5 + 0.5 * cos(lineCoord * 6.2831853);
+        lines = mix(lines, 0.5, smoothstep(0.25, 1.0, footprint));
+        float centre = 1.08 - 1.16 * fract(push.visual.x / 4.0);
+        float scan = 1.0 - smoothstep(0.0, 0.055, abs(height - centre));
+        vec3 emission = mix(fragColor.rgb, push.material.rgb, 0.20);
+        float luminance = dot(fragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+        vec3 base = mix(fragColor.rgb, vec3(luminance), 0.35);
+        rgb = base * (0.86 + 0.16 * face) * (0.92 + 0.08 * lines) +
+              emission * (0.12 * rim + 0.16 * scan);
     }
 
     if (matId == 5) {

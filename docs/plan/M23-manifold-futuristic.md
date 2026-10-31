@@ -256,3 +256,7 @@ Optional full-scene bloom is deferred under the milestone's cut line. The local
 packet glow uses layered strokes and no new render pass. A half-resolution
 postprocess still needs hardware-GPU cost/contrast validation; llvmpipe timing
 does not establish that budget. Hardware FPS validation remains open.
+
+Actual game pieces now use the tested height-scanning hologram material and explicit
+presentation clock in [M23.4](M23.4-holograms-led-and-live-controls.md), checkpoint A.
+LED panels and live controls are the following independently committed checkpoints.

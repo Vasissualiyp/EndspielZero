@@ -27,6 +27,7 @@ layout(push_constant) uniform Push {
     vec4 lightDir;
     vec4 eyePos;
     vec4 material;
+    vec4 visual;
 } push;
 
 layout(location = 0) out vec4 fragColor;
