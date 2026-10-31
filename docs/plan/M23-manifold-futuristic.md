@@ -130,6 +130,42 @@ Verify console captures byte-for-byte against the pre-change binary, plus
 manifold library/menu, standard/flat and torus/Klein captures at 720p and 1080p.
 The interface restyle and optional bloom remain separate slices.
 
+### M23.3 pulse trails and interface finish (2026-10-31)
+
+The first floor capture and live-window review show three plain horizontal bars:
+`drawGridFloor` moves their centres with a sine at three fixed depths. They do
+not follow the grid and have no direction, junction or trail. Replace those bars
+with four sparse cyan/violet light packets following the floor's own perspective
+lanes. Each route approaches from the distance, turns along one cross-line, then
+turns back towards the viewer. Segment the fading tail at both junctions so it
+cannot cut diagonally across a turn. Keep the original moving ground: its cross-lines
+continue flowing towards the viewer under the running lights. On arrival, replace
+the diamond heads/echoes with small chess holograms, as requested in live review.
+Reuse `icon`/`pieceIcon` and the player's selected icon style, with a bottom-up reveal
+and a faint fill plus luminous outline. Four terminals show a rook, knight, queen
+and bishop, away from the real board's centre. The light reaches its terminal before
+the piece appears; the piece then fades with the trail before the cycle repeats.
+A soft wide underlay gives the light a bright core without a new bloom pass.
+Fade both ends of a packet's cycle; evaluate every sample from elapsed seconds,
+never retained particle state. Holograms are part of the floor decoration, including
+the quieter gameplay field, rather than free pieces in the old confetti simulation.
+Tests distinguish bright trail geometry from the old flat bars, check depth span
+and graded opacity, pin continued ground movement and icon-style selection, and
+retain the existing deterministic/time-partition tests.
+Review a live animation as well as still frames.
+
+Finish the specified interface through theme data: a panel treatment enum and a
+mono-label flag in `Theme`, selected only by manifold. Extend the existing
+`widgets::drawPlate` path with open corner brackets rather than a filled card;
+give shell panes the same bracket treatment through `Ui::drawShellFrame` and
+`pauseFrame`, and use the mono face for action rows and small control labels.
+Keep prose in the body face and large screen titles in the display face. Rules
+use the accent at low alpha. The theme control must say which look includes the
+grid, and live switching must update fonts/style as well as colours. Preserve
+console's drawing and keyboard/mouse targets. Pin the corner treatment and theme
+roles with draw-list/ImGui tests, verify a live theme round trip, and review both
+themes at 1× and 3×.
+
 ## M23.4 Tests
 
 1. `tests/unit/view/test_theme.cpp`: manifold is a dark theme (`light == false`, ink luminance
@@ -166,7 +202,8 @@ without bloom). The grid-floor background, the interface restyle and bloom follo
 
 ## Status
 
-In progress (2026-10-30): M23.1 landed under M24 (ADR-0021). M23.2's dark palette,
+Base look built, further hologram/LED/live-control polish in progress (2026-10-31):
+M23.1 landed under M24 (ADR-0021). M23.2's dark palette,
 glass-like Fresnel cells, cool faceted crystal pieces, glowing portal rails and
 translucent geometry-view board are implemented and seen in standard, flat, torus
 and Klein captures. The opaque board's glass is **not physically translucent**:
@@ -176,7 +213,7 @@ deep-indigo black piece failed the standing contrast constraint on the near-blac
 glass squares; a lighter indigo crystal (`0x657CC5`) clears all four combinations.
 M23.3's grid-floor backdrop is built through `Theme::backdrop` and the existing
 `DepthField` draw-list path. It replaces manifold's ambient wireframes with a
-depth-faded perspective floor and three slowly drifting cyan/violet streaks;
+depth-faded moving perspective floor and cyan/violet running lights;
 the principal menu object is retained. Geometry is a function of elapsed time,
 independent of the confetti simulation or menu dolly impulses. Console's library
 capture is byte-identical to its pre-change baseline.
@@ -190,7 +227,32 @@ selection, floor placement, clock partition independence, opacity and tiny
 rectangles; the existing Vulkan early-background test covers board occlusion.
 Two GUI gates exercise manifold's shell and board paths explicitly. Local review
 captures are in `out/m23/`, including a before/after library comparison.
-All 241 view/render tests, all 40 GUI gates and `tools/precommit.sh` pass.
+The initial backdrop slice passed all 241 view/render tests, all 40 GUI gates
+and `tools/precommit.sh`.
 
-M23.3's interface restyle and M23.2's optional bloom remain open, with
-hardware-GPU FPS validation. No bloom or hardware timing is claimed by this slice.
+The first horizontal bars were replaced after live review: four light packets now
+follow the floor lanes, turn outward at two junctions and carry graded tails.
+As requested after live review, the moving lattice is retained and chess-piece
+holograms appear at the light terminals instead of diamond heads/echoes.
+They reuse the chosen piece-icon set and reveal from the base upwards.
+The floor and packet routes share a perspective. Outward turns keep them
+visible around the board rather than hiding most of their travel beneath it.
+All packet state is derived from elapsed time, including cycle fades.
+
+M23.3's interface is built: `PanelStyle::Brackets` supplies open corners without
+panel fills; `Theme::monoLabels` selects mono action fonts and settings labels;
+`interfaceRule` supplies faint cyan rules. Large titles and prose keep their
+display/body faces. The Settings theme control names each theme's backdrop.
+New tests pin bright depth trails with graded opacity and transparent panel
+centres at 1× and 3×. All 246 view/render tests pass with validation on, including
+the repaired library START action at 3× (see M14). A live
+window, launched without `--theme` or `--shot`, was switched console → manifold
+→ console through Settings: style, fonts, backdrop and saved selection all
+followed. Review captures and a 32-frame live animation are in `out/m23/finish/`
+and `out/m23/pulses/`. All 40 GUI gates and the final precommit gate
+(format, architecture, unit and property suites) pass.
+
+Optional full-scene bloom is deferred under the milestone's cut line. The local
+packet glow uses layered strokes and no new render pass. A half-resolution
+postprocess still needs hardware-GPU cost/contrast validation; llvmpipe timing
+does not establish that budget. Hardware FPS validation remains open.

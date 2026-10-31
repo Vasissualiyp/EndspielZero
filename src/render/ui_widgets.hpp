@@ -34,6 +34,10 @@ view::Rgba mix(const view::Rgba& a, const view::Rgba& b, float t);
 /// Multiply a colour's brightness without touching its alpha.
 view::Rgba shade(const view::Rgba& c, float factor);
 
+/// An open frame, with no fill behind the subject or text. Sizes follow the UI scale.
+void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
+                  float scale);
+
 /// A section heading with a rule running out to the right, the way a plate is labelled.
 void heading(const char* text, const view::Theme& theme, ImFont* font);
 

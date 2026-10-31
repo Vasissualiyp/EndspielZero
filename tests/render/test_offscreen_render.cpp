@@ -154,7 +154,8 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
           std::abs(lit.instances[i].color[1] - set.instances[i].color[1]) > 0.02f;
       if (differs) ++changed;
     }
-    // Three cells, and the selected piece itself, which takes the stronger accent tint (M20).
+    // Three cells, and the selected piece itself, which takes the stronger accent tint
+    // (M20).
     REQUIRE(changed == 4);
 
     const auto& ember = renderer.theme().ember;
@@ -169,7 +170,8 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
   }
 }
 
-TEST_CASE("wood is confined to board and pieces and never moves with a piece", "[render]") {
+TEST_CASE("wood is confined to board and pieces and never moves with a piece",
+          "[render]") {
   const VariantSpec v = test::loadVariant("standard");
   const Position p = Position::startPosition(v);
   const auto snap = view::PositionView::capture(p);
@@ -183,7 +185,8 @@ TEST_CASE("wood is confined to board and pieces and never moves with a piece", "
   const InstanceSet matte = renderer.buildInstances(snap, cfg);
   REQUIRE(set.size() == matte.size());
   REQUIRE(set.size() == 97);
-  CHECK(std::memcmp(matte.instances.data(), renderer.buildInstances(snap, cfg).instances.data(),
+  CHECK(std::memcmp(matte.instances.data(),
+                    renderer.buildInstances(snap, cfg).instances.data(),
                     set.size() * sizeof(Instance)) == 0);
   int cells = 0, pieces = 0, plinths = 0;
   for (std::size_t i = 0; i < set.size(); ++i) {
@@ -193,9 +196,12 @@ TEST_CASE("wood is confined to board and pieces and never moves with a piece", "
     CHECK(std::memcmp(&a, &b, sizeof(Instance)) == 0);
     const int id = static_cast<int>(set.instances[i].material);
     if (id == 2) {
-      if (set.instances[i].material == 2.25f) ++plinths;
-      else ++cells;
-    } else if (id == 6) ++pieces;
+      if (set.instances[i].material == 2.25f)
+        ++plinths;
+      else
+        ++cells;
+    } else if (id == 6)
+      ++pieces;
   }
   CHECK(cells == 64);
   CHECK(plinths == 1);
@@ -212,7 +218,8 @@ TEST_CASE("wood is confined to board and pieces and never moves with a piece", "
   auto session = app::Session::create(test::loadVariant("standard"));
   REQUIRE(session.has_value());
   renderer.setTheme(view::Theme::console());
-  const auto before = renderer.buildInstances((*session)->snapshot(), (*session)->viewConfig());
+  const auto before =
+      renderer.buildInstances((*session)->snapshot(), (*session)->viewConfig());
   const auto pawnMaterial = [&] {
     for (const Instance& i : before.instances) {
       if (static_cast<int>(i.material) == 6 &&
@@ -231,9 +238,9 @@ TEST_CASE("wood is confined to board and pieces and never moves with a piece", "
   for (float t : {0.2f, 0.5f, 0.8f}) {
     (*session)->setMoveProgress(t);
     const auto at = (*session)->animation().sample();
-    const auto moving = renderer.buildInstances((*session)->snapshot(),
-                                                 (*session)->viewConfig(),
-                                                 &(*session)->seams(), &(*session)->animation());
+    const auto moving =
+        renderer.buildInstances((*session)->snapshot(), (*session)->viewConfig(),
+                                &(*session)->seams(), &(*session)->animation());
     const auto found = std::find_if(moving.instances.begin(), moving.instances.end(),
                                     [&](const Instance& i) {
                                       return static_cast<int>(i.material) == 6 &&
@@ -261,8 +268,8 @@ TEST_CASE("manifold dispatches glass, crystal and portal glow", "[render]") {
   CHECK(crystal == 32);
   auto glued = app::Session::create(test::loadVariant("torus"));
   REQUIRE(glued.has_value());
-  const auto portals = renderer.buildInstances((*glued)->snapshot(),
-                                                (*glued)->viewConfig(), &(*glued)->seams());
+  const auto portals = renderer.buildInstances(
+      (*glued)->snapshot(), (*glued)->viewConfig(), &(*glued)->seams());
   CHECK(std::any_of(portals.instances.begin(), portals.instances.end(),
                     [](const Instance& i) { return i.material == 5.0f; }));
   auto mirrored = app::Session::create(test::loadVariant("mirrorbox"));
@@ -270,12 +277,13 @@ TEST_CASE("manifold dispatches glass, crystal and portal glow", "[render]") {
   auto matte = view::Theme::console();
   matte.materials = view::Materials{};
   renderer.setTheme(matte);
-  const auto rails = renderer.buildInstances((*mirrored)->snapshot(),
-                                             (*mirrored)->viewConfig(), &(*mirrored)->seams());
+  const auto rails = renderer.buildInstances(
+      (*mirrored)->snapshot(), (*mirrored)->viewConfig(), &(*mirrored)->seams());
   CHECK(std::any_of(rails.instances.begin(), rails.instances.end(),
                     [](const Instance& i) { return i.material == 1.0f; }));
-  CHECK(std::all_of(rails.instances.begin(), rails.instances.end(),
-                    [](const Instance& i) { return i.material == 0.0f || i.material == 1.0f; }));
+  CHECK(std::all_of(
+      rails.instances.begin(), rails.instances.end(),
+      [](const Instance& i) { return i.material == 0.0f || i.material == 1.0f; }));
 }
 
 #ifdef CB_HAVE_IMGUI
@@ -296,7 +304,8 @@ TEST_CASE("manifold shape glass reveals the far side by default", "[render]") {
 }
 #endif
 
-TEST_CASE("wood and glass change the rendered board without changing its geometry", "[render]") {
+TEST_CASE("wood and glass change the rendered board without changing its geometry",
+          "[render]") {
   if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
   const VariantSpec v = test::loadVariant("standard");
   const Position p = Position::startPosition(v);
@@ -1582,6 +1591,49 @@ TEST_CASE("the tesseract scaffold is drawn only for hyper4 and only with seams o
   CHECK(scaffoldCells("hyper4", true) == 32u);
   CHECK(scaffoldCells("hyper4", false) == 0u);
   CHECK(scaffoldCells("torus3d", true) == 0u);
+}
+
+TEST_CASE("the library Start action is clickable at three times UI scale",
+          "[render][gpu]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("library-footer", 1920, 1080, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    auto shell = app::Shell::create(
+        {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "library-footer.conf");
+    shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+      return test::loadVariant(name);
+    });
+    shell->go(app::Screen::NewGame);
+    auto ui = Ui::create(gpu().ctx, window, theme);
+    REQUIRE(ui.has_value());
+    REQUIRE((*ui)->setScale(3.0f).has_value());
+    const auto frame = [&] {
+      (*ui)->tick(1.0f);
+      (*ui)->newFrame();
+      auto request = (*ui)->build(*shell, 60.0f);
+      (*ui)->endFrame();
+      return request;
+    };
+    for (int i = 0; i < 3; ++i) (void)frame();
+    (*ui)->injectMouse(1200.0f, 850.0f, false);
+    (void)frame();
+    (*ui)->injectMouse(1200.0f, 850.0f, true);
+    (void)frame();
+    (*ui)->injectMouse(1200.0f, 850.0f, false);
+    const auto request = frame();
+    CHECK(request.loadVariant == "standard");
+  }
+  CHECK(gpu().ctx.validationErrorCount() == 0);
 }
 
 TEST_CASE("the board screen's real ambient field is submitted behind the board",

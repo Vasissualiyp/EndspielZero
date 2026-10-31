@@ -33,6 +33,10 @@ void gradientRect(ImDrawList* dl, const ImVec2& a, const ImVec2& b, ImU32 top,
 /// thick dark outline and a bright inner rim.
 void drawPlate(ImDrawList* dl, const ImVec2& pmin, const ImVec2& pmax,
                const view::Theme& t, float s) {
+  if (t.panelStyle == view::PanelStyle::Brackets) {
+    panelCorners(dl, pmin, pmax, t, s);
+    return;
+  }
   const float r = 10.0f * s;
   gradientRect(dl, pmin, pmax, u32(t.panelHi), u32(t.panel), r);
   // A deep outline first, then a warm rim just inside it: the brass edging a game card
@@ -55,6 +59,23 @@ void drawPlate(ImDrawList* dl, const ImVec2& pmin, const ImVec2& pmax,
 }
 
 }  // namespace
+
+void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
+                  float scale) {
+  const float width = max.x - min.x;
+  const float height = max.y - min.y;
+  if (width <= 0.0f || height <= 0.0f) return;
+  const float length = std::min({14.0f * scale, width * 0.2f, height * 0.2f});
+  const ImU32 colour = u32(theme.ember, 0.40f);
+  for (const float x : {min.x, max.x}) {
+    for (const float y : {min.y, max.y}) {
+      const float dx = x == min.x ? length : -length;
+      const float dy = y == min.y ? length : -length;
+      dl->AddLine(ImVec2(x + dx, y), ImVec2(x, y), colour, scale);
+      dl->AddLine(ImVec2(x, y), ImVec2(x, y + dy), colour, scale);
+    }
+  }
+}
 
 view::Rgba mix(const view::Rgba& a, const view::Rgba& b, float t) {
   return view::Rgba{a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t,
@@ -133,7 +154,7 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
     dl->AddRectFilledMultiColor(min, max, u32(wash, 0.16f), u32(wash, 0.0f),
                                 u32(wash, 0.0f), u32(wash, 0.16f));
   }
-  dl->AddLine(min, ImVec2(max.x, min.y), u32(theme.rule, 0.8f), 1.0f);
+  dl->AddLine(min, ImVec2(max.x, min.y), u32(theme.interfaceRule, 0.8f), 1.0f);
 
   const float labelHeight = font != nullptr ? font->FontSize : ImGui::GetFontSize();
   const float top = min.y + (max.y - min.y - labelHeight) * 0.5f;
@@ -565,11 +586,11 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
-  const bool began = ImGui::Begin(
-      id, nullptr,
-      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings |
-          ImGuiWindowFlags_NoBackground);
+  const bool began =
+      ImGui::Begin(id, nullptr,
+                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                       ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
+                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground);
   currentPaneBuilt() = began;
   // Draw without the window's own clip, so a pane scaled up past its settled edge is not
   // cut off there.

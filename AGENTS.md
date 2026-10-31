@@ -262,6 +262,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | New rule mechanic | `src/rules/` opcode + tests + docs table | `cb-new-effect` |
 | A piece's look | `variants/*.toml` `shape` / `height` (data only) | `cb-new-piece` |
 | UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
+| UI panel treatment and action labels | `Theme::panelStyle`, `monoLabels` and `interfaceRule`; `widgets::panelCorners` in `src/render/ui_widgets.cpp` and `Ui::actionFont` in `src/render/ui.cpp`. Settings → Looks → Theme selects the whole look, including the backdrop | |
 | Ambient background (drifting shapes or a perspective grid floor) | `Theme::backdrop` in `src/view/theme.hpp`, dispatched by `DepthField::draw` in `src/render/deco.cpp`; the same field draws behind menus and behind the board | |
 | A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021 | |
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |

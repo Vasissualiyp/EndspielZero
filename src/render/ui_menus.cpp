@@ -160,41 +160,41 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(14)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("New game", 1, t, display, width, true, scale_)) {
+  if (menuEntry("New game", 1, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::NewGame);
   }
   // The demo action: watch a bundled game play itself, through the ordinary board and
   // move camera (M12.8). It opens a short picker rather than a fixed file, because two
   // games ship.
-  if (menuEntry("Watch a game", 2, t, display, width, true, scale_)) {
+  if (menuEntry("Watch a game", 2, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::Watch);
   }
   // The trailer: a fixed, looping tour of the shapes, played on the game screen (M13.9).
   // Unlike "Watch a game" there is nothing to choose, so the row starts it in place
   // instead of opening a picker.
-  if (menuEntry("Watch trailer", 3, t, display, width, true, scale_)) {
+  if (menuEntry("Watch trailer", 3, t, actionFont(), width, true, scale_)) {
     request.startAttract = true;
   }
   // Disabled rows stay in the list, marked and nothing more. A menu that hides what is
   // coming is dishonest; one that explains itself every time the pointer crosses it is
   // just noisy.
-  if (menuEntry("Continue", 4, t, display, width, false, scale_)) {
+  if (menuEntry("Continue", 4, t, actionFont(), width, false, scale_)) {
     // unreachable while disabled, but kept so enabling it is a one-word change
   }
-  if (menuEntry("Multiplayer", 5, t, display, width, false, scale_)) {
+  if (menuEntry("Multiplayer", 5, t, actionFont(), width, false, scale_)) {
   }
   // The curated "start here" path, summoned when the player asks for it rather than
   // opened on first launch (M14.1, revised).
-  if (menuEntry("Tutorial", 6, t, display, width, true, scale_)) {
+  if (menuEntry("Tutorial", 6, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::Welcome);
   }
-  if (menuEntry("Editor", 7, t, display, width, true, scale_)) {
+  if (menuEntry("Editor", 7, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::Editor);
   }
-  if (menuEntry("Settings", 8, t, display, width, true, scale_)) {
+  if (menuEntry("Settings", 8, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Quit", 9, t, display, width, true, scale_)) {
+  if (menuEntry("Quit", 9, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::QuitConfirm);
   }
 
@@ -302,7 +302,7 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
                      (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
   if (!games.empty() &&
-      (button("START WATCHING", t, px(180), true, false, true, display) || enter)) {
+      (button("START WATCHING", t, px(180), true, false, true, actionFont()) || enter)) {
     request.watchGame = pickedWatch_;
   } else if (games.empty()) {
     ImGui::PushFont(small);
@@ -312,7 +312,7 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
     ImGui::PopFont();
   }
   ImGui::SameLine();
-  if (button("BACK", t, px(110), false, false, true, display)) shell.back();
+  if (button("BACK", t, px(110), false, false, true, actionFont())) shell.back();
   if (!shell.message().empty()) {
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
@@ -371,13 +371,13 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
   // The curated path: standard first, exotic last. A front door, not a gate.
   int row = 1;
   for (const app::CuratedVariant& c : app::curatedVariants()) {
-    if (menuEntry(c.name.c_str(), row++, t, display, width, true, scale_)) {
+    if (menuEntry(c.name.c_str(), row++, t, actionFont(), width, true, scale_)) {
       start(c.name);
       break;
     }
     caption(c.what.c_str());
   }
-  if (menuEntry("Surprise me", row++, t, display, width, true, scale_)) {
+  if (menuEntry("Surprise me", row++, t, actionFont(), width, true, scale_)) {
     start(shell.surpriseVariant());
   }
   const std::string surprise = shell.currentVariant();
@@ -386,7 +386,7 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
     const std::string why = shell.variantDescription(surprise);
     if (!why.empty()) caption(why.c_str());
   }
-  if (menuEntry("Show me all the boards", row++, t, display, width, true, scale_)) {
+  if (menuEntry("Show me all the boards", row++, t, actionFont(), width, true, scale_)) {
     shell.dismissWelcome();
     shell.go(app::Screen::NewGame);
   }
@@ -420,9 +420,9 @@ UiRequest Ui::buildQuitConfirm(app::Shell& shell) {
 
   // Leaving is the destructive choice, so it is not the one under the pointer by
   // default and it is not the accent: backing out is.
-  if (button("BACK", t, px(150), true, false, true, display)) shell.back();
+  if (button("BACK", t, px(150), true, false, true, actionFont())) shell.back();
   ImGui::SameLine();
-  if (button("QUIT", t, px(110), false, false, true, display)) request.quit = true;
+  if (button("QUIT", t, px(110), false, false, true, actionFont())) request.quit = true;
   endPane();
   return request;
 }
@@ -451,9 +451,9 @@ UiRequest Ui::buildPauseQuitConfirm(app::Shell& shell) {
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(14)));
 
-  if (button("BACK", t, px(150), true, false, true, display)) shell.back();
+  if (button("BACK", t, px(150), true, false, true, actionFont())) shell.back();
   ImGui::SameLine();
-  if (button("QUIT", t, px(110), false, false, true, display)) request.quit = true;
+  if (button("QUIT", t, px(110), false, false, true, actionFont())) request.quit = true;
   endPane();
   return request;
 }
@@ -504,26 +504,28 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
     pickedDescription_ = shell.variantDescription(pickedVariant_);
   }
 
+  // Keep actions outside the scrolling body. The list and game options can scroll
+  // together even when the large-scale form is taller than the whole pane.
+  const float actionH = controlHeight() + px(8);
+  ImGui::BeginChild("##newgamebody",
+                    ImVec2(0, std::max(1.0f, ImGui::GetContentRegionAvail().y - actionH -
+                                                 ImGui::GetStyle().ItemSpacing.y)),
+                    0, ImGuiWindowFlags_NavFlattened);
   const float rowH = px(26.0f);
   // Proportional, not a pixel count: the pane is half the window, and a width chosen
   // for a fixed plate squeezes the description to one letter per line.
   const float listW = ImGui::GetContentRegionAvail().x * 0.44f;
-  // Room beneath the list for the two-player tick, its legend line, and the
-  // Start/Back row; the list scrolls, so reserving more costs nothing.
-  // Reserve what the footer actually needs rather than a constant: the hot-seat row was
-  // added under the list and pushed START and BACK off the bottom of the pane, because
-  // the constant still described a footer that was only two buttons. Measured, so a
-  // larger interface scale - or another row here later - cannot do it again.
-  const float footerH = px(10) + ImGui::GetFrameHeight()      // hot-seat checkbox
-                        + px(2) + ImGui::GetTextLineHeight()  // its one-line note
-                        + px(10) + px(40)                     // the buttons
-                        + px(6);
+  // Two checkboxes, their note and the computer level slider. Keep a useful list
+  // height when those options cannot all fit: the containing body scrolls then.
+  const float spacing = ImGui::GetStyle().ItemSpacing.y;
+  const float optionsH = px(6) + spacing + 3.0f * ImGui::GetFrameHeightWithSpacing() +
+                         small->FontSize + spacing + px(6) + spacing;
   // And no taller than the list actually is. Stretching it to the full pane left a
   // field of empty panel between the last variant and the buttons, which reads as the
   // controls having fallen to the bottom of the screen rather than as a group sitting
   // under the thing they act on.
   const float wantH = static_cast<float>(shell.library().size()) * rowH + px(18.0f);
-  const float room = std::max(1.0f, ImGui::GetContentRegionAvail().y - footerH);
+  const float room = std::max(px(80), ImGui::GetContentRegionAvail().y - optionsH);
   const float listH = std::clamp(wantH, std::min(px(140.0f), room), room);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
@@ -611,17 +613,18 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImGui::PopFont();
   if (computerLevelSlider(shell.settings().computerLevel)) request.settingsChanged = true;
   ImGui::Dummy(ImVec2(0, px(6)));
+  ImGui::EndChild();
   // Enter starts whatever the list has selected. The library is a list of things to
   // play, so the key that means "yes, this one" should work without reaching for the
   // mouse - and it is the only control here that needs no aim.
   const bool enter = !ghosting_ && !ImGui::GetIO().WantTextInput &&
                      (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
-  if (button("START", t, px(150), true, false, true, display) || enter) {
+  if (button("START", t, px(150), true, false, true, actionFont()) || enter) {
     request.loadVariant = pickedVariant_;
   }
   ImGui::SameLine();
-  if (button("BACK", t, px(110), false, false, true, display)) shell.back();
+  if (button("BACK", t, px(110), false, false, true, actionFont())) shell.back();
   if (!shell.message().empty()) {
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
@@ -650,39 +653,39 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(8)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("Continue", 1, t, display, width, true, scale_)) shell.resume();
+  if (menuEntry("Continue", 1, t, actionFont(), width, true, scale_)) shell.resume();
   // Resigning or agreeing a draw only means anything while the game is unfinished, and
   // they sit right under Continue because ending the game is the decision a pause is
   // most often opened for.
   if (shell.session()->game().result() == GameResult::InProgress) {
-    if (menuEntry("Resign", 2, t, display, width, true, scale_)) {
+    if (menuEntry("Resign", 2, t, actionFont(), width, true, scale_)) {
       app::Action a;
       a.kind = app::ActionKind::Resign;
       (void)shell.session()->apply(a);
       shell.resume();
     }
-    if (menuEntry("Offer draw", 3, t, display, width, true, scale_)) {
+    if (menuEntry("Offer draw", 3, t, actionFont(), width, true, scale_)) {
       app::Action a;
       a.kind = app::ActionKind::AgreeDraw;
       (void)shell.session()->apply(a);
       shell.resume();
     }
   }
-  if (menuEntry("Game mode", 4, t, display, width, true, scale_)) {
+  if (menuEntry("Game mode", 4, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::GameInfo);
   }
-  if (menuEntry("Piece moves", 5, t, display, width, true, scale_)) {
+  if (menuEntry("Piece moves", 5, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::PieceMoves);
   }
-  if (menuEntry("Settings", 6, t, display, width, true, scale_)) {
+  if (menuEntry("Settings", 6, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::Settings);
   }
-  if (menuEntry("Main menu", 7, t, display, width, true, scale_)) {
+  if (menuEntry("Main menu", 7, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::MainMenu);
   }
   // A pause-specific confirmation, so quitting from the game keeps the pause section's
   // own look and step rather than jumping to the main menu's prompt.
-  if (menuEntry("Quit", 8, t, display, width, true, scale_)) {
+  if (menuEntry("Quit", 8, t, actionFont(), width, true, scale_)) {
     shell.go(app::Screen::PauseQuitConfirm);
   }
 
@@ -696,12 +699,12 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   ImGui::PopFont();
   ImGui::SetNextItemWidth(px(228.0f));
   ImGui::InputText("##gamename", gameName_, sizeof(gameName_));
-  if (button("Save", t, px(108), false, false, true, display)) {
+  if (button("Save", t, px(108), false, false, true, actionFont())) {
     request.saveGame = true;
     request.gameName = gameName_;
   }
   ImGui::SameLine();
-  if (button("Load", t, px(108), false, false, true, display)) {
+  if (button("Load", t, px(108), false, false, true, actionFont())) {
     request.loadGame = true;
     request.gameName = gameName_;
   }
@@ -776,15 +779,15 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       }
       leaveTarget_ = 0;
     };
-    if (button("SAVE AND LEAVE", t, px(220), true, false, valid, display)) {
+    if (button("SAVE AND LEAVE", t, px(220), true, false, valid, actionFont())) {
       if (shell.saveEditor().has_value()) finish();
     }
-    if (button("LEAVE WITHOUT SAVING", t, px(260), false, false, true, display)) {
+    if (button("LEAVE WITHOUT SAVING", t, px(260), false, false, true, actionFont())) {
       shell.discardEditorChanges();
       designSyncedRevision_ = ~0ull;
       finish();
     }
-    if (button("STAY", t, px(120), false, false, true, display)) leaveTarget_ = 0;
+    if (button("STAY", t, px(120), false, false, true, actionFont())) leaveTarget_ = 0;
     endPane();
     return request;
   }
@@ -802,14 +805,14 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(12)));
     const float homeWidth = ImGui::GetContentRegionAvail().x;
-    if (menuEntry("Piece designer", 1, t, display, homeWidth, true, scale_)) {
+    if (menuEntry("Piece designer", 1, t, actionFont(), homeWidth, true, scale_)) {
       editorPage_ = 1;
     }
-    if (menuEntry("Board designer", 2, t, display, homeWidth, true, scale_)) {
+    if (menuEntry("Board designer", 2, t, actionFont(), homeWidth, true, scale_)) {
       editorPage_ = 3;
     }
     ImGui::Dummy(ImVec2(0, px(10)));
-    if (button("BACK", t, px(120), false, false, true, display)) shell.back();
+    if (button("BACK", t, px(120), false, false, true, actionFont())) shell.back();
     endPane();
     return request;
   }
@@ -848,7 +851,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(12)));
-    if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 1;
+    if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 1;
     endPane();
     return request;
   }
@@ -865,7 +868,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       ImGui::PopStyleColor();
       ImGui::PopFont();
       ImGui::Dummy(ImVec2(0, px(10)));
-      if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
+      if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 0;
       endPane();
       return request;
     }
@@ -944,11 +947,12 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       ImGui::PopFont();
     }
     ImGui::PushFont(small);
-    if (button("SAVE", t, px(90), editor->dirty(), false, loads.has_value(), display)) {
+    if (button("SAVE", t, px(90), editor->dirty(), false, loads.has_value(),
+               actionFont())) {
       (void)shell.saveEditor();
     }
     ImGui::SameLine();
-    if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
+    if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 0;
     ImGui::PopFont();
     endPane();
     return request;
@@ -964,7 +968,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(10)));
-    if (button("BACK", t, px(120), false, false, true, display)) editorPage_ = 0;
+    if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 0;
     endPane();
     return request;
   }
@@ -976,9 +980,9 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(4)));
-  if (button("UNDO", t, px(84), false, true, true, display)) editor->undo();
+  if (button("UNDO", t, px(84), false, true, true, actionFont())) editor->undo();
   ImGui::SameLine();
-  if (button("REDO", t, px(84), false, true, true, display)) editor->redo();
+  if (button("REDO", t, px(84), false, true, true, actionFont())) editor->redo();
   ImGui::SameLine();
   // The loader's verdict, cached per revision: one validator, and the message is its own.
   // SAVE is held back while the document would not load - there is no "save anyway".
@@ -997,13 +1001,14 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       }
     }
   }
-  if (button("SAVE", t, px(84), editor->dirty(), false, validateNote_.empty(), display)) {
+  if (button("SAVE", t, px(84), editor->dirty(), false, validateNote_.empty(),
+             actionFont())) {
     (void)shell.saveEditor();
   }
   ImGui::SameLine();
-  if (button("HELP", t, px(84), false, true, true, display)) editorPage_ = 2;
+  if (button("HELP", t, px(84), false, true, true, actionFont())) editorPage_ = 2;
   ImGui::SameLine();
-  if (button("CLEAR", t, px(88), false, true, true, display)) {
+  if (button("CLEAR", t, px(88), false, true, true, actionFont())) {
     for (auto& cells : previewOcc_) std::fill(cells.begin(), cells.end(), 0);
   }
   // A bad move row is shown red where it is; the sentence is only for what has no row.
@@ -1108,7 +1113,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::PopStyleVar(3);
 
   ImGui::Dummy(ImVec2(0, px(10)));
-  if (button("BACK", t, px(120), false, false, true, display)) {
+  if (button("BACK", t, px(120), false, false, true, actionFont())) {
     if (editor->dirty()) {
       leaveTarget_ = 1;  // ask first
     } else {
@@ -1141,6 +1146,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   const PaneMove move = paneMove();
   beginPane("##settings", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
             !ghosting_);
+  ImGui::PushFont(static_cast<ImFont*>(t.monoLabels ? fontLabel_ : fontBody_));
   eyebrow("settings", t, mono, scale_);
   screenTitle("Settings", t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
@@ -1184,13 +1190,15 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   }
   {
     // The two palettes, chosen by name for the same reason as the icon set.
-    if (cycleButton("Palette", s.theme, t, scale_, px(230))) {
+    if (cycleButton("Theme", s.theme, t, scale_, px(230))) {
       s.theme = s.theme == "console" ? "manifold" : "console";
     }
   }
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-  ImGui::TextUnformatted("faceted silhouettes, or a handful of flat shapes each");
+  ImGui::TextWrapped("%s", s.theme == "manifold"
+                               ? "Manifold: cool glass and a circuit grid floor."
+                               : "Console: warm wood and drifting shapes.");
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::Dummy(ImVec2(0, px(8)));
@@ -1198,7 +1206,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   heading("BOARD", t, small);
   ImGui::Checkbox("Highlight legal moves", &s.showLegalMoves);
   ImGui::Checkbox("Ctrl over a piece shows its moves", &s.peekMovesOnCtrl);
-  ImGui::Checkbox("Ctrl over a square shows what attacks and defends it", &s.showAttackHints);
+  ImGui::Checkbox("Ctrl over a square shows what attacks and defends it",
+                  &s.showAttackHints);
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
   ImGui::TextUnformatted("Ctrl hints only; the opponent's moves ignore check");
@@ -1387,9 +1396,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
   ImGui::BeginChild("##settingsfooter", ImVec2(0, footerH), ImGuiChildFlags_Border,
                     ImGuiWindowFlags_NavFlattened);
-  if (button("BACK", t, px(120), true, false, true, display)) shell.back();
+  if (button("BACK", t, px(120), true, false, true, actionFont())) shell.back();
   ImGui::SameLine();
-  if (button("RESET TO DEFAULTS", t, px(200), false, false, true, display)) {
+  if (button("RESET TO DEFAULTS", t, px(200), false, false, true, actionFont())) {
     const std::string keepVariant = s.lastVariant;
     s = app::Settings{};
     s.lastVariant = keepVariant;
@@ -1404,6 +1413,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::PopFont();
   ImGui::EndChild();
   ImGui::PopStyleVar();
+  ImGui::PopFont();
   endPane();
 
   // Persist whenever anything actually moved, rather than on a Save button nobody
@@ -1423,11 +1433,11 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.trailerMovePreview != s.trailerMovePreview ||
       before.trailerMorphSpeed != s.trailerMorphSpeed ||
       before.trailerMoveSpeed != s.trailerMoveSpeed ||
-      before.trailerNearClip != s.trailerNearClip ||
-      before.kleinTwist != s.kleinTwist ||
-      before.pieceHeightScale != s.pieceHeightScale || before.nearClip != s.nearClip || before.flatView != s.flatView ||
-      before.pieceIcons != s.pieceIcons || before.animateMoves != s.animateMoves ||
-      before.theme != s.theme || before.animationSpeed != s.animationSpeed ||
+      before.trailerNearClip != s.trailerNearClip || before.kleinTwist != s.kleinTwist ||
+      before.pieceHeightScale != s.pieceHeightScale || before.nearClip != s.nearClip ||
+      before.flatView != s.flatView || before.pieceIcons != s.pieceIcons ||
+      before.animateMoves != s.animateMoves || before.theme != s.theme ||
+      before.animationSpeed != s.animationSpeed ||
       before.overtureSpeed != s.overtureSpeed ||
       before.orbitSensitivity != s.orbitSensitivity ||
       before.zoomSensitivity != s.zoomSensitivity ||
@@ -1568,7 +1578,7 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
   ImGui::BeginChild("##infofooter", ImVec2(0, footerH), ImGuiChildFlags_Border,
                     ImGuiWindowFlags_NavFlattened);
-  if (button("BACK", t, px(120), true, false, true, display)) shell.back();
+  if (button("BACK", t, px(120), true, false, true, actionFont())) shell.back();
   ImGui::EndChild();
   ImGui::PopStyleVar();
   endPane();
@@ -1699,7 +1709,7 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
   ImGui::BeginChild("##piecesfooter", ImVec2(0, footerH), ImGuiChildFlags_Border,
                     ImGuiWindowFlags_NavFlattened);
-  if (button("BACK", t, px(120), true, false, true, display)) shell.back();
+  if (button("BACK", t, px(120), true, false, true, actionFont())) shell.back();
   ImGui::EndChild();
   ImGui::PopStyleVar();
   endPane();

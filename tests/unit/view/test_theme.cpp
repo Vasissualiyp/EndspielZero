@@ -43,6 +43,10 @@ TEST_CASE("themes choose their surface materials", "[unit][view]") {
 TEST_CASE("themes select independent ambient backgrounds", "[unit][view]") {
   CHECK(Theme::console().backdrop == Backdrop::Confetti);
   CHECK(Theme::manifold().backdrop == Backdrop::Grid);
+  CHECK(Theme::console().panelStyle == PanelStyle::Plate);
+  CHECK_FALSE(Theme::console().monoLabels);
+  CHECK(Theme::manifold().panelStyle == PanelStyle::Brackets);
+  CHECK(Theme::manifold().monoLabels);
 }
 
 TEST_CASE("manifold is a dark, legible glass alternative", "[unit][view]") {

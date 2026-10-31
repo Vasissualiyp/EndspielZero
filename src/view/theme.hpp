@@ -39,6 +39,7 @@ struct Materials {
 
 /// Ambient decoration, shared by shell screens and the room behind the board.
 enum class Backdrop : std::uint8_t { Confetti, Grid };
+enum class PanelStyle : std::uint8_t { Plate, Brackets };
 
 /// The game's palette, as data.
 ///
@@ -56,6 +57,8 @@ enum class Backdrop : std::uint8_t { Confetti, Grid };
 struct Theme {
   Materials materials{Material::Wood, Material::Wood, Material::Wood};
   Backdrop backdrop{Backdrop::Confetti};
+  PanelStyle panelStyle{PanelStyle::Plate};
+  bool monoLabels{false};
   // Ground and structure. Brown-biased near-black, never a neutral grey: the scene
   // should read as candlelight on worn wood rather than as a developer tool.
   Rgba ink{Rgba::hex(0x0D0B0A)};
@@ -63,6 +66,7 @@ struct Theme {
   Rgba panel{Rgba::hex(0x1E1813)};
   Rgba panelHi{Rgba::hex(0x2A211A)};
   Rgba rule{Rgba::hex(0x3A2E24)};
+  Rgba interfaceRule{Rgba::hex(0x3A2E24)};
 
   // Warm side.
   Rgba bone{Rgba::hex(0xE8DCC4)};
@@ -158,6 +162,8 @@ struct Theme {
     Theme t;
     t.materials = Materials{Material::Glass, Material::Crystal, Material::Glass};
     t.backdrop = Backdrop::Grid;
+    t.panelStyle = PanelStyle::Brackets;
+    t.monoLabels = true;
     t.ink = Rgba::hex(0x05070F);
     t.soot = Rgba::hex(0x0A0E1A);
     t.panel = Rgba::hex(0x10192A);
@@ -169,6 +175,7 @@ struct Theme {
     t.boneFaint = Rgba::hex(0x7796B2);
     t.ember = Rgba::hex(0x35E0FF);
     t.emberDeep = Rgba::hex(0x7A5CFF);
+    t.interfaceRule = t.ember.withAlpha(0.22f);
 
     t.rift = Rgba::hex(0x35B9DB);
     t.riftDeep = Rgba::hex(0x186782);

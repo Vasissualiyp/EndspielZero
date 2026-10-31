@@ -2,11 +2,11 @@
 #include "render/ui.hpp"
 
 #include <algorithm>
-#include <unordered_map>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 #include <SDL3/SDL.h>
@@ -55,12 +55,12 @@ ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
   // there is nothing for it to have replaced there, so disabling the toggle would only
   // break the ordinary flat/solid board for no shape to show in its place (reported
   // directly: "your edits have disabled the normal 2D mode... on cube5 or standard").
-  // Greyed only where a shape is standing in for the board. The flat view is never greyed: it
-  // is the way back. (With `geometryView` left on from a glued variant, a player who had
-  // switched to 2D on a variant with no shape would otherwise find both this and SHAPE
-  // greyed on the next glued board, with no way out.)
-  return {flatView ? "2D" : "3D", flatView || !(settings.geometryView && surfaceAvailable),
-          false};
+  // Greyed only where a shape is standing in for the board. The flat view is never
+  // greyed: it is the way back. (With `geometryView` left on from a glued variant, a
+  // player who had switched to 2D on a variant with no shape would otherwise find both
+  // this and SHAPE greyed on the next glued board, with no way out.)
+  return {flatView ? "2D" : "3D",
+          flatView || !(settings.geometryView && surfaceAvailable), false};
 }
 
 namespace {
@@ -475,9 +475,17 @@ Result<void> Ui::loadFonts() {
   fontDisplay_ = load(display, 17.0f, 0.9f);
   // A missing typeface must not stop the game starting; it just looks plainer.
   if (fontDisplay_ == nullptr) fontDisplay_ = fontBody_;
+  fontAction_ = load(mono, 17.0f, 0.3f);
+  if (fontAction_ == nullptr) fontAction_ = fontDisplay_;
+  fontLabel_ = load(mono, 15.5f);
+  if (fontLabel_ == nullptr) fontLabel_ = fontBody_;
 
   io.FontDefault = static_cast<ImFont*>(fontBody_);
   return {};
+}
+
+ImFont* Ui::actionFont() const noexcept {
+  return static_cast<ImFont*>(theme_.monoLabels ? fontAction_ : fontDisplay_);
 }
 
 void Ui::applyStyle() {
@@ -506,11 +514,16 @@ void Ui::applyStyle() {
   s.ScrollbarSize = 10.0f;
 
   const view::Theme& t = theme_;
+  if (t.panelStyle == view::PanelStyle::Brackets) {
+    s.ChildRounding = 0.0f;
+    s.FrameRounding = 0.0f;
+    s.GrabRounding = 0.0f;
+  }
   ImVec4* c = s.Colors;
   c[ImGuiCol_WindowBg] = col(t.soot, 0.96f);
   c[ImGuiCol_ChildBg] = col(t.panel, 0.0f);
   c[ImGuiCol_PopupBg] = col(t.panel, 0.99f);
-  c[ImGuiCol_Border] = col(t.rule);
+  c[ImGuiCol_Border] = col(t.interfaceRule);
   c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
   c[ImGuiCol_FrameBg] = col(t.panel);
   c[ImGuiCol_FrameBgHovered] = col(t.panelHi);
@@ -526,7 +539,7 @@ void Ui::applyStyle() {
   c[ImGuiCol_Header] = col(t.panelHi);
   c[ImGuiCol_HeaderHovered] = col(t.panelHi);
   c[ImGuiCol_HeaderActive] = col(t.emberDeep);
-  c[ImGuiCol_Separator] = col(t.rule);
+  c[ImGuiCol_Separator] = col(t.interfaceRule);
   c[ImGuiCol_ScrollbarBg] = col(t.ink, 0.6f);
   c[ImGuiCol_ScrollbarGrab] = col(t.rule);
   c[ImGuiCol_ScrollbarGrabHovered] = col(t.emberDeep);
@@ -732,6 +745,10 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   // through where nothing else is drawn.
   dl->AddRectFilled(min, max, u32(theme_.ink));
   field_.draw(dl, min, max, theme_, iconStyle_, true, true);
+  if (theme_.panelStyle == view::PanelStyle::Brackets) {
+    widgets::panelCorners(dl, ImVec2(menuMin.x + px(24), menuMin.y + px(24)),
+                          ImVec2(menuMax.x - px(24), menuMax.y - px(24)), theme_, scale_);
+  }
 
   // A screen's object belongs to that screen: the library's lattice is the *selected*
   // variant's, while a board screen shows the running game's. The departing ghost must
@@ -848,9 +865,9 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   occupied[origin] = 0;
   const int orientIndex = editor->orientationAxis() == 0 ? 0 : 1;
   for (const MoveAtom& a : *atoms) {
-    const std::vector<Direction> dirs = expandAtomFor(
-        a, static_cast<std::uint8_t>(dims), editor->orientationAxis() >= 0 ? orientIndex : -1,
-        Color::White);
+    const std::vector<Direction> dirs =
+        expandAtomFor(a, static_cast<std::uint8_t>(dims),
+                      editor->orientationAxis() >= 0 ? orientIndex : -1, Color::White);
     const StepRange range = stepRange(a);
     const int first = std::max(1, static_cast<int>(range.lo));
     const int last = range.hi == kUnlimited
@@ -1017,8 +1034,8 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
       for (int i = 0; i < 4; ++i) {
         const ImVec2& a = q.p[i];
         const ImVec2& b = q.p[(i + 1) % 4];
-        const float cr = (b.x - a.x) * (io.MousePos.y - a.y) -
-                         (b.y - a.y) * (io.MousePos.x - a.x);
+        const float cr =
+            (b.x - a.x) * (io.MousePos.y - a.y) - (b.y - a.y) * (io.MousePos.x - a.x);
         if (cr != 0.0f) {
           if (sign != 0.0f && (cr > 0.0f) != (sign > 0.0f)) return false;
           sign = cr;
@@ -1056,6 +1073,11 @@ void Ui::pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax) {
   // A departing ghost must not lay the scrim a second time.
   if (ghosting_) return;
   ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(theme_.ink, 0.42f));
+  if (theme_.panelStyle == view::PanelStyle::Brackets) {
+    widgets::panelCorners(ImGui::GetBackgroundDrawList(),
+                          ImVec2(menuMin.x + px(24), menuMin.y + px(24)),
+                          ImVec2(menuMax.x - px(24), menuMax.y - px(24)), theme_, scale_);
+  }
   request.boardRect[0] = vmin.x;
   request.boardRect[1] = vmin.y;
   request.boardRect[2] = split - vmin.x;
@@ -1193,7 +1215,8 @@ void Ui::drawGhost(app::Shell& shell) {
 
 void Ui::drawDebugConsole(app::Shell& shell) {
   if (ImGui::IsKeyPressed(ImGuiKey_F12, false) ||
-      (!ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false))) {
+      (!ImGui::GetIO().WantTextInput &&
+       ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false))) {
     consoleOpen_ = !consoleOpen_;
     consoleFocus_ = consoleOpen_;
   }
@@ -1202,7 +1225,8 @@ void Ui::drawDebugConsole(app::Shell& shell) {
   ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Debug console (F12)", &consoleOpen_)) {
     const float footer = ImGui::GetFrameHeightWithSpacing();
-    ImGui::BeginChild("scrollback", ImVec2(0, -footer), true, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("scrollback", ImVec2(0, -footer), true,
+                      ImGuiWindowFlags_HorizontalScrollbar);
     for (const std::string& l : console_.log()) ImGui::TextUnformatted(l.c_str());
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f || consoleFocus_)
       ImGui::SetScrollHereY(1.0f);
@@ -1221,16 +1245,19 @@ void Ui::drawDebugConsole(app::Shell& shell) {
                                        ? static_cast<int>(h.size()) - 1
                                        : std::max(0, self->consoleHistoryPos_ - 1);
       else if (d->EventKey == ImGuiKey_DownArrow)
-        self->consoleHistoryPos_ = self->consoleHistoryPos_ < 0 ? -1 : self->consoleHistoryPos_ + 1;
-      if (self->consoleHistoryPos_ >= static_cast<int>(h.size())) self->consoleHistoryPos_ = -1;
+        self->consoleHistoryPos_ =
+            self->consoleHistoryPos_ < 0 ? -1 : self->consoleHistoryPos_ + 1;
+      if (self->consoleHistoryPos_ >= static_cast<int>(h.size()))
+        self->consoleHistoryPos_ = -1;
       d->DeleteChars(0, d->BufTextLen);
       if (self->consoleHistoryPos_ >= 0)
         d->InsertChars(0, h[static_cast<std::size_t>(self->consoleHistoryPos_)].c_str());
       return 0;
     };
-    if (ImGui::InputText("##cmd", consoleInput_.data(), consoleInput_.size(),
-                         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory,
-                         recall, this)) {
+    if (ImGui::InputText(
+            "##cmd", consoleInput_.data(), consoleInput_.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory,
+            recall, this)) {
       console_.run(shell, consoleInput_.data());
       consoleInput_[0] = '\0';
       consoleHistoryPos_ = -1;
@@ -1345,8 +1372,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
 }
 
 void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
-                              UiRequest& request, ImFont* display, ImFont* small,
-                              bool editing) {
+                              UiRequest& request, ImFont* small, bool editing) {
   const view::Theme& t = theme_;
   auto note = [&](const char* text) {
     ImGui::SameLine();
@@ -1362,27 +1388,27 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
     // Row 1 - where in the trailer the camera is being set up. STEP moves by the grid:
     // a whole move, or a half, quarter or eighth of one, so a camera that has to circle
     // something can be keyed several times inside a single move.
-    if (button("< STEP", t, px(92), false, true, true, display)) {
+    if (button("< STEP", t, px(92), false, true, true, actionFont())) {
       (void)shell.trailerStepFraction(-1);
     }
     ImGui::SameLine();
-    if (button("STEP >", t, px(92), false, true, true, display)) {
+    if (button("STEP >", t, px(92), false, true, true, actionFont())) {
       (void)shell.trailerStepFraction(+1);
     }
     ImGui::SameLine();
     char grid[16];
     std::snprintf(grid, sizeof(grid), shell.trailerGrid() == 1 ? "GRID 1" : "GRID 1/%d",
                   shell.trailerGrid());
-    if (button(grid, t, px(108), false, true, true, display)) {
+    if (button(grid, t, px(108), false, true, true, actionFont())) {
       const int g = shell.trailerGrid();
       shell.setTrailerGrid(g == 1 ? 2 : g == 2 ? 4 : g == 4 ? 8 : 1);
     }
     ImGui::SameLine();
-    if (button("< BEAT", t, px(92), false, true, true, display)) {
+    if (button("< BEAT", t, px(92), false, true, true, actionFont())) {
       shell.requestTrailerJumpBeat(-1);
     }
     ImGui::SameLine();
-    if (button("BEAT >", t, px(92), false, true, true, display)) {
+    if (button("BEAT >", t, px(92), false, true, true, actionFont())) {
       shell.requestTrailerJumpBeat(+1);
     }
     std::snprintf(text, sizeof(text), "beat %zu of %zu  -  %s  -  move %zu + %zu/8",
@@ -1396,11 +1422,11 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
     const app::CameraCue here{shell.currentVariant(), session.game().moveHistory().size(),
                               shell.attractStep() + 1, shell.trailerEditSub()};
     const app::CameraKeyframe* key = shell.cameraTrack().find(here);
-    if (button("REC KEY", t, px(100), key != nullptr, true, true, display)) {
+    if (button("REC KEY", t, px(100), key != nullptr, true, true, actionFont())) {
       shell.recordCameraKeyframe(shell.trailerKeySpeed());
     }
     ImGui::SameLine();
-    if (button("DEL KEY", t, px(100), false, true, key != nullptr, display)) {
+    if (button("DEL KEY", t, px(100), false, true, key != nullptr, actionFont())) {
       (void)shell.eraseCameraKeyframe();
     }
     std::snprintf(text, sizeof(text), "%zu keys%s",
@@ -1418,31 +1444,31 @@ void Ui::buildTrailerEditRows(app::Shell& shell, app::Session& session,
     app::TrailerPose& pose = shell.editPose();
     const bool formed = pose.formed > 0.5f;
     if (editing && shaped) {
-      if (button("SHAPE", t, px(84), formed, true, true, display)) {
+      if (button("SHAPE", t, px(84), formed, true, true, actionFont())) {
         pose.formed = formed ? 0.0f : 1.0f;
       }
       ImGui::SameLine();
     }
     const bool inverted = shell.settings().geometryInvert;
-    if (button("INVERT", t, px(92), inverted, true, true, display)) {
+    if (button("INVERT", t, px(92), inverted, true, true, actionFont())) {
       shell.settings().geometryInvert = !inverted;
       request.settingsChanged = true;
     }
     ImGui::SameLine();
     const bool ghost = (editing ? pose.ghost : shell.settings().geometryGhost) < 0.99f;
-    if (button("GHOST", t, px(84), ghost, true, true, display)) {
+    if (button("GHOST", t, px(84), ghost, true, true, actionFont())) {
       shell.setTrailerGhost(ghost ? 1.0f : 0.35f);
     }
     ImGui::SameLine();
     const bool flat = shell.settings().shapePieceCylinders;
-    if (button("PIECES", t, px(100), flat, true, true, display)) {
+    if (button("PIECES", t, px(100), flat, true, true, actionFont())) {
       shell.setTrailerFlatPieces(!flat);
       request.settingsChanged = true;
     }
     if (editing && shaped && session.variant().dims.dims() > 2) {
       ImGui::SameLine();
       const bool spread = pose.shellSpread > 0.5f;
-      if (button("SPREAD", t, px(92), spread, true, true, display)) {
+      if (button("SPREAD", t, px(92), spread, true, true, actionFont())) {
         pose.shellSpread = spread ? 0.0f : 1.0f;
       }
     }
@@ -1496,8 +1522,8 @@ float Ui::buildTrailerTimeline(app::Shell& shell) {
   const float labelH = px(15.0f);
   const float y0 = origin.y + labelH;  // the track
   const float y1 = origin.y + height;
-  // Padding at both ends: the first and last frames, and a keyframe sitting on either, would
-  // otherwise be half off the track and hard to grab.
+  // Padding at both ends: the first and last frames, and a keyframe sitting on either,
+  // would otherwise be half off the track and hard to grab.
   const float pad = px(18.0f);
   const float trackW = width - 2.0f * pad;
   const auto xOf = [&](float g) { return origin.x + pad + g / total * trackW; };
@@ -1616,9 +1642,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // skews, overlaps its neighbour, or goes nearly edge-on, so the whole block is gated on
   // the flat view and neither the solid board nor the shape draws it (M17.21 label
   // revision). The seam rails are presentation, not text, and stay.
-  // Flat wins over the shape here exactly as it does in `optionsFor`: with both flags on, the
-  // renderer draws the flat board, so the flat tokens are the pieces - skipping them left a
-  // glued board with no pieces at all.
+  // Flat wins over the shape here exactly as it does in `optionsFor`: with both flags on,
+  // the renderer draws the flat board, so the flat tokens are the pieces - skipping them
+  // left a glued board with no pieces at all.
   const bool surfaceView = shell.settings().geometryView &&
                            hasPlaySurface(session.variant()) && !session.flatView();
   if (coordinateLabelsShown(shell.settings(), session)) {
@@ -1863,20 +1889,21 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     const bool editing = shell.trailerEditing();
     // The shape buttons are offered while it plays too; the stepping and keyframe rows
     // only while editing. They sit above the main row, so the main row never moves.
-    buildTrailerEditRows(shell, session, request, display, small, editing);
-    if (button("STOP TRAILER", t, px(180), false, true, true, display)) {
+    buildTrailerEditRows(shell, session, request, small, editing);
+    if (button("STOP TRAILER", t, px(180), false, true, true, actionFont())) {
       shell.stopAttract();
     }
     ImGui::SameLine();
     // Back to the first beat (deferred a frame - it replaces the session this frame
     // holds).
-    if (button("RESTART", t, px(110), false, true, true, display)) {
+    if (button("RESTART", t, px(110), false, true, true, actionFont())) {
       shell.requestTrailerRestart();
     }
     ImGui::SameLine();
     // Render the whole trailer to a video, frame by frame, in a separate process - what
     // plays here is as fast as this machine can draw it, what is rendered is every frame.
-    if (button("RENDER", t, px(110), renderRunning_, true, !renderRunning_, display)) {
+    if (button("RENDER", t, px(110), renderRunning_, true, !renderRunning_,
+               actionFont())) {
       request.renderTrailer = true;
     }
     ImGui::SameLine();
@@ -1884,7 +1911,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     {
       const bool paused = shell.trailerPaused() || editing;
       if (button(paused ? "PLAY" : "PAUSE", t, px(100), paused, true, !editing,
-                 display)) {
+                 actionFont())) {
         shell.setTrailerPaused(!shell.trailerPaused());
       }
     }
@@ -1897,7 +1924,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const char* label = cam == app::TrailerCamera::Auto     ? "CAM: AUTO"
                           : cam == app::TrailerCamera::Follow ? "CAM: FOLLOW"
                                                               : "CAM: AUTHORED";
-      if (button(label, t, px(150), false, true, true, display)) {
+      if (button(label, t, px(150), false, true, true, actionFont())) {
         shell.setTrailerCamera(
             cam == app::TrailerCamera::Auto     ? app::TrailerCamera::Follow
             : cam == app::TrailerCamera::Follow ? app::TrailerCamera::Authored
@@ -1906,7 +1933,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     }
     ImGui::SameLine();
     if (button(editing ? "DONE" : "EDIT CAMERA", t, px(editing ? 78 : 140), editing, true,
-               true, display)) {
+               true, actionFont())) {
       shell.setTrailerEditing(!editing);
     }
     ImGui::SameLine();
@@ -1923,7 +1950,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   } else if (shell.watching()) {
     // Watching is not playing: the only control that matters is the way out, so it is
     // the only one offered. Esc does the same (M12.8).
-    if (button("STOP WATCHING", t, px(180), false, true, true, display)) {
+    if (button("STOP WATCHING", t, px(180), false, true, true, actionFont())) {
       shell.stopWatching();
     }
     ImGui::SameLine();
@@ -1936,13 +1963,13 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
   } else {
-    if (button("UNDO", t, px(78), false, false, true, display)) {
+    if (button("UNDO", t, px(78), false, false, true, actionFont())) {
       app::Action a;
       a.kind = app::ActionKind::Undo;
       (void)session.apply(a);
     }
     ImGui::SameLine();
-    if (button("RESET", t, px(84), false, false, true, display)) {
+    if (button("RESET", t, px(84), false, false, true, actionFont())) {
       app::Action a;
       a.kind = app::ActionKind::Reset;
       (void)session.apply(a);
@@ -1950,7 +1977,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (v.dims.dims() > 2) {
       ImGui::SameLine();
       // Cold, because it acts on the geometry rather than on the game.
-      if (button("AXES", t, px(78), false, true, true, display)) {
+      if (button("AXES", t, px(78), false, true, true, actionFont())) {
         const DimSpec& d = v.dims;
         bool temporal = false;
         for (std::uint8_t ax = 0; ax < d.dims(); ++ax) {
@@ -2002,7 +2029,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     const bool surfaceAvailable = hasPlaySurface(session.variant());
     const ViewModeButton mode =
         viewModeButton(shell.settings(), session.flatView(), surfaceAvailable);
-    if (button(mode.label, t, px(64), false, true, mode.enabled, display)) {
+    if (button(mode.label, t, px(64), false, true, mode.enabled, actionFont())) {
       if (mode.pieceStyle) {
         shell.settings().shapePieceCylinders = !shell.settings().shapePieceCylinders;
       } else {
@@ -2020,7 +2047,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const bool on = shell.settings().geometryView;
       // Greyed out in 2D (M18.6): a donut has no 2D rendering, so SHAPE is refused there
       // rather than silently doing something. Visible but inert, as above.
-      if (button("SHAPE", t, px(84), on, true, !session.flatView(), display)) {
+      if (button("SHAPE", t, px(84), on, true, !session.flatView(), actionFont())) {
         shell.settings().geometryView = !on;
         request.settingsChanged = true;
       }
@@ -2034,13 +2061,13 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         // without leaving the board. Lit while it follows.
         ImGui::SameLine();
         const bool follow = shell.settings().cameraMode != "off";
-        if (button("CAMERA", t, px(100), follow, true, true, display)) {
+        if (button("CAMERA", t, px(100), follow, true, true, actionFont())) {
           shell.settings().cameraMode = follow ? "off" : "route";
           request.settingsChanged = true;
         }
         ImGui::SameLine();
         const bool inverted = shell.settings().geometryInvert;
-        if (button("INVERT", t, px(92), inverted, true, true, display)) {
+        if (button("INVERT", t, px(92), inverted, true, true, actionFont())) {
           shell.settings().geometryInvert = !inverted;
           request.settingsChanged = true;
         }
@@ -2048,7 +2075,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         // through the near side (M17.10). The pieces stay opaque.
         ImGui::SameLine();
         const bool ghost = shell.settings().geometryGhost < 0.99f;
-        if (button("GHOST", t, px(84), ghost, true, true, display)) {
+        if (button("GHOST", t, px(84), ghost, true, true, actionFont())) {
           shell.settings().geometryGhost = ghost ? 1.0f : 0.35f;
           request.settingsChanged = true;
         }
@@ -2061,7 +2088,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
             PlaySurface::slidesAlongRanks(session.variant())) {
           ImGui::SameLine();
           const bool aligned = shell.settings().geometryAlign;
-          if (button("NOCLIP", t, px(92), aligned, true, true, display)) {
+          if (button("NOCLIP", t, px(92), aligned, true, true, actionFont())) {
             shell.settings().geometryAlign = !aligned;
             request.settingsChanged = true;
           }
@@ -2074,13 +2101,14 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (shell.settings().cameraMode != "off" && shell.settings().geometryView) {
       ImGui::SameLine();
       const bool upright = shell.settings().followUpright;
-      if (button(upright ? "UPRIGHT" : "TILT", t, px(92), upright, true, true, display)) {
+      if (button(upright ? "UPRIGHT" : "TILT", t, px(92), upright, true, true,
+                 actionFont())) {
         shell.settings().followUpright = !upright;
         request.settingsChanged = true;
       }
     }
     ImGui::SameLine();
-    if (button("MENU", t, px(78), false, false, true, display)) shell.pause();
+    if (button("MENU", t, px(78), false, false, true, actionFont())) shell.pause();
 
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
@@ -2153,13 +2181,13 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         if (i != 0) ImGui::SameLine();
         const PieceTypeId piece = pending.choices[i];
         if (button(upper(v.pieces[piece].name).c_str(), t, px(104), i == 0, false, true,
-                   display)) {
+                   actionFont())) {
           (void)session.choosePromotion(piece);
           ImGui::CloseCurrentPopup();
         }
       }
       ImGui::Dummy(ImVec2(0, px(2)));
-      if (button("CANCEL", t, px(104), false, false, true, display)) {
+      if (button("CANCEL", t, px(104), false, false, true, actionFont())) {
         session.cancelPromotion();
         ImGui::CloseCurrentPopup();
       }
@@ -2185,12 +2213,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGui::PopStyleColor();
       ImGui::PopFont();
       ImGui::Dummy(ImVec2(0, px(4)));
-      if (button("PLAY", t, px(104), true, false, true, display)) {
+      if (button("PLAY", t, px(104), true, false, true, actionFont())) {
         (void)session.confirmMove();
         ImGui::CloseCurrentPopup();
       }
       ImGui::SameLine();
-      if (button("CANCEL", t, px(104), false, false, true, display)) {
+      if (button("CANCEL", t, px(104), false, false, true, actionFont())) {
         session.cancelMove();
         ImGui::CloseCurrentPopup();
       }
@@ -2234,11 +2262,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // to sit on - and the thing being read is the figure.
       dl->AddCircleFilled(centre, radius, u32(t.pieceToken, focus), 24);
       dl->AddCircle(centre, radius, u32(t.boardRim, focus), 24, px(1.5f));
-      const view::Rgba figure = view::tintedPiece(white ? t.whitePiece : t.blackPiece,
-                                                  session.snapshot(), cell, travelling, t);
-      drawPieceOf(
-          dl, centre, radius * 0.82f, u32(figure, focus),
-          u32(t.pieceToken, focus), v.pieces[piece.type], iconStyle_, piece.flipped());
+      const view::Rgba figure = view::tintedPiece(
+          white ? t.whitePiece : t.blackPiece, session.snapshot(), cell, travelling, t);
+      drawPieceOf(dl, centre, radius * 0.82f, u32(figure, focus),
+                  u32(t.pieceToken, focus), v.pieces[piece.type], iconStyle_,
+                  piece.flipped());
     };
 
     const view::MoveAnimation& anim = session.animation();
@@ -2251,8 +2279,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (movingTo != kInvalidCell) {
       const view::MoveAnimation::Sample at = anim.sample();
       if (at.moving) {
-        drawToken(session.snapshot().at(movingTo), view::Vec3{at.x, at.y, at.z}, kInvalidCell,
-                  true);
+        drawToken(session.snapshot().at(movingTo), view::Vec3{at.x, at.y, at.z},
+                  kInvalidCell, true);
       }
     }
   }

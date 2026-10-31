@@ -3,8 +3,8 @@
 
 #include <array>
 #include <cstdint>
-#include <memory>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -153,8 +153,8 @@ class Ui {
   /// reviewable without a mouse.
   void setPreviewDims(int dims) noexcept { previewDims_ = dims; }
   /// The piece the designer opens on, by name. For `--shot --piece`.
-  /// Drive the pointer without a display, for `--shot --ui-click`: where it is and whether
-  /// the left button is down on the next frame.
+  /// Drive the pointer without a display, for `--shot --ui-click`: where it is and
+  /// whether the left button is down on the next frame.
   void injectMouse(float x, float y, bool down, int button = 0) noexcept {
     inject_ = true;
     injectPos_ = ImVec2(x, y);
@@ -209,6 +209,7 @@ class Ui {
   int consoleHistoryPos_{-1};
 
   UiRequest buildGameHud(app::Shell& shell, float fps);
+  [[nodiscard]] ImFont* actionFont() const noexcept;
   /// The two-pane frame every menu screen sits in: the drifting field, the screen's
   /// own object, and the depth ladder. Returns the rectangle the menu itself gets.
   void drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax);
@@ -275,7 +276,7 @@ class Ui {
   /// The trailer's camera-authoring rows (M13.9 revision): stepping, keyframes, and the
   /// shape-mode buttons, shown above the trailer's main row while it is paused for edit.
   void buildTrailerEditRows(app::Shell& shell, app::Session& session, UiRequest& request,
-                            ImFont* display, ImFont* small, bool editing);
+                            ImFont* small, bool editing);
   /// The trailer's timeline strip (M13.9): beats as segments, keyframes as diamonds, the
   /// playhead, and - in edit mode - click or drag to scrub. Returns the height it takes
   /// so the controls sit above it.
@@ -321,6 +322,8 @@ class Ui {
   void* fontBody_{nullptr};
   void* fontSmall_{nullptr};
   void* fontMono_{nullptr};
+  void* fontAction_{nullptr};
+  void* fontLabel_{nullptr};
   /// Which flat-piece table to draw from. Pushed in from the player's settings; the
   /// interface holds no opinion of its own about it.
   IconStyle iconStyle_{IconStyle::Faceted};
@@ -374,20 +377,21 @@ class Ui {
   assets::PieceModel previewMeshModel_{};
   bool previewMeshValid_{false};
   /// A note from the last move edit that did not take, shown in red under the list.
-  /// The rest of the piece, drawn faintly behind the outline being edited (the flat icon's
-  /// other fills and its cut-outs), set by the caller around `outlineEditor`.
+  /// The rest of the piece, drawn faintly behind the outline being edited (the flat
+  /// icon's other fills and its cut-outs), set by the caller around `outlineEditor`.
   std::vector<const assets::Outline*> outlineGhostFills_;
   std::vector<const assets::Outline*> outlineGhostCuts_;
-  /// Where the "unsaved changes" dialog would leave to: 0 no dialog, 1 the editor's home, 2
-  /// out of the editor altogether.
+  /// Where the "unsaved changes" dialog would leave to: 0 no dialog, 1 the editor's home,
+  /// 2 out of the editor altogether.
   int leaveTarget_{0};
-  /// The piece's move rows are invalid (set while drawing them): they are shown red, and the
-  /// header stays quiet rather than repeating the loader's sentence.
+  /// The piece's move rows are invalid (set while drawing them): they are shown red, and
+  /// the header stays quiet rather than repeating the loader's sentence.
   bool movesInvalid_{false};
   std::string moveNote_;
   /// The move row whose detail (steps, home rank, en passant, reach) is open.
   int selectedAtom_{-1};
-  /// The piece designer's identity form: text buffers and which piece they were filled for.
+  /// The piece designer's identity form: text buffers and which piece they were filled
+  /// for.
   std::string identityFor_;
   std::array<char, 64> nameBuf_{};
   std::array<char, 4> symbolBuf_{};

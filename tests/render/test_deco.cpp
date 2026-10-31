@@ -8,6 +8,7 @@
 
 #ifdef CB_HAVE_IMGUI
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -102,6 +103,66 @@ TEST_CASE("manifold's ambient field is a perspective floor", "[render]") {
     CHECK(std::isfinite(v.pos.x));
     CHECK(std::isfinite(v.pos.y));
   }
+}
+
+TEST_CASE("grid lights have bright depth trails with graded opacity", "[render]") {
+  DepthField field;
+  field.advance(6.5f);
+  DecoFrame f;
+  field.draw(&f.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+             IconStyle::Faceted, true, true);
+  float minY = 360.0f;
+  float maxY = 0.0f;
+  std::vector<ImU32> alphas;
+  for (const auto& v : f.dl.VtxBuffer) {
+    const ImU32 alpha = (v.col >> IM_COL32_A_SHIFT) & 255u;
+    const ImU32 blue = (v.col >> IM_COL32_B_SHIFT) & 255u;
+    if (blue <= 100u || alpha == 0u) continue;
+    minY = std::min(minY, v.pos.y);
+    maxY = std::max(maxY, v.pos.y);
+    if (std::find(alphas.begin(), alphas.end(), alpha) == alphas.end())
+      alphas.push_back(alpha);
+  }
+  // A luminous route reaches into depth, with a dim tail rather than a uniform bar.
+  REQUIRE(alphas.size() >= 3);
+  CHECK(maxY - minY > 20.0f);
+}
+
+TEST_CASE("the ground keeps flowing underneath the running lights", "[render]") {
+  const auto ground = [](float seconds) {
+    DepthField field;
+    field.advance(seconds);
+    DecoFrame frame;
+    field.draw(&frame.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+               IconStyle::Faceted, true, true);
+    std::vector<std::pair<float, float>> points;
+    for (const auto& v : frame.dl.VtxBuffer) {
+      // The substrate is dimmer than the running lights and their terminal figures.
+      if (((v.col >> IM_COL32_B_SHIFT) & 255u) <= 100u &&
+          ((v.col >> IM_COL32_A_SHIFT) & 255u) > 0u)
+        points.emplace_back(v.pos.x, v.pos.y);
+    }
+    return points;
+  };
+  const auto before = ground(0.2f);
+  REQUIRE_FALSE(before.empty());
+  const bool moved = before != ground(1.1f);
+  CHECK(moved);
+}
+
+TEST_CASE("running-light terminals use the selected chess icon set", "[render]") {
+  DepthField field;
+  field.advance(1.0f);
+  const auto picture = [&](IconStyle style) {
+    DecoFrame frame;
+    field.draw(&frame.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(), style,
+               true, true);
+    std::vector<std::tuple<float, float, ImU32>> points;
+    for (const auto& v : frame.dl.VtxBuffer) points.emplace_back(v.pos.x, v.pos.y, v.col);
+    return points;
+  };
+  const bool different = picture(IconStyle::Faceted) != picture(IconStyle::Primitive);
+  CHECK(different);
 }
 
 TEST_CASE("the grid floor follows elapsed time rather than body simulation", "[render]") {

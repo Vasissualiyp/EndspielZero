@@ -701,7 +701,7 @@ namespace {
 /// A floor in perspective, evaluated directly from elapsed seconds. In particular it
 /// reads none of the confetti bodies' integrated positions or transition impulses.
 void drawGridFloor(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-                   float seconds, float opacity) {
+                   IconStyle iconStyle, float seconds, float opacity) {
   const float width = max.x - min.x;
   const float height = max.y - min.y;
   if (width <= 0.0f || height <= 0.0f || opacity <= 0.0f) return;
@@ -735,24 +735,60 @@ void drawGridFloor(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& th
                   u32(tint(0.25f), opacity * near * 0.60f), lineWidth);
     }
   }
-  const float phase = seconds * 0.16f - std::floor(seconds * 0.16f);
+  const float flow = seconds * 0.16f - std::floor(seconds * 0.16f);
   for (int row = 1; row <= 28; ++row) {
-    const float q = 1.0f / (1.0f + static_cast<float>(row) - phase);
+    const float q = 1.0f / (1.0f + static_cast<float>(row) - flow);
     dl->AddLine(ImVec2(min.x, horizon + floorHeight * q),
                 ImVec2(max.x, horizon + floorHeight * q),
                 u32(tint(0.45f), opacity * q * 0.65f), lineWidth);
   }
-  // A few short light streaks slide along the floor, never across the subject's sky.
-  // Sines avoid a respawn boundary and make capture/reverse evaluation deterministic.
-  for (int streak = 0; streak < 3; ++streak) {
-    const float seed = static_cast<float>(streak);
-    const float q = 0.25f + seed * 0.22f;
-    const float x = std::sin(seconds * 0.12f + seed * 2.1f) * 7.0f;
-    const ImVec2 a = point(x - 0.7f, q);
-    const ImVec2 b = point(x + 0.7f, q);
-    const view::Rgba colour = tint(seed * 0.5f);
-    dl->AddLine(a, b, u32(colour, opacity * 0.12f), lineWidth * 4.0f);
-    dl->AddLine(a, b, u32(colour, opacity * 0.85f), lineWidth);
+  // Packets follow actual grid lanes, turning at two junctions. Sample the tail in
+  // floor space before projecting, so its depth, width and corners belong to the floor.
+  constexpr std::array<float, 4> lanes{-7.0f, -3.0f, 3.0f, 7.0f};
+  for (std::size_t packet = 0; packet < lanes.size(); ++packet) {
+    const float seed = static_cast<float>(packet);
+    const float cycle = seconds * 0.065f + seed * 0.25f;
+    const float progress = cycle - std::floor(cycle);
+    const float distance = std::min(progress / 0.72f, 1.0f) * 8.0f;
+    const float fade = std::clamp(progress / 0.06f, 0.0f, 1.0f) *
+                       std::clamp((1.0f - progress) / 0.16f, 0.0f, 1.0f) * opacity;
+    const float turn = packet < 2 ? -1.0f : 1.0f;
+    const auto floorPoint = [&](float along) {
+      if (along < 5.0f) return ImVec2(lanes[packet], 7.0f - along);
+      if (along < 7.0f) return ImVec2(lanes[packet] + turn * (along - 5.0f), 2.0f);
+      return ImVec2(lanes[packet] + turn * 2.0f, 9.0f - along);
+    };
+    const auto project = [&](ImVec2 p) { return point(p.x, 1.0f / (1.0f + p.y)); };
+    const view::Rgba colour =
+        widgets::shade(widgets::mix(theme.rift, theme.emberDeep, seed / 3.0f), 0.70f);
+    constexpr std::array<float, 4> junctions{0.0f, 5.0f, 7.0f, 9.0f};
+    for (int tail = 0; tail < 12; ++tail) {
+      const float strength = static_cast<float>(tail + 1) / 12.0f;
+      const float end = distance - static_cast<float>(11 - tail) * 0.14f;
+      const float begin = end - 0.14f;
+      for (std::size_t leg = 0; leg + 1 < junctions.size(); ++leg) {
+        const float a = std::max(begin, junctions[leg]);
+        const float b = std::min(end, junctions[leg + 1]);
+        if (a >= b) continue;
+        const ImVec2 from = project(floorPoint(a));
+        const ImVec2 to = project(floorPoint(b));
+        const float alpha = fade * strength * strength;
+        dl->AddLine(from, to, u32(colour, alpha * 0.10f), lineWidth * 6.0f);
+        dl->AddLine(from, to, u32(colour, alpha * 0.85f), lineWidth * 1.2f);
+      }
+    }
+    // A completed route boots a small chess hologram at its terminal. It is an
+    // ambient outline, not another opaque piece competing with the real game.
+    const float reveal = std::clamp((progress - 0.72f) / 0.10f, 0.0f, 1.0f);
+    if (reveal > 0.0f) {
+      const ImVec2 at = project(floorPoint(8.0f));
+      const float size = height * 0.055f;
+      dl->PushClipRect(ImVec2(at.x - size * 0.65f, at.y - size * reveal),
+                       ImVec2(at.x + size * 0.65f, at.y + size * 0.15f), true);
+      icon(dl, iconStyle, kPieceShapes[packet], ImVec2(at.x, at.y - size * 0.5f), size,
+           u32(colour, fade * reveal * 0.16f), u32(colour, fade * reveal * 0.72f));
+      dl->PopClipRect();
+    }
   }
   dl->PopClipRect();
 }
@@ -763,7 +799,7 @@ void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme&
                       IconStyle iconStyle, bool withPieces, bool withShapes,
                       float opacity) const {
   if (theme.backdrop == view::Backdrop::Grid) {
-    if (withShapes) drawGridFloor(dl, min, max, theme, clock_, opacity);
+    if (withShapes) drawGridFloor(dl, min, max, theme, iconStyle, clock_, opacity);
     return;
   }
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);

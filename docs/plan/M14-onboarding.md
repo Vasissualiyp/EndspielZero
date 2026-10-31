@@ -210,3 +210,30 @@ beyond the pane. On a 960x540 window at 3.0x the pane is intrinsically too narro
 for some text; it now scrolls rather than aborting, but a responsive full-width
 layout remains for the broader M14.5 accessibility pass. This slice does **not**
 complete the played tutorial, reachability diagram or full accessibility audit.
+
+### M14.5 library action-row regression (2026-10-31)
+
+The M23 interface review reproduced a missing START/BACK row at 3× on 1920×1080
+(`out/m23/finish/library-footer-before.png`). In
+`Ui::buildNewGame`, `footerH` reserves one hot-seat checkbox, its note and two
+buttons. The actual controls also include the computer checkbox and level
+slider, plus their item spacing. The extra rows push the actions below the
+pane. The capture gate missed this because it asserts a successful render and
+different scale hashes, not an actual button hit.
+
+Extend the existing bounded-body pattern in `Ui::buildSettings`: put the library,
+description and game options in one scrollable child, and keep START/BACK after
+that child in the parent pane. Reserve `widgets::controlHeight()` plus spacing
+for the actions. Within the body, reserve the real option rows; retain a useful
+minimum list height and let the body scroll when the whole form cannot fit.
+Do not add a second set of controls or change keyboard Enter behavior.
+
+Regression: build the real UI at 1920×1080, scale 3, settle its transition, then
+press/release the pointer over the visible START row. It must return the selected
+variant through `UiRequest::loadVariant` for both themes, without scrolling the
+whole pane. Review the 1×/3× captures, and retain the tiny-window no-crash gate.
+
+Implemented: the real-pointer regression first failed for both themes, then
+passed with START/BACK outside the scrolling body. The 1080p 3× artifact now
+shows both actions; the options scroll within the body. Before/after captures
+are in `out/m23/finish/library-footer-{before,after}.png`.
