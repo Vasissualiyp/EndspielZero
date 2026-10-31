@@ -272,3 +272,9 @@ edge, and hover/visible keyboard focus adds explicit-time clipped text echoes an
 frame fragments behind intact labels. Labels/values and footer pairs are measured,
 wrap or stack, and remain reachable through the existing scrollers. Normal Console
 captures are unchanged. See that slice's status for review and final validation.
+
+Sparse cell-local LED interference is implemented in [M23.8](M23.8-led-ambient-and-response.md),
+checkpoint A. Tiny interior strips briefly dim without changing hue or geometry;
+portal rails, sidewalls and distant panels are protected. Actual colour-change
+settling remains checkpoint B. Optional Astra design ideas are listed in the root
+`visual_ideas.md` for the user to select; they are not implementation commitments.

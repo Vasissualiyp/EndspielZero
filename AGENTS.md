@@ -271,6 +271,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | UI panel treatment and action labels | `Theme::panelStyle`, `monoLabels` and `interfaceRule`; `widgets::panelCorners` in `src/render/ui_widgets.cpp` and `Ui::actionFont` in `src/render/ui.cpp`. Settings → Looks → Theme selects the whole look, including the backdrop | |
 | Ambient background (drifting shapes or a perspective grid floor) | `Theme::backdrop` in `src/view/theme.hpp`, dispatched by `DepthField::draw` in `src/render/deco.cpp`; the same field draws behind menus and behind the board | |
 | A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021, ADR-0022 and ADR-0023; `--visual-time` samples hologram light | |
+| LCD panel interference and colour response | `panelSignal` in `src/render/board_renderer.cpp` / `src/render/shaders/board.frag`; stable cell identity and explicit presentation time. See ADR-0024 and `docs/plan/M23.8-led-ambient-and-response.md` (ambient built; response next). Optional user-selectable ideas: [`visual_ideas.md`](visual_ideas.md). | |
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |

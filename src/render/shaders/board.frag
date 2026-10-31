@@ -15,6 +15,7 @@ layout(location = 7) flat in float fragMaterial;
 layout(location = 8) in vec3 fragWorld;
 layout(location = 9) in vec3 fragObject;
 layout(location = 10) in vec3 fragPanel;
+layout(location = 11) in vec3 fragPanelSignal;
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
@@ -81,6 +82,38 @@ float woodFactor(vec3 obj, float variation, bool turned) {
     float ring = smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.72, 1.0, t));
     float fibre = valueNoise(vec3(q.x * 1.2, q.y * 38.0, q.z * 38.0));
     return 1.0 + kRingAmp * (ring - kRingMean) + kFibreAmp * (fibre - 0.5);
+}
+
+// Integer-only event scheduling: each logical display cell has an independent,
+// reproducible phase. No camera/world coordinates or mutable random state enter it.
+uint panelHash(uint x) {
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    return x ^ (x >> 16);
+}
+float panelUnit(uint x) {
+    return float(x >> 8) * (1.0 / 16777216.0);
+}
+float panelInterference(vec2 uv, uint seed, float seconds) {
+    uint epoch = uint(floor(seconds / 12.0));
+    uint event = panelHash(seed ^ (epoch * 0x9e3779b9u) ^ 0x68bc21ebu);
+    if (event % 3u != 0u) return 0.0;
+    float start = 0.5 + 10.5 * panelUnit(panelHash(event ^ 0x1234567u));
+    float age = seconds - float(epoch) * 12.0 - start;
+    if (age <= 0.0 || age >= 0.28) return 0.0;
+    float envelope = smoothstep(0.0, 0.06, age) *
+                       (1.0 - smoothstep(0.22, 0.28, age));
+    float width = 0.18 + 0.17 * panelUnit(panelHash(event ^ 0x89abcdefu));
+    float x = 0.15 + (0.70 - width) * panelUnit(panelHash(event ^ 0x31415926u));
+    float y = float(4u + panelHash(event ^ 0x27182818u) % 15u) / 24.0;
+    vec2 lo = vec2(x, y);
+    vec2 hi = lo + vec2(width, 1.0 / 24.0);
+    vec2 feather = vec2(1.0 / 24.0, 0.5 / 24.0);
+    vec2 band = smoothstep(lo, lo + feather, uv) *
+                 (vec2(1.0) - smoothstep(hi - feather, hi, uv));
+    return -0.028 * envelope * band.x * band.y;
 }
 
 void main() {
@@ -157,6 +190,13 @@ void main() {
         float face = smoothstep(0.0, 0.018, min(border.x, border.y));
         rgb = fragColor.rgb * (0.82 + 0.22 * pixels) * mix(0.58, 1.0, face);
         if (fragPanel.z < 0.5) rgb = fragColor.rgb * 0.55;
+        else if (fragPanelSignal.x > 0.0) {
+            uint seed = uint(floor(fragPanelSignal.x * 65536.0 + 0.5));
+            float ambient = panelInterference(fragPanel.xy, seed, push.visual.x);
+            float departure = clamp(ambient + fragPanelSignal.y, -0.04, 0.04);
+            departure *= clamp(fragPanelSignal.z, 0.0, 1.0) * face * (1.0 - undersampled);
+            rgb *= 1.0 + departure;
+        }
     }
 
     if (matId == 5) {

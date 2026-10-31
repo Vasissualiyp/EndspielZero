@@ -32,3 +32,4 @@ Template: [`template.md`](template.md).
 | [0021](0021-theme-materials-are-presentation-only.md) | Theme materials are presentation-only per-instance shading | Accepted |
 | [0022](0022-explicit-presentation-time-and-holograms.md) | Explicit presentation time and opaque holographic pieces | Accepted |
 | [0023](0023-cell-local-led-panel-coordinates.md) | Cell-local coordinates for LED panels | Accepted |
+| [0024](0024-explicit-cell-display-response-state.md) | Explicit cell display response state | Accepted |

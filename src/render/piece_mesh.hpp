@@ -27,9 +27,12 @@ struct MeshVertex {
   /// Cell-local panel UV; tag 0 uses the ordinary slab's coordinates, +1 is a
   /// sampled surface face, -1 is a sidewall. Independent of slide/world position.
   float panelCoord[3]{};
+  /// Cell display signal: stable seed, explicit response gain, effect weight.
+  /// Sampled LED faces supply this here; ordinary slabs use their instance instead.
+  float panelSignal[3]{};
 };
 
-static_assert(sizeof(MeshVertex) == 56);
+static_assert(sizeof(MeshVertex) == 68);
 
 /// A range inside the shared vertex and index buffers.
 struct MeshRange {

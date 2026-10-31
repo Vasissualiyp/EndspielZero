@@ -83,14 +83,23 @@ float shaderMaterial(view::Material m, Cut cut, float variation) {
   return 0.0f;
 }
 
-float hash01(std::uint32_t key) {
+std::uint32_t materialHash(std::uint32_t key) {
   std::uint32_t x = key * 0x9E3779B1u;
   x ^= x >> 16;
   x *= 0x7FEB352Du;
   x ^= x >> 15;
   x *= 0x846CA68Bu;
   x ^= x >> 16;
-  return static_cast<float>(x >> 8) * (1.0f / 16777216.0f);
+  return x;
+}
+
+float hash01(std::uint32_t key) {
+  return static_cast<float>(materialHash(key) >> 8) * (1.0f / 16777216.0f);
+}
+
+float panelSeed(CellId cell) {
+  // Exactly represented 16-bit phase; zero is reserved for synthetic steady panels.
+  return static_cast<float>(1u + materialHash(cell) % 65535u) / 65536.0f;
 }
 
 float pieceMaterial(const view::Theme& t, Piece piece) {
@@ -240,12 +249,13 @@ Result<void> BoardRenderer::buildPipeline() {
   const VkVertexInputBindingDescription bindings[2]{
       {0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-  const VkVertexInputAttributeDescription attrs[13]{
+  const VkVertexInputAttributeDescription attrs[15]{
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, pos)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
       {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, height)},
       {11, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color)},
       {12, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, panelCoord)},
+      {13, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, panelSignal)},
       {3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, center)},
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, scale)},
       {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, color)},
@@ -253,13 +263,14 @@ Result<void> BoardRenderer::buildPipeline() {
       {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, edgeMask)},
       {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, roll)},
       {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, material)},
-      {10, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, quat)}};
+      {10, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, quat)},
+      {14, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, panelSignal)}};
 
   VkPipelineVertexInputStateCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vi.vertexBindingDescriptionCount = 2;
   vi.pVertexBindingDescriptions = bindings;
-  vi.vertexAttributeDescriptionCount = 13;
+  vi.vertexAttributeDescriptionCount = 15;
   vi.pVertexAttributeDescriptions = attrs;
 
   VkPipelineInputAssemblyStateCreateInfo ia{};
@@ -888,7 +899,8 @@ InstanceSet BoardRenderer::buildInstances(
     constexpr int kSide = PlaySurface::kSubdiv + 1;
     constexpr float kHalf = PlaySurface::kThickness * 0.5f;
     const auto push = [&](const view::Vec3& at, const view::Vec3& n, float h,
-                          const float rgba[4], float u, float panelV, float tag) {
+                          const float rgba[4], float u, float panelV, float tag,
+                          float seed = 0, float effectWeight = 0) {
       MeshVertex mv{};
       mv.pos[0] = at.x;
       mv.pos[1] = at.y;
@@ -900,6 +912,8 @@ InstanceSet BoardRenderer::buildInstances(
       mv.panelCoord[0] = u;
       mv.panelCoord[1] = panelV;
       mv.panelCoord[2] = tag;
+      mv.panelSignal[0] = seed;
+      mv.panelSignal[2] = effectWeight;
       for (int c = 0; c < 4; ++c) mv.color[c] = rgba[c];
       out.surfaceVertices.push_back(mv);
       return static_cast<std::uint32_t>(out.surfaceVertices.size() - 1);
@@ -911,6 +925,8 @@ InstanceSet BoardRenderer::buildInstances(
 
     for (const SurfacePatch& patch : surf.patches()) {
       const view::Rgba fill = fillFor(patch.cell);
+      const float seed =
+          theme_.materials.cells == view::Material::Led ? panelSeed(patch.cell) : 0;
       // The seam rails (M17.21): a closed shape has no edge to draw a rim on the way the
       // flat board does, so the wrap ring is tinted into the patch's own vertices
       // instead. The colour is the flat view's own seam colour at the same cell, so the
@@ -935,12 +951,16 @@ InstanceSet BoardRenderer::buildInstances(
       const app::SurfaceKind railKind = app::overtureSignature(v).surface;
       const float railW0 = seamRailWeight(railKind, 0, options_.surfaceFormed);
       const float railW1 = seamRailWeight(railKind, 1, options_.surfaceFormed);
-      const auto tinted = [&](view::Rgba base, int i, int j) {
+      const auto tinted = [&](view::Rgba base, int i, int j,
+                              float* effectWeight = nullptr) {
+        if (effectWeight) *effectWeight = seed > 0 ? 1.0f : 0.0f;
         if (rails) {
           SurfaceRail ru = surfaceRail(*seams, patch.cell, 0, i, j);
           SurfaceRail rv = surfaceRail(*seams, patch.cell, 1, i, j);
           ru.weight *= railW0;
           rv.weight *= railW1;
+          if (effectWeight)
+            *effectWeight *= 1 - std::clamp(std::max(ru.weight, rv.weight), 0.0f, 1.0f);
           if (ru.weight > 0.0f && rv.weight > 0.0f) {
             // The one corner where both rings cross: average them so neither wins.
             const float sum = ru.weight + rv.weight;
@@ -971,21 +991,23 @@ InstanceSet BoardRenderer::buildInstances(
         for (int j = 0; j < kSide; ++j) {
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
           float rgba[4]{};
-          toFloat4(tinted(fill, i, j), rgba);
+          float effectWeight{};
+          toFloat4(tinted(fill, i, j, &effectWeight), rgba);
           push(patch.pos[k] + patch.normal[k] * kHalf, patch.normal[k], 1.0f, rgba,
                static_cast<float>(j) / PlaySurface::kSubdiv,
-               static_cast<float>(i) / PlaySurface::kSubdiv, 1);
+               static_cast<float>(i) / PlaySurface::kSubdiv, 1, seed, effectWeight);
         }
       }
       for (int i = 0; i < kSide; ++i) {
         for (int j = 0; j < kSide; ++j) {
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
           float rgba[4]{};
-          toFloat4(tinted(fill, i, j), rgba);
+          float effectWeight{};
+          toFloat4(tinted(fill, i, j, &effectWeight), rgba);
           push(patch.pos[k] - patch.normal[k] * kHalf,
                view::Vec3{-patch.normal[k].x, -patch.normal[k].y, -patch.normal[k].z},
                0.80f, rgba, static_cast<float>(j) / PlaySurface::kSubdiv,
-               static_cast<float>(i) / PlaySurface::kSubdiv, 1);
+               static_cast<float>(i) / PlaySurface::kSubdiv, 1, seed, effectWeight);
         }
       }
       const std::uint32_t backBase = base + kSide * kSide;
@@ -1428,6 +1450,10 @@ InstanceSet BoardRenderer::buildInstances(
     cell.material =
         shaderMaterial(theme_.materials.cells, Cut::Plank,
                        0.5f * static_cast<float>(parity & 1) + 0.49f * hash01(pl.cell));
+    if (theme_.materials.cells == view::Material::Led) {
+      cell.panelSignal[0] = panelSeed(pl.cell);
+      cell.panelSignal[2] = 1;
+    }
 
     byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(cell);
 

@@ -547,6 +547,214 @@ TEST_CASE("LED patch coordinates stay attached through slide and inversion",
 }
 #endif
 
+TEST_CASE("LED panel signal has a dedicated zero-default GPU payload",
+          "[render][led][led-ambient]") {
+  CHECK(sizeof(MeshVertex) == 68);
+  CHECK(offsetof(MeshVertex, panelSignal) == 56);
+  CHECK(sizeof(Instance) == 96);
+  CHECK(offsetof(Instance, panelSignal) == 84);
+  const Instance instance;
+  CHECK(std::all_of(std::begin(instance.panelSignal), std::end(instance.panelSignal),
+                    [](float f) { return f == 0; }));
+  for (const auto& vertex : MeshLibrary::build().vertices)
+    CHECK(std::all_of(std::begin(vertex.panelSignal), std::end(vertex.panelSignal),
+                      [](float f) { return f == 0; }));
+}
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("LED interference identity follows logical cells across surfaces and rails",
+          "[render][led][led-ambient]") {
+  constexpr std::size_t side = PlaySurface::kSubdiv + 1;
+  constexpr std::size_t faceVertices = side * side;
+  constexpr std::size_t perPatch = 2 * faceVertices + 16 * PlaySurface::kSubdiv;
+  for (const char* name : {"torus", "klein"}) {
+    INFO(name);
+    const auto v = test::loadVariant(name);
+    const auto snap = view::PositionView::capture(Position::startPosition(v));
+    const auto cfg = view::ViewConfig::forBoard(v.dims);
+    const auto theme = view::Theme::manifold();
+    const auto seams = view::SeamMap::build(v, cfg, theme);
+    BoardRenderer renderer;
+    renderer.setTheme(theme);
+    const auto flat = renderer.buildInstances(snap, cfg, &seams);
+    std::vector<float> seeds;
+    for (const auto& instance : flat.instances) {
+      if (instance.material == 7) {
+        CHECK(instance.panelSignal[0] > 0);
+        CHECK(instance.panelSignal[0] < 1);
+        CHECK(instance.panelSignal[1] == 0);
+        CHECK(instance.panelSignal[2] == 1);
+        seeds.push_back(instance.panelSignal[0]);
+      } else {
+        CHECK(std::all_of(std::begin(instance.panelSignal),
+                          std::end(instance.panelSignal),
+                          [](float f) { return f == 0; }));
+      }
+    }
+    const auto placements = view::layout(v.dims, cfg);
+    REQUIRE(seeds.size() == placements.size());
+    std::vector<float> byCell(v.dims.cellCount());
+    for (std::size_t i = 0; i < placements.size(); ++i)
+      byCell[placements[i].cell] = seeds[i];
+    REQUIRE(seeds.size() > 1);
+    CHECK(seeds[0] != seeds[1]);
+    BoardOptions options;
+    options.surface = true;
+    renderer.setOptions(options);
+    const auto shape = renderer.buildInstances(snap, cfg, &seams);
+    const auto surface = PlaySurface::build(v);
+    REQUIRE(shape.surfaceVertices.size() == surface.patches().size() * perPatch);
+    bool protectedRail = false;
+    for (std::size_t patch = 0; patch < surface.patches().size(); ++patch) {
+      const float seed = byCell[surface.patches()[patch].cell];
+      for (std::size_t i = 0; i < perPatch; ++i) {
+        const auto& vertex = shape.surfaceVertices[patch * perPatch + i];
+        if (i < 2 * faceVertices) {
+          CHECK(vertex.panelSignal[0] == seed);
+          CHECK(vertex.panelSignal[1] == 0);
+          CHECK(vertex.panelSignal[2] >= 0);
+          CHECK(vertex.panelSignal[2] <= 1);
+          protectedRail |= vertex.panelSignal[2] == 0;
+        } else {
+          CHECK(std::all_of(std::begin(vertex.panelSignal), std::end(vertex.panelSignal),
+                            [](float f) { return f == 0; }));
+        }
+      }
+    }
+    CHECK(protectedRail);
+    for (const auto& instance : shape.instances)
+      CHECK(std::all_of(std::begin(instance.panelSignal), std::end(instance.panelSignal),
+                        [](float f) { return f == 0; }));
+    options.surfaceSlideU = 0.6f;
+    options.surfaceEvert = 1;
+    renderer.setOptions(options);
+    const auto moved = renderer.buildInstances(snap, cfg, &seams);
+    REQUIRE(moved.surfaceVertices.size() == shape.surfaceVertices.size());
+    for (std::size_t i = 0; i < shape.surfaceVertices.size(); ++i)
+      CHECK(std::equal(std::begin(shape.surfaceVertices[i].panelSignal),
+                       std::end(shape.surfaceVertices[i].panelSignal),
+                       std::begin(moved.surfaceVertices[i].panelSignal)));
+    renderer.setTheme(view::Theme::console());
+    const auto console = renderer.buildInstances(snap, cfg, &seams);
+    for (const auto& vertex : console.surfaceVertices)
+      CHECK(std::all_of(std::begin(vertex.panelSignal), std::end(vertex.panelSignal),
+                        [](float f) { return f == 0; }));
+  }
+}
+#endif
+
+TEST_CASE("LED interference is sparse local subtle and reproducible",
+          "[render][gpu][led][led-ambient]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  auto target = OffscreenTarget::create(gpu().ctx, 512, 512);
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(target.has_value());
+  REQUIRE(renderer.has_value());
+  InstanceSet set;
+  Instance cell;
+  cell.scale[0] = cell.scale[1] = cell.scale[2] = 1;
+  cell.color[0] = cell.color[1] = cell.color[2] = 0.4f;
+  cell.color[3] = 1;
+  cell.material = 7;
+  cell.panelSignal[0] = 0.125f;
+  cell.panelSignal[2] = 1;
+  set.instances.push_back(cell);
+  set.batches[static_cast<std::size_t>(Archetype::Cell)] = {0, 1};
+  view::OrbitCamera cam;
+  cam.yaw = 0;
+  cam.pitch = std::numbers::pi_v<float> * 0.5f;
+  cam.orthographic = true;
+  cam.distance = 1.4f;
+  const auto shot = [&](double seconds) {
+    renderer->setVisualTime(seconds);
+    REQUIRE(renderer->render(*target, set, cam).has_value());
+    auto px = target->readPixels();
+    REQUIRE(px.has_value());
+    REQUIRE(gpu().ctx.takeValidationMessages().empty());
+    return Image{512, 512, std::move(*px)};
+  };
+  const auto quiet = shot(0);
+  // Observed representative fixture: seed 1/8 has a visible event at 6.75s.
+  // Phase discovery was done by rendering, not by duplicating the shader hash.
+  constexpr double eventTime = 6.75;
+  const auto active = shot(eventTime);
+  REQUIRE(active.rgba != quiet.rgba);
+  for (double t : {1.0, 4.0, 6.5, 7.0, 11.75, 12.0, 119.99, 120.0})
+    CHECK(shot(t).rgba == quiet.rgba);
+  std::size_t changed = 0, face = 0;
+  int minX = 512, minY = 512, maxX = 0, maxY = 0;
+  for (std::uint32_t y = 0; y < 512; ++y) {
+    for (std::uint32_t x = 0; x < 512; ++x) {
+      const auto a = quiet.at(x, y), b = active.at(x, y);
+      face += a.r > 50 ? 1u : 0u;
+      CHECK(a.a == b.a);
+      CHECK(std::abs(int(a.r) - int(b.r)) <= 10);
+      CHECK(std::abs(int(a.g) - int(b.g)) <= 10);
+      CHECK(std::abs(int(a.b) - int(b.b)) <= 10);
+      if (a.r != b.r || a.g != b.g || a.b != b.b) {
+        ++changed;
+        minX = std::min(minX, static_cast<int>(x));
+        minY = std::min(minY, static_cast<int>(y));
+        maxX = std::max(maxX, static_cast<int>(x));
+        maxY = std::max(maxY, static_cast<int>(y));
+      }
+    }
+  }
+  REQUIRE(changed > 0);
+  CHECK(changed * 20 < face);
+  CHECK(minX > 90);
+  CHECK(minY > 90);
+  CHECK(maxX < 422);
+  CHECK(maxY < 422);
+  (void)shot(20);
+  CHECK(shot(eventTime).rgba == active.rgba);
+  REQUIRE(writePpm(quiet, capturePath("led-ambient-quiet")).has_value());
+  REQUIRE(writePpm(active, capturePath("led-ambient-active")).has_value());
+  cam.distance = 30;
+  const auto farQuiet = shot(0);
+  CHECK(shot(eventTime).rgba == farQuiet.rgba);
+  cam.distance = 1.4f;
+  set.instances[0].panelSignal[0] = 0;
+  CHECK(shot(eventTime).rgba == quiet.rgba);
+  set.instances[0].panelSignal[0] = 0.125f;
+  set.instances[0].material = 3;
+  const auto glass = shot(0);
+  CHECK(shot(eventTime).rgba == glass.rgba);
+  // The same signal on a sampled vertical face uses its UVs, not world XY.
+  set.instances[0].material = 7;
+  std::fill(std::begin(set.instances[0].panelSignal),
+            std::end(set.instances[0].panelSignal), 0);
+  set.batches = {};
+  for (const auto& uv :
+       std::array<std::array<float, 2>, 4>{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}}) {
+    MeshVertex vertex{};
+    vertex.pos[0] = uv[0] - 0.5f;
+    vertex.pos[2] = uv[1] - 0.5f;
+    vertex.normal[1] = -1;
+    vertex.panelCoord[0] = uv[0];
+    vertex.panelCoord[1] = uv[1];
+    vertex.panelCoord[2] = 1;
+    vertex.panelSignal[0] = 0.125f;
+    vertex.panelSignal[2] = 1;
+    set.surfaceVertices.push_back(vertex);
+  }
+  set.surfaceIndices = {0, 1, 2, 0, 2, 3};
+  cam.pitch = 0;
+  const auto vertical = shot(0);
+  const auto verticalActive = shot(eventTime);
+  CHECK(vertical.rgba != verticalActive.rgba);
+  REQUIRE(writePpm(verticalActive, capturePath("led-ambient-vertical")).has_value());
+  for (auto& vertex : set.surfaceVertices) vertex.panelSignal[2] = 0;
+  CHECK(shot(eventTime).rgba == vertical.rgba);  // fully coloured portal rail
+  for (auto& vertex : set.surfaceVertices) {
+    vertex.panelSignal[2] = 1;
+    vertex.panelCoord[2] = -1;
+  }
+  const auto sidewall = shot(0);
+  CHECK(shot(eventTime).rgba == sidewall.rgba);
+  CHECK(gpu().ctx.validationErrorCount() == 0);
+}
+
 TEST_CASE("LED cells resolve a pixel matrix nearby and filter to a steady mean afar",
           "[render][gpu][led]") {
   if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);

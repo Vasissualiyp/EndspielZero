@@ -58,8 +58,11 @@ struct Instance {
   /// glass (3), hologram (4), glow (5), turned wood (6), or LED panel (7).
   /// Fractional part varies wood grain.
   float material{0};
+  /// Cell display signal: stable seed, explicit response gain, effect weight.
+  /// Zero on non-panels and the sampled surface's identity instance.
+  float panelSignal[3]{};
 };
-static_assert(sizeof(Instance) == 84);
+static_assert(sizeof(Instance) == 96);
 
 /// The sub-rectangle of the target the board is drawn into, in pixels. Zero width means
 /// the whole target. At namespace scope because a nested class's default member

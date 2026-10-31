@@ -13,6 +13,8 @@ layout(location = 11) in vec4 inVertColor;  // white on authored shapes; the geo
                                             // view's board is one mesh of many colours
 
 layout(location = 12) in vec3 inPanelCoord;
+layout(location = 13) in vec3 inPanelSignal;
+layout(location = 14) in vec3 instPanelSignal;
 
 layout(location = 3) in vec3 instCenter;
 layout(location = 4) in vec3 instScale;
@@ -43,6 +45,7 @@ layout(location = 7) flat out float fragMaterial;
 layout(location = 8) out vec3 fragWorld;
 layout(location = 9) out vec3 fragObject;
 layout(location = 10) out vec3 fragPanel;
+layout(location = 11) out vec3 fragPanelSignal;
 
 // Rotate a vector by a unit quaternion.
 vec3 rotateByQuat(vec3 v, vec4 q) {
@@ -79,6 +82,7 @@ void main() {
     fragPanel = abs(inPanelCoord.z) < 0.5
         ? vec3(inPosition.xy + vec2(0.5), abs(inNormal.z) > 0.5 ? 1.0 : 0.0)
         : vec3(inPanelCoord.xy, inPanelCoord.z > 0.0 ? 1.0 : 0.0);
+    fragPanelSignal = inPanelSignal + instPanelSignal;
     fragLocal = inPosition.xy;
     fragEdge = instEdge;
     fragEdgeMask = instEdgeMask;
