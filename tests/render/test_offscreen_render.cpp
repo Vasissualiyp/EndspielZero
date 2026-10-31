@@ -169,6 +169,170 @@ TEST_CASE("instances are built from a snapshot without a GPU", "[render]") {
   }
 }
 
+TEST_CASE("wood is confined to board and pieces and never moves with a piece", "[render]") {
+  const VariantSpec v = test::loadVariant("standard");
+  const Position p = Position::startPosition(v);
+  const auto snap = view::PositionView::capture(p);
+  const auto cfg = view::ViewConfig::forBoard(v.dims);
+  BoardRenderer renderer;
+  auto wood = view::Theme::console();
+  renderer.setTheme(wood);
+  const InstanceSet set = renderer.buildInstances(snap, cfg);
+  wood.materials = view::Materials{};
+  renderer.setTheme(wood);
+  const InstanceSet matte = renderer.buildInstances(snap, cfg);
+  REQUIRE(set.size() == matte.size());
+  REQUIRE(set.size() == 97);
+  CHECK(std::memcmp(matte.instances.data(), renderer.buildInstances(snap, cfg).instances.data(),
+                    set.size() * sizeof(Instance)) == 0);
+  int cells = 0, pieces = 0, plinths = 0;
+  for (std::size_t i = 0; i < set.size(); ++i) {
+    Instance a = set.instances[i], b = matte.instances[i];
+    CHECK(b.material == 0.0f);
+    a.material = b.material;
+    CHECK(std::memcmp(&a, &b, sizeof(Instance)) == 0);
+    const int id = static_cast<int>(set.instances[i].material);
+    if (id == 2) {
+      if (set.instances[i].material == 2.25f) ++plinths;
+      else ++cells;
+    } else if (id == 6) ++pieces;
+  }
+  CHECK(cells == 64);
+  CHECK(plinths == 1);
+  CHECK(pieces == 32);
+  std::vector<float> variations;
+  for (const Instance& i : set.instances) {
+    if (static_cast<int>(i.material) == 2 && i.material != 2.25f)
+      variations.push_back(i.material);
+  }
+  REQUIRE(variations.size() == 64);
+  CHECK(std::adjacent_find(variations.begin(), variations.end(),
+                           std::not_equal_to<float>{}) != variations.end());
+
+  auto session = app::Session::create(test::loadVariant("standard"));
+  REQUIRE(session.has_value());
+  renderer.setTheme(view::Theme::console());
+  const auto before = renderer.buildInstances((*session)->snapshot(), (*session)->viewConfig());
+  const auto pawnMaterial = [&] {
+    for (const Instance& i : before.instances) {
+      if (static_cast<int>(i.material) == 6 &&
+          std::abs(i.color[0] - renderer.theme().whitePiece.r) < 1e-4f)
+        return i.material;
+    }
+    return -1.0f;
+  }();
+  REQUIRE(pawnMaterial >= 6.0f);
+  for (const auto coords : {Coord::of({4, 1}), Coord::of({4, 3})}) {
+    app::Action click;
+    click.kind = app::ActionKind::ClickCell;
+    click.cell = (*session)->variant().dims.toCell(coords);
+    REQUIRE((*session)->apply(click).has_value());
+  }
+  for (float t : {0.2f, 0.5f, 0.8f}) {
+    (*session)->setMoveProgress(t);
+    const auto at = (*session)->animation().sample();
+    const auto moving = renderer.buildInstances((*session)->snapshot(),
+                                                 (*session)->viewConfig(),
+                                                 &(*session)->seams(), &(*session)->animation());
+    const auto found = std::find_if(moving.instances.begin(), moving.instances.end(),
+                                    [&](const Instance& i) {
+                                      return static_cast<int>(i.material) == 6 &&
+                                             std::abs(i.center[0] - at.x) < 1e-4f &&
+                                             std::abs(i.center[1] - at.y) < 1e-4f;
+                                    });
+    REQUIRE(found != moving.instances.end());
+    CHECK(found->material == pawnMaterial);
+  }
+}
+
+TEST_CASE("manifold dispatches glass, crystal and portal glow", "[render]") {
+  const VariantSpec v = test::loadVariant("torus");
+  const Position p = Position::startPosition(v);
+  const auto snap = view::PositionView::capture(p);
+  BoardRenderer renderer;
+  renderer.setTheme(view::Theme::manifold());
+  const auto set = renderer.buildInstances(snap, view::ViewConfig::forBoard(v.dims));
+  int glass = 0, crystal = 0;
+  for (const Instance& i : set.instances) {
+    if (i.material == 3.0f) ++glass;
+    if (i.material == 4.0f) ++crystal;
+  }
+  CHECK(glass == 65);
+  CHECK(crystal == 32);
+  auto glued = app::Session::create(test::loadVariant("torus"));
+  REQUIRE(glued.has_value());
+  const auto portals = renderer.buildInstances((*glued)->snapshot(),
+                                                (*glued)->viewConfig(), &(*glued)->seams());
+  CHECK(std::any_of(portals.instances.begin(), portals.instances.end(),
+                    [](const Instance& i) { return i.material == 5.0f; }));
+  auto mirrored = app::Session::create(test::loadVariant("mirrorbox"));
+  REQUIRE(mirrored.has_value());
+  auto matte = view::Theme::console();
+  matte.materials = view::Materials{};
+  renderer.setTheme(matte);
+  const auto rails = renderer.buildInstances((*mirrored)->snapshot(),
+                                             (*mirrored)->viewConfig(), &(*mirrored)->seams());
+  CHECK(std::any_of(rails.instances.begin(), rails.instances.end(),
+                    [](const Instance& i) { return i.material == 1.0f; }));
+  CHECK(std::all_of(rails.instances.begin(), rails.instances.end(),
+                    [](const Instance& i) { return i.material == 0.0f || i.material == 1.0f; }));
+}
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("manifold shape glass reveals the far side by default", "[render]") {
+  const VariantSpec v = test::loadVariant("torus");
+  const Position p = Position::startPosition(v);
+  BoardRenderer renderer;
+  renderer.setTheme(view::Theme::manifold());
+  BoardOptions options;
+  options.surface = true;
+  renderer.setOptions(options);
+  const auto set = renderer.buildInstances(view::PositionView::capture(p),
+                                           view::ViewConfig::forBoard(v.dims));
+  REQUIRE_FALSE(set.surfaceVertices.empty());
+  CHECK(set.instances[set.surfaceInstance].material == 3.0f);
+  CHECK(set.surfaceVertices.front().color[3] > 0.35f);
+  CHECK(set.surfaceVertices.front().color[3] < 0.8f);
+}
+#endif
+
+TEST_CASE("wood and glass change the rendered board without changing its geometry", "[render]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  const VariantSpec v = test::loadVariant("standard");
+  const Position p = Position::startPosition(v);
+  const auto snap = view::PositionView::capture(p);
+  const auto cfg = view::ViewConfig::forBoard(v.dims);
+  const auto cam = view::OrbitCamera::frame(view::boundsOf(view::layout(v.dims, cfg)));
+  auto target = OffscreenTarget::create(gpu().ctx, 640, 400);
+  REQUIRE(target.has_value());
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(renderer.has_value());
+  const auto shot = [&](const view::Theme& theme) {
+    renderer->setTheme(theme);
+    auto img = renderer->renderToImage(*target, snap, cfg, cam);
+    REQUIRE(img.has_value());
+    REQUIRE(gpu().ctx.takeValidationMessages().empty());
+    return *img;
+  };
+  auto matte = view::Theme::console();
+  matte.materials = view::Materials{};
+  const auto plain = shot(matte);
+  const auto wood = shot(view::Theme::console());
+  const auto glass = shot(view::Theme::manifold());
+  auto unshadedManifold = view::Theme::manifold();
+  unshadedManifold.materials = view::Materials{};
+  const auto plainManifold = shot(unshadedManifold);
+  REQUIRE(plain.rgba.size() == wood.rgba.size());
+  std::size_t changed = 0;
+  for (std::size_t i = 0; i < plain.rgba.size(); ++i)
+    if (plain.rgba[i] != wood.rgba[i]) ++changed;
+  CHECK(changed > plain.rgba.size() / 50);
+  const bool otherTheme = glass.rgba != wood.rgba;
+  const bool glassShaded = glass.rgba != plainManifold.rgba;
+  CHECK(otherTheme);
+  CHECK(glassShaded);
+}
+
 TEST_CASE("a capture leaves a flourish and a quiet move leaves none", "[render]") {
   // M18.1. The position is already post-move when the renderer sees it, so the captured
   // piece is not on the board - the flourish is rebuilt from the animation's own copy of
@@ -957,9 +1121,10 @@ TEST_CASE("a board renders a picture, not a fill", "[render][gpu]") {
     // Structure: a blank or solid frame has near-zero luminance variance.
     CHECK(f.image.luminanceVariance() > 50.0);
     CHECK(f.image.distinctColors() > 8);
-    // A flat board has no non-flat geometry, so it spends no saturated colour.
+    // Faceted indigo pieces may now be saturated even on a flat board, but the
+    // frame remains restrained: saturated pixels cannot dominate it.
     if (std::string(name) == "standard") {
-      CHECK(f.image.saturatedPixels() == 0);
+      CHECK(f.image.saturatedPixels() < 256u * 192u / 100u);
     }
   }
 }

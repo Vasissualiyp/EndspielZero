@@ -16,6 +16,12 @@ travel. The engine core is dependency-free C++23, driven by declarative variant
 data and a sandboxed rule-effect VM. A Vulkan renderer projects N-D boards to
 the screen. Performance is a first-class constraint at every layer.
 
+**[INVARIANT]** Material ids and procedural grain are presentation only
+(ADR-0021). `view::Theme` names surfaces; `render::BoardRenderer` chooses their
+shader branches. Neither a material nor its variation enters a variant identity,
+position, game file or the deterministic engine. Grain on an instanced piece is
+sampled in object space and keyed by piece type and colour, never by cell.
+
 ## 1. Layer map
 
 Strictly downward dependencies. A layer may only include headers from lower

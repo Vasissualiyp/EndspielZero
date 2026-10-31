@@ -54,8 +54,9 @@ struct Instance {
   /// so a tile or a piece stands on the warped board with the ordinary camera and depth
   /// buffer (M17).
   float quat[4]{0.0f, 0.0f, 0.0f, 1.0f};
-  /// 1 for a mirror face, which is shaded as polished metal; 0 for everything else.
-  float metal{0};
+  /// Shader material: integer part selects matte (0), metal (1), plank wood (2),
+  /// or turned wood (6); ids 3-5 are reserved. Fractional part varies wood grain.
+  float material{0};
 };
 static_assert(sizeof(Instance) == 84);
 

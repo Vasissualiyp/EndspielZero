@@ -22,8 +22,10 @@ struct PushConstants {
   /// normal, so shading by its sign would show the unavoidable flip as a seam; facing
   /// the normal at the viewer makes the flip invisible.
   float eyePos[4]{0.0f, 0.0f, 0.0f, 1.0f};
+  /// Theme-controlled cool rim and glow strength; unused by matte, metal and wood.
+  float material[4]{0.21f, 0.88f, 1.0f, 1.35f};
 };
-static_assert(sizeof(PushConstants) == 96);
+static_assert(sizeof(PushConstants) == 112);
 
 struct BackdropPush {
   float inner[4]{};
@@ -64,6 +66,42 @@ void toFloat4(const view::Rgba& c, float out[4]) {
   out[3] = c.a;
 }
 
+enum class Cut : std::uint8_t { Plank, Turned };
+
+float shaderMaterial(view::Material m, Cut cut, float variation) {
+  if (m == view::Material::Wood)
+    return (cut == Cut::Plank ? 2.0f : 6.0f) + std::clamp(variation, 0.0f, 0.99f);
+  if (m == view::Material::Metal) return 1.0f;
+  if (m == view::Material::Glass) return 3.0f;
+  if (m == view::Material::Crystal) return 4.0f;
+  if (m == view::Material::Glow) return 5.0f;
+  return 0.0f;
+}
+
+float hash01(std::uint32_t key) {
+  std::uint32_t x = key * 0x9E3779B1u;
+  x ^= x >> 16;
+  x *= 0x7FEB352Du;
+  x ^= x >> 15;
+  x *= 0x846CA68Bu;
+  x ^= x >> 16;
+  return static_cast<float>(x >> 8) * (1.0f / 16777216.0f);
+}
+
+float pieceMaterial(const view::Theme& t, Piece piece) {
+  const std::uint32_t key = 2u * static_cast<std::uint32_t>(piece.type) +
+                            (piece.colorOf() == Color::White ? 0u : 1u);
+  return shaderMaterial(t.materials.pieces, Cut::Turned, 0.99f * hash01(key));
+}
+
+float surfaceOpacity(const view::Theme& theme, const BoardOptions& options) {
+  // The glass alternative reveals the far sheet of a folded board by default.
+  // An explicit ghost below one still takes precedence for either theme.
+  return theme.materials.cells == view::Material::Glass && options.surfaceGhost >= 0.99f
+             ? 0.58f
+             : options.surfaceGhost;
+}
+
 view::Rgba mix(const view::Rgba& a, const view::Rgba& b, float t) {
   return view::Rgba{a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t,
                     a.a + (b.a - a.a) * t};
@@ -89,6 +127,7 @@ Instance plinthInstance(const view::Vec3& centre, float halfSpanX, float halfSpa
   // rather than as a darker rectangle.
   toFloat4(present ? t.ember : mix(t.boardRim, t.emberDeep, 0.35f), plinth.edge);
   plinth.edgeMask = 15.0f;
+  plinth.material = shaderMaterial(t.materials.plinth, Cut::Plank, 0.25f);
   return plinth;
 }
 
@@ -203,7 +242,7 @@ Result<void> BoardRenderer::buildPipeline() {
       {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, edge)},
       {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, edgeMask)},
       {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, roll)},
-      {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, metal)},
+      {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, material)},
       {10, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, quat)}};
 
   VkPipelineVertexInputStateCreateInfo vi{};
@@ -869,7 +908,7 @@ InstanceSet BoardRenderer::buildInstances(
       // as `1 - (1-a)^4`, much darker than the plain torus the shape has just been. Give
       // each level the alpha that composites to `a` when they coincide, and ease back to
       // `a` each as they spread into their own nested shells.
-      float ghostAlpha = options_.surfaceGhost;
+       float ghostAlpha = surfaceOpacity(theme_, options_);
       if (surf.stacked() && v.dims.dims() >= 3 && ghostAlpha < 0.99f) {
         const float levels = static_cast<float>(std::max<int>(1, v.dims.extent(2)));
         const float single = 1.0f - std::pow(1.0f - ghostAlpha, 1.0f / levels);
@@ -1019,6 +1058,7 @@ InstanceSet BoardRenderer::buildInstances(
       body.quat[3] = quat[3];
       toFloat4(pc, body.color);
       body.color[3] = alpha;
+      body.material = pieceMaterial(theme_, piece);
       const std::size_t sh = static_cast<std::size_t>(shape[piece.type]);
       // The disc is the token, in the theme's one shared furniture colour, read live so a
       // palette switch repaints it the same frame it repaints everything else. It carries
@@ -1031,6 +1071,7 @@ InstanceSet BoardRenderer::buildInstances(
         toFloat4(theme_.pieceToken, disc.color);
         disc.color[3] = alpha;
         discInto[sh].push_back(disc);
+        body.material = 0.0f;  // the icon decal is ink, not a second wooden surface
       }
       into[sh].push_back(body);
     };
@@ -1240,6 +1281,7 @@ InstanceSet BoardRenderer::buildInstances(
     identity.color[1] = 1.0f;
     identity.color[2] = 1.0f;
     identity.color[3] = 1.0f;
+    identity.material = shaderMaterial(theme_.materials.cells, Cut::Plank, 0.25f);
     out.surfaceInstance = static_cast<std::uint32_t>(out.instances.size());
     out.instances.push_back(identity);
     return out;
@@ -1323,6 +1365,7 @@ InstanceSet BoardRenderer::buildInstances(
     body.scale[1] = 0.8f;
     body.scale[2] = 0.8f * h;
     toFloat4(pieceColor, body.color);
+    body.material = pieceMaterial(theme_, piece);
     byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
   };
 
@@ -1362,6 +1405,9 @@ InstanceSet BoardRenderer::buildInstances(
       fill = withHint(fill, p, pl.cell, theme_);
     }
     toFloat4(withHover(fill, p, pl.cell), cell.color);
+    cell.material = shaderMaterial(theme_.materials.cells, Cut::Plank,
+                                   0.5f * static_cast<float>(parity & 1) +
+                                       0.49f * hash01(pl.cell));
 
     byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(cell);
 
@@ -1380,7 +1426,12 @@ InstanceSet BoardRenderer::buildInstances(
         rail.scale[2] = 0.055f / half.z;
         toFloat4(f.color, rail.color);
         // A mirror is drawn as metal; a glued portal keeps the matte seam colour.
-        rail.metal = f.kind == view::SeamKind::Mirror ? 1.0f : 0.0f;
+        rail.material = shaderMaterial(f.kind == view::SeamKind::Mirror
+                                            ? view::Material::Metal
+                                            : theme_.materials.cells == view::Material::Glass
+                                                  ? view::Material::Glow
+                                                  : view::Material::Matte,
+                                        Cut::Plank, 0.0f);
         byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
       }
     }
@@ -1750,6 +1801,7 @@ InstanceSet BoardRenderer::buildInstances(
             taken.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
         toFloat4(pc, body.color);
         body.color[3] = fade;
+        body.material = pieceMaterial(theme_, taken);
         byShapeFlourish[static_cast<std::size_t>(shape[taken.type])].push_back(body);
       }
       if (flash > 0.0f) {
@@ -1897,6 +1949,9 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   push.eyePos[0] = eye.x;
   push.eyePos[1] = eye.y;
   push.eyePos[2] = eye.z;
+  push.material[0] = theme_.ember.r;
+  push.material[1] = theme_.ember.g;
+  push.material[2] = theme_.ember.b;
 
   {
     const auto barrier = [&](VkImage image, VkImageAspectFlags aspectMask,
@@ -2047,7 +2102,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       if (!set.surfaceIndices.empty()) {
         vkCmdBindPipeline(
             cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            options_.surfaceGhost < 0.99f ? surfaceBlendPipeline_ : pipeline_);
+             surfaceOpacity(theme_, options_) < 0.99f ? surfaceBlendPipeline_ : pipeline_);
         vkCmdBindVertexBuffers(cmd, 0, 1, &surfaceVertexBuffer_[frame], &zero);
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,

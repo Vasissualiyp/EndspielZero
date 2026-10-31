@@ -21,13 +21,19 @@ struct Rgba {
   [[nodiscard]] constexpr std::array<float, 4> array() const { return {r, g, b, a}; }
 };
 
+/// Surface shading chosen by the theme; shader ids remain private to the renderer.
+enum class Material : std::uint8_t { Matte = 0, Metal = 1, Wood = 2, Glass = 3, Crystal = 4, Glow = 5 };
+
+struct Materials {
+  Material cells{Material::Matte};
+  Material pieces{Material::Matte};
+  Material plinth{Material::Matte};
+};
+
 /// The game's palette, as data.
 ///
-/// Two themes ship. `manifold()` is the game's own look and the default: a bright, cool
-/// instrument with the board several steps darker than the page, because the board is
-/// what you came to look at and nothing else on screen may compete with it. `console()`
-/// is the older candlelit one, kept because it is a second palette and a struct that
-/// only ever holds one value is not really data.
+/// Two themes ship. `console()` is the default, a candlelit wooden set;
+/// `manifold()` is the alternative.
 ///
 /// The rule that survives both: **one accent, and geometry gets its own colours.**
 /// `ember` is the accent - selection, headings, the primary action - and the seam ramp
@@ -38,6 +44,7 @@ struct Rgba {
 /// Being a struct rather than constants means a variant, or eventually a Workshop
 /// package, can carry its own without anyone touching the renderer.
 struct Theme {
+  Materials materials{Material::Wood, Material::Wood, Material::Wood};
   // Ground and structure. Brown-biased near-black, never a neutral grey: the scene
   // should read as candlelight on worn wood rather than as a developer tool.
   Rgba ink{Rgba::hex(0x0D0B0A)};
@@ -135,51 +142,44 @@ struct Theme {
 
   [[nodiscard]] static Theme console() { return Theme{}; }
 
-  /// The shell's own theme: a light instrument, a dark board.
-  ///
-  /// The two board values are not free choices. They were set by one constraint - both
-  /// piece colours must read on both squares - and everything else was fitted around
-  /// them.
+  /// A dark, cool glass alternative to the default wooden set.
   [[nodiscard]] static Theme manifold() {
     Theme t;
-    // The ground is now the light one, and deliberately a soft blue rather than a near
-    // white: a full-page bright field is tiring to sit in front of, and the blue keeps
-    // the board's own cool greys in the same family. It sits a little below the drifting
-    // field, so the field reads as objects in front of the page rather than as a pattern
-    // printed on it.
-    t.ink = Rgba::hex(0xB4C4DB);
-    t.soot = Rgba::hex(0xE6EAF0);
-    t.panel = Rgba::hex(0xEEF1F6);
-    t.panelHi = Rgba::hex(0xD2D9E4);
-    t.rule = Rgba::hex(0xB4BECD);
+    t.materials = Materials{Material::Glass, Material::Crystal, Material::Glass};
+    t.ink = Rgba::hex(0x05070F);
+    t.soot = Rgba::hex(0x0A0E1A);
+    t.panel = Rgba::hex(0x10192A);
+    t.panelHi = Rgba::hex(0x1A2940);
+    t.rule = Rgba::hex(0x304460);
 
-    t.bone = Rgba::hex(0x0E121A);  // "bone" is now the ink: type on paper
-    t.boneDim = Rgba::hex(0x39414F);
-    t.boneFaint = Rgba::hex(0x737E90);
-    t.ember = Rgba::hex(0x2E4BFF);  // the one accent, electric rather than warm
-    t.emberDeep = Rgba::hex(0x6F4FF2);
+    t.bone = Rgba::hex(0xDDF4FF);
+    t.boneDim = Rgba::hex(0x9FBBD2);
+    t.boneFaint = Rgba::hex(0x7796B2);
+    t.ember = Rgba::hex(0x35E0FF);
+    t.emberDeep = Rgba::hex(0x7A5CFF);
 
-    t.rift = Rgba::hex(0x1C7FA8);
-    t.riftDeep = Rgba::hex(0x0E4A63);
-    // A light page needs darker seams than a dark one, or the ramp burns out against it.
-    t.seamValue = 0.74f;
-    t.seamSaturation = 0.80f;
+    t.rift = Rgba::hex(0x35B9DB);
+    t.riftDeep = Rgba::hex(0x186782);
+    t.seamHueBegin = 0.48f;
+    t.seamHueEnd = 0.87f;
+    t.seamValue = 1.0f;
+    t.seamSaturation = 0.85f;
     t.mirrorEdge = Rgba::hex(0xFFFFFF);
 
-    t.moss = Rgba::hex(0x17937A);
-    t.blood = Rgba::hex(0xD24A6A);
-    t.peek = Rgba::hex(0xE0A030);
+    t.moss = Rgba::hex(0x39BB83);
+    t.blood = Rgba::hex(0xEF5278);
+    t.peek = Rgba::hex(0xE7A341);
 
-    t.boardLight = Rgba::hex(0x98A4BE);
-    t.boardDark = Rgba::hex(0x59637E);
-    t.boardRim = Rgba::hex(0x39415A);
-    // A deep slate that leans blue to match the board, not a warm brown - the light shell
-    // has no warm ground for a brown shadow to blend into.
-    t.shadow = Rgba::hex(0x141C2E, 0.34f);
-    t.pieceToken = Rgba::hex(0x7C8AA6);
-    t.whitePiece = Rgba::hex(0xF6F9FF);
-    t.blackPiece = Rgba::hex(0x10141E);
-    t.light = true;
+    t.boardLight = Rgba::hex(0x1C2A44);
+    t.boardDark = Rgba::hex(0x0F1830);
+    t.boardRim = Rgba::hex(0x0A1123);
+    t.shadow = Rgba::hex(0x030711, 0.26f);
+    t.pieceToken = Rgba::hex(0x30436D);
+    t.whitePiece = Rgba::hex(0xDDF4FF);
+    // Lighter than an ordinary black piece: against two near-black glass squares a
+    // deep indigo would disappear. Hue and faceting still distinguish the sides.
+    t.blackPiece = Rgba::hex(0x657CC5);
+    t.light = false;
     return t;
   }
 };

@@ -104,12 +104,9 @@ TEST_CASE("the field's wire vocabulary is five shapes and reaches no sixth", "[r
   }
 }
 
-TEST_CASE("the candlelit theme's drifting field is muted and dark", "[render]") {
-  // The drifting polygons are the only colours in the shell that mean nothing, but they
-  // still have to follow the page: on the light theme they are pastel, and on the
-  // candlelit theme they must sit under the interface rather than glow through it. Pinned
-  // as "the console field is darker than the manifold field" rather than as exact
-  // colours, so the palettes can be tuned without rewriting the test.
+TEST_CASE("both themes keep the drifting field below the interface", "[render]") {
+  // Neither theme is a light page now. Their ornaments must remain muted rather than
+  // taking attention away from the board and the interface.
   DepthField field;
   field.advance(1.0f);
   const auto meanLuminance = [&](const view::Theme& th) {
@@ -127,11 +124,12 @@ TEST_CASE("the candlelit theme's drifting field is muted and dark", "[render]") 
     }
     return n == 0 ? 0.0f : sum / static_cast<float>(n);
   };
-  const float light = meanLuminance(view::Theme::manifold());
-  const float dark = meanLuminance(view::Theme::console());
-  REQUIRE(light > 0.0f);
-  CHECK(dark < light);
-  CHECK(dark < 0.35f);  // muted, not merely a little darker
+  const float manifold = meanLuminance(view::Theme::manifold());
+  const float console = meanLuminance(view::Theme::console());
+  REQUIRE(manifold > 0.0f);
+  REQUIRE(console > 0.0f);
+  CHECK(manifold < 0.35f);
+  CHECK(console < 0.35f);
 }
 
 TEST_CASE("each wireframe body is a real drawing", "[render]") {

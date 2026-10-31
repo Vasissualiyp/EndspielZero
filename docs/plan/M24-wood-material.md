@@ -329,4 +329,22 @@ interactive window (the wood is ~11 value-noise lookups per fragment; if it cost
 
 ## Status
 
-Planned (2026-10-30); nothing built.
+Built (2026-10-30): `Theme::materials`, the preserved 84-byte instance material
+field, object-space shader coordinates, stable type/colour grain variations, console
+wood on cells/plinth/pieces, and the `--theme`/`--matte` A/B flags. Flat icons remain
+matte; shape-view pucks are turned wood with matte icon decals. GPU and instance tests
+cover both themes, moving pieces, mirror rails, surface glass, and the grain-vs-matte
+luminance/edge measurement. The matte/metal shader expressions were left untouched.
+
+Looked at 960x540 console wood vs matte, mid-move, torus and Klein surface, cube5,
+5d and flat tokens; manifold standard/flat/torus/Klein, menu and pause (filmstrip in
+untracked `out/m24/`). The first grain looked like tightly spaced etching, so its
+rings and fibre were reduced. Final constants: wood scale 3; board/piece rings 7/9;
+ring amp 0.19, mean 0.80; fibre amp 0.055; varnish power 48, board/piece strength
+0.10/0.18. The second warp octave was dropped after a software Vulkan 1080p
+measurement: 41.5 ms wood vs 33.4 ms matte; after removal 39.6 vs 34.3 ms over
+20 frames. These are llvmpipe numbers, **not a GPU performance claim**; real GPU
+timing and interactive FPS still need a display. The wood remains visibly grained
+without repainting the square's mean luminance (`gui-wood-contrast`). The 1080p
+capture was checked for aliased fibre; no obvious pixel crawl can be assessed in a
+still image, so motion on a real display is an outstanding visual check.

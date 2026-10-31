@@ -29,6 +29,26 @@ float contrast(const Rgba& a, const Rgba& b) {
 
 }  // namespace
 
+TEST_CASE("themes choose their surface materials", "[unit][view]") {
+  const Theme wood = Theme::console();
+  CHECK(wood.materials.cells == Material::Wood);
+  CHECK(wood.materials.pieces == Material::Wood);
+  CHECK(wood.materials.plinth == Material::Wood);
+  const Materials matte{};
+  CHECK(matte.cells == Material::Matte);
+  CHECK(matte.pieces == Material::Matte);
+  CHECK(matte.plinth == Material::Matte);
+}
+
+TEST_CASE("manifold is a dark, legible glass alternative", "[unit][view]") {
+  const Theme t = Theme::manifold();
+  CHECK_FALSE(t.light);
+  CHECK(luminance(t.ink) < 0.02f);
+  CHECK(t.materials.cells == Material::Glass);
+  CHECK(t.materials.pieces == Material::Crystal);
+  CHECK(t.materials.plinth == Material::Glass);
+}
+
 TEST_CASE("the peek colour is not confusable with the other board marks", "[unit][view]") {
   for (const Theme& t : {Theme::manifold(), Theme::console()}) {
     const auto far = [&](const Rgba& o) {
@@ -99,12 +119,10 @@ TEST_CASE("body text is legible on the ground it is drawn on", "[unit][view]") {
   }
 }
 
-TEST_CASE("the shell theme is light and its board is darker than the page",
-          "[unit][view]") {
+TEST_CASE("the manifold board has distinct square tones and a darker rim",
+           "[unit][view]") {
   const Theme t = Theme::manifold();
-  CHECK(t.light);
-  // The board is the focus: both its squares sit below the page it is drawn on.
-  CHECK(luminance(t.boardLight) < luminance(t.ink));
+  CHECK_FALSE(t.light);
   CHECK(luminance(t.boardDark) < luminance(t.boardLight));
   CHECK(luminance(t.boardRim) < luminance(t.boardDark));
 }
@@ -118,7 +136,7 @@ TEST_CASE("the candlelit theme is still dark, and unchanged", "[unit][view]") {
 
 TEST_CASE("a palette is chosen by name, and an unknown name is the shipped one",
           "[unit][view]") {
-  CHECK(themeFromName("manifold").light);
+  CHECK(themeFromName("manifold").materials.cells == Material::Glass);
   CHECK_FALSE(themeFromName("console").light);
   // A settings file from a newer build, or a typo, still produces a usable palette.
   CHECK(themeFromName("tesseract").light == themeFromName("console").light);

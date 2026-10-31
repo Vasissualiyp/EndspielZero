@@ -152,6 +152,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
                                  --shape-follow chase --clip frames/   # M12.6: play a saved game
                                  # --dwell S, --fps N, --play-at S, --width W --height H
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen body   # the designer tabs
+./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --theme manifold # dark glass alternative
+./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --matte          # material-free A/B capture
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen designer --dims 4
 ./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry        # the board as its shape
 ./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
@@ -259,6 +261,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | New rule mechanic | `src/rules/` opcode + tests + docs table | `cb-new-effect` |
 | A piece's look | `variants/*.toml` `shape` / `height` (data only) | `cb-new-piece` |
 | UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
+| A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021 | |
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
@@ -357,11 +360,15 @@ These are the ones that have actually cost time here, not hypotheticals.
   archetype (`src/render/piece_mesh.cpp`); a variant may name one, and anything it
   leaves out is derived from how the piece moves. An unknown name falls back rather
   than failing - a variant is never unplayable for want of a model.
-- The palette is `view::Theme`, one struct, and there are two of them: `manifold()` is
-  the shipped look - a light shell with a board several steps darker than the page - and
-  `console()` is the older candlelit one. Retheming must not touch the renderer.
+- The palette is `view::Theme`, one struct, and there are two of them: `console()` is
+  the shipped candlelit wooden set and `manifold()` the dark glass/crystal alternative.
+  Colours live in the theme; shader material branches live in the renderer.
   `tests/unit/view/test_theme.cpp` pins the load-bearing part: both piece colours must
   read on both squares. That test found the old board pair sitting at 1.2:1.
+- **A material is sampled in object space** (`fragObject`) and keyed on what the object
+  is, not where it is. A piece's grain is keyed by type and colour so it does not swim
+  when moved or shrunk; the surface mesh is one identity instance and its wood grain
+  currently stays in world space while the square slides (ADR-0021).
 - Saturated colour is reserved for geometry that is not flat: seams, wrapped moves,
   extra axes. The shell itself is cool and neutral, so spending a seam hue on a button
   breaks the one rule a player learns by playing.

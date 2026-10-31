@@ -44,6 +44,16 @@ using namespace cb;
 
 namespace {
 
+std::string gThemeOverride;
+bool gMatteCapture = false;
+
+view::Theme resolveTheme(const app::Settings& settings) {
+  view::Theme theme = view::themeFromName(
+      gThemeOverride.empty() ? settings.theme : gThemeOverride);
+  if (gMatteCapture) theme.materials = view::Materials{};
+  return theme;
+}
+
 /// Where the variants live, whether running from the build tree or an install.
 std::filesystem::path variantDir() {
   for (const char* base :
@@ -739,7 +749,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // Cinema dresses the frame with a grade and a vignette, not an interface (M18.3).
   (*ui)->setCinema(cinema);
   {
-    const view::Theme theme = view::themeFromName(shell->settings().theme);
+    const view::Theme theme = resolveTheme(shell->settings());
     renderer->setTheme(theme);
     (*ui)->setTheme(theme);
   }
@@ -1278,7 +1288,8 @@ int main(int argc, char** argv) {
           "so\n"
           "the reviewable screens include it; --screen watch is the bundled-game "
           "picker.\n"
-          "--width W --height H set the capture/window resolution (default 1920x1080).\n"
+           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
+           "--theme console|manifold overrides the theme for this run; --matte disables materials.\n"
           "--ui-click \"x,y;x,y,button;drag:x1,y1,x2,y2,button\" replays pointer clicks and\n"
           "drags (pixels; button 0 left, 1 right, 2 middle) before the capture.\n"
           "--variants-dir DIR reads and saves the player's own variants there.\n"
@@ -1308,6 +1319,10 @@ int main(int argc, char** argv) {
       cinema = true;
     else if (arg == "--geometry")
       geometry = true;
+    else if (arg == "--theme" && i + 1 < argc)
+      gThemeOverride = argv[++i];
+    else if (arg == "--matte")
+      gMatteCapture = true;
     else if (arg == "--formed" && i + 1 < argc) {
       formed = std::strtof(argv[++i], nullptr);
       formedGiven = true;
@@ -1435,7 +1450,7 @@ int main(int argc, char** argv) {
   (void)(*ui)->setScale(shell->settings().guiScale);
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   {
-    const view::Theme theme = view::themeFromName(shell->settings().theme);
+    const view::Theme theme = resolveTheme(shell->settings());
     renderer->setTheme(theme);
     (*ui)->setTheme(theme);
   }
@@ -2053,7 +2068,7 @@ int main(int argc, char** argv) {
       }
       renderer->setOptions(optionsFor(*shell));
       (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
-      const view::Theme theme = view::themeFromName(shell->settings().theme);
+      const view::Theme theme = resolveTheme(shell->settings());
       renderer->setTheme(theme);
       (*ui)->setTheme(theme);
       (void)window->setVsync(shell->settings().vsync);

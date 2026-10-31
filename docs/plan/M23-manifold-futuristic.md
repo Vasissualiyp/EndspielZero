@@ -140,4 +140,13 @@ without bloom). The grid-floor background, the interface restyle and bloom follo
 
 ## Status
 
-Planned (2026-10-30); nothing built. `console` became the default theme the same day.
+In progress (2026-10-30): M23.1 landed under M24 (ADR-0021). M23.2's dark palette,
+glass-like Fresnel cells, cool faceted crystal pieces, glowing portal rails and
+translucent geometry-view board are implemented and seen in standard, flat, torus
+and Klein captures. The opaque board's glass is **not physically translucent**:
+reordering ordinary cell and piece passes to blend it would be a new rendering
+architecture; shape view uses the existing ghost blend pass instead. The proposed
+deep-indigo black piece failed the standing contrast constraint on the near-black
+glass squares; a lighter indigo crystal (`0x657CC5`) clears all four combinations.
+M23.3's grid-floor backdrop/interface restyle and M23.2's optional bloom are **not
+yet built**. They remain the next visual polish, with hardware-GPU FPS validation.
