@@ -221,6 +221,12 @@ inner loop.
 6. **No allocation in movegen.** Enforced by the allocation tripwire.
 7. **Architectural decisions get an ADR.** Immutable once merged; supersede, never edit.
 8. **Update this file in the same commit** as anything that changes navigation or commands.
+9. **Debug access.** Every important feature can be reached from the debug interface:
+   a console command, or a `Settings` field (which `get`/`set` already reach). Where a
+   feature must be captured or tested headlessly, it also gets a GUI command-line flag.
+   Development-only presentation (the fps counter, unbuilt menu entries) is hidden by
+   default and switched on from the console. Keep `DebugConsole::help()` and
+   [`docs/debug-console.md`](docs/debug-console.md) in step with the code.
 
 ## Layer map — dependencies point strictly down (ARCH §1)
 
@@ -271,7 +277,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | UI panel treatment and action labels | `Theme::panelStyle`, `monoLabels` and `interfaceRule`; `widgets::panelCorners` in `src/render/ui_widgets.cpp` and `Ui::actionFont` in `src/render/ui.cpp`. Settings → Looks → Theme selects the whole look, including the backdrop | |
 | Ambient background (drifting shapes or a perspective grid floor) | `Theme::backdrop` in `src/view/theme.hpp`, dispatched by `DepthField::draw` in `src/render/deco.cpp`; the same field draws behind menus and behind the board | |
 | A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021, ADR-0022 and ADR-0023; `--visual-time` samples hologram light | |
-| LCD panel interference and colour response | `panelSignal` in `src/render/board_renderer.cpp` / `src/render/shaders/board.frag`; `PanelResponse::prepare`/`apply` in `src/render/panel_response.cpp` owns interactive colour history and explicit time. The GUI checks `Session::presentationEpoch` after UI/request handling; independent CLI captures remain settled. See ADR-0024 and `docs/plan/M23.8-led-ambient-and-response.md`. Optional user-selectable ideas: [`visual_ideas.md`](visual_ideas.md). | |
+| LCD panel interference and colour response | `panelSignal` in `src/render/board_renderer.cpp` / `src/render/shaders/board.frag`; `PanelResponse::prepare`/`apply` in `src/render/panel_response.cpp` owns interactive colour history and explicit time. The GUI checks `Session::presentationEpoch` after UI/request handling; independent CLI captures remain settled. See ADR-0024 and `docs/plan/M23.8-led-ambient-and-response.md`. M23.9 (`docs/plan/M23.9-manifold-emission-and-handoff.md`): emission/aliveness in `board.frag` with the C++ mirror `render/panel_alive.*`; board-centred backdrop and far stars in `backdrop.frag` via `projectBoardGlow` (`render/board_glow.*`); projector handoff and heat via `view::handoffState` (`view/move_anim.*`); one `BoardOptions::presentationIntensity` scalar. Optional user-selectable ideas: [`visual_ideas.md`](visual_ideas.md). | |
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
