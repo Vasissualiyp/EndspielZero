@@ -7,10 +7,18 @@
 #include <map>
 #include <vector>
 
+#include <imgui_internal.h>
+
 #include "audio/audio.hpp"
 
 namespace cb::render::widgets {
 namespace {
+
+struct VisualInput {
+  ImGuiContext* context{nullptr};
+  double seconds{0};
+};
+thread_local VisualInput visualInput;
 
 /// Widget chrome is sized from the current font, which the interface already scales for
 /// the interface-scale option. A control therefore keeps its proportions at any scale
@@ -59,6 +67,15 @@ void drawPlate(ImDrawList* dl, const ImVec2& pmin, const ImVec2& pmax,
 }
 
 }  // namespace
+
+ScopedVisualTime::ScopedVisualTime(double seconds) noexcept
+    : previousContext_(visualInput.context), previousSeconds_(visualInput.seconds) {
+  visualInput = {ImGui::GetCurrentContext(),
+                 std::isfinite(seconds) && seconds >= 0 ? seconds : 0};
+}
+ScopedVisualTime::~ScopedVisualTime() {
+  visualInput = {previousContext_, previousSeconds_};
+}
 
 void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
                   float scale) {
@@ -137,8 +154,16 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));
   if (!enabled) ImGui::BeginDisabled();
   const bool pressed = ImGui::Button(id, ImVec2(width, height));
+  const bool usable =
+      theme.liveControls
+          ? enabled && (ImGui::GetItemFlags() & ImGuiItemFlags_Disabled) == 0
+          : enabled;
   if (!enabled) ImGui::EndDisabled();
-  const bool hovered = enabled && ImGui::IsItemHovered();
+  const bool hovered = usable && ImGui::IsItemHovered();
+  const bool focused =
+      theme.liveControls && usable && ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  const bool held = theme.liveControls && usable && ImGui::IsItemActive();
+  const bool hot = hovered || focused;
   ImGui::PopStyleColor(5);
 
   // Everything is positioned from the item's *actual* rectangle rather than from the
@@ -150,23 +175,62 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
   // A wash that sweeps in from the left rather than a filled row: the row is type on a
   // page, and a solid block would turn the list back into a stack of buttons.
   const view::Rgba wash = cold ? theme.rift : theme.ember;
-  if (hovered) {
+  if (hot) {
     dl->AddRectFilledMultiColor(min, max, u32(wash, 0.16f), u32(wash, 0.0f),
                                 u32(wash, 0.0f), u32(wash, 0.16f));
   }
-  dl->AddLine(min, ImVec2(max.x, min.y), u32(theme.interfaceRule, 0.8f), 1.0f);
+  if (theme.liveControls) dl->PushClipRect(min, max, true);
+  dl->AddLine(min, ImVec2(max.x, min.y),
+              u32(theme.liveControls && hot ? wash : theme.interfaceRule, 0.8f),
+              theme.liveControls ? s : 1.0f);
+  if (theme.liveControls && usable) {
+    const float widthInside = max.x - min.x - 4.0f * s;
+    const float length = std::min(28.0f * s, (max.x - min.x) * 0.16f);
+    if (widthInside > length && max.y > min.y) {
+      const double seconds =
+          visualInput.context == ImGui::GetCurrentContext() ? visualInput.seconds : 0;
+      const double phase = static_cast<double>(ImGui::GetItemID() & 0xFFFFu) / 65536.0;
+      const double cycle = std::fmod(seconds, 6.0) / 6.0 + phase;
+      const float t = static_cast<float>(cycle - std::floor(cycle));
+      const auto ease = [](float x) {
+        x = std::clamp(x, 0.0f, 1.0f);
+        return x * x * (3.0f - 2.0f * x);
+      };
+      const float envelope = ease(t / 0.1f) * ease((1.0f - t) / 0.1f);
+      const float x = min.x + 2.0f * s + (widthInside - length) * t;
+      const float y = min.y + 1.5f * s;
+      dl->AddLine(ImVec2(x, y), ImVec2(x + length, y),
+                  u32(wash, envelope * (hot ? 0.22f : 0.08f)), 3.0f * s);
+      dl->AddLine(ImVec2(x, y), ImVec2(x + length, y),
+                  u32(wash, envelope * (hot ? 0.85f : 0.35f)), s);
+    }
+    const float mid = (min.y + max.y) * 0.5f;
+    if (focused) {
+      dl->AddLine(ImVec2(min.x + 3.0f * s, mid - 6.0f * s),
+                  ImVec2(min.x + 3.0f * s, mid + 6.0f * s), u32(wash, 0.9f), 2.0f * s);
+    }
+    if (held) {
+      const float x = min.x + 6.0f * s;
+      dl->AddLine(ImVec2(x + 4.0f * s, mid - 5.0f * s), ImVec2(x, mid - 5.0f * s),
+                  u32(wash), s);
+      dl->AddLine(ImVec2(x, mid - 5.0f * s), ImVec2(x, mid + 5.0f * s), u32(wash), s);
+      dl->AddLine(ImVec2(x, mid + 5.0f * s), ImVec2(x + 4.0f * s, mid + 5.0f * s),
+                  u32(wash), s);
+    }
+  }
+  if (theme.liveControls) dl->PopClipRect();
 
   const float labelHeight = font != nullptr ? font->FontSize : ImGui::GetFontSize();
   const float top = min.y + (max.y - min.y - labelHeight) * 0.5f;
-  // The row steps towards the pointer, which is the only movement in the list.
-  const float slide = hovered ? 12.0f * s : 0.0f;
+  // Live labels stay fixed; console retains its existing pointer step.
+  const float slide = hovered && !theme.liveControls ? 12.0f * s : 0.0f;
   const float inset = index >= 0 ? 36.0f * s : 12.0f * s;
   const float textX = min.x + inset + slide;
 
-  const ImU32 labelColor = u32(!enabled  ? theme.boneFaint
+  const ImU32 labelColor = u32(!usable   ? theme.boneFaint
                                : primary ? theme.ember
                                : cold    ? theme.rift
-                               : hovered ? theme.ember
+                               : hot     ? theme.ember
                                          : theme.bone);
   const std::string caption = upper(label);
   if (font != nullptr) {
@@ -183,8 +247,7 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
       const ImVec2 w = font->CalcTextSizeA(small, FLT_MAX, 0.0f, tail);
       dl->AddText(font, small,
                   ImVec2(max.x - 8.0f * s - w.x, min.y + (max.y - min.y - small) * 0.5f),
-                  u32(enabled ? (hovered ? theme.ember : theme.rule) : theme.boneFaint),
-                  tail);
+                  u32(usable ? (hot ? theme.ember : theme.rule) : theme.boneFaint), tail);
     }
   } else {
     dl->AddText(ImVec2(textX, top), labelColor, caption.c_str());
@@ -192,10 +255,9 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
     // settings rows - still shows what it is set to.
     if (tail != nullptr) {
       const ImVec2 w = ImGui::CalcTextSize(upper(tail).c_str());
-      dl->AddText(
-          ImVec2(max.x - 10.0f * s - w.x, min.y + (max.y - min.y - w.y) * 0.5f),
-          u32(enabled ? (hovered ? theme.ember : theme.boneDim) : theme.boneFaint),
-          upper(tail).c_str());
+      dl->AddText(ImVec2(max.x - 10.0f * s - w.x, min.y + (max.y - min.y - w.y) * 0.5f),
+                  u32(usable ? (hot ? theme.ember : theme.boneDim) : theme.boneFaint),
+                  upper(tail).c_str());
     }
   }
   // One chokepoint for every control the shell draws: a menu row, a button and a cycling

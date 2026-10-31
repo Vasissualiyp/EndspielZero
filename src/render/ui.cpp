@@ -616,6 +616,10 @@ void Ui::setTheme(const view::Theme& t) noexcept {
   overtureCacheValid_ = false;
 }
 
+void Ui::setVisualTime(double seconds) noexcept {
+  visualTime_ = std::isfinite(seconds) && seconds >= 0 ? seconds : 0;
+}
+
 void Ui::tick(float dt) {
   lastDt_ = dt;
   clock_ += dt;
@@ -1268,6 +1272,7 @@ void Ui::drawDebugConsole(app::Shell& shell) {
 }
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
+  const widgets::ScopedVisualTime visualTime(visualTime_);
   // The trailer's keys (Space pauses, the arrows step, Enter records a keyframe) are the
   // app's, not the interface's. With keyboard navigation on, ImGui captures the keyboard
   // whenever a panel button or slider has focus - as soon as one has been clicked - and

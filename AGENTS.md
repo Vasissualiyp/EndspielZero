@@ -274,6 +274,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
+| A menu control's animation | `Theme::liveControls`, `Ui::setVisualTime` and `widgets::rowControl` in `src/render/ui_widgets.cpp`; the scoped input uses the GUI's explicit presentation seconds, never ImGui's backend clock | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
 | The trailer's camera (calm sway, follow, authored keyframes, edit mode) | `Shell::trailerCamera`/`setTrailerEditing` in `src/app/shell.cpp`, `view::steadySway`, the panel in `Ui::buildTrailerEditRows`. Never write the trailer's camera into `Settings`. See `docs/plan/M13-overtures.md` (2026-10-16) | |

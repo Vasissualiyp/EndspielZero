@@ -60,6 +60,7 @@ struct Theme {
   Backdrop backdrop{Backdrop::Confetti};
   PanelStyle panelStyle{PanelStyle::Plate};
   bool monoLabels{false};
+  bool liveControls{false};
   // Ground and structure. Brown-biased near-black, never a neutral grey: the scene
   // should read as candlelight on worn wood rather than as a developer tool.
   Rgba ink{Rgba::hex(0x0D0B0A)};
@@ -165,6 +166,7 @@ struct Theme {
     t.backdrop = Backdrop::Grid;
     t.panelStyle = PanelStyle::Brackets;
     t.monoLabels = true;
+    t.liveControls = true;
     t.ink = Rgba::hex(0x05070F);
     t.soot = Rgba::hex(0x0A0E1A);
     t.panel = Rgba::hex(0x10192A);

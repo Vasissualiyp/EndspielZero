@@ -174,6 +174,8 @@ class Ui {
   /// Swap the palette. The theme is read every frame, so a change is immediate - and a
   /// retheme never touches the renderer.
   void setTheme(const view::Theme& t) noexcept;
+  /// Presentation seconds for live controls, independent of transitions/background.
+  void setVisualTime(double seconds) noexcept;
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);
@@ -337,6 +339,7 @@ class Ui {
   /// screen arrives; the menu is scaled and faded along it, which is as close to a
   /// camera push as a 2-D draw list gets.
   float clock_{0.0f};
+  double visualTime_{0};
   /// The last frame's dt, so `build` can move the overture on. `tick` is the only place
   /// that knows about time, and the overture is advanced where the shell is to hand.
   float lastDt_{0.0f};

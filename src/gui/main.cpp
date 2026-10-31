@@ -787,6 +787,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                const render::ShapeMoveSequence* playSeq =
                                    nullptr) -> std::optional<render::Image> {
     renderer->setVisualTime(visualOrigin + sample.seconds);
+    (*ui)->setVisualTime(visualOrigin + sample.seconds);
     // A fixed step rather than a real clock: the shell animates, and a capture has to be
     // the same picture every time it is taken.
     (*ui)->tick(dt);
@@ -1567,6 +1568,7 @@ int main(int argc, char** argv) {
     // The trailer moves the camera and the shape on every frame, with or without a piece
     // in flight; waiting for events would draw it at the idle ten frames a second.
     const bool animating =
+        resolveTheme(shell->settings()).liveControls ||
         resolveTheme(shell->settings()).materials.pieces == view::Material::Hologram ||
         (shell->hasGame() &&
          (shell->session()->animation().active() || shell->attracting()));
@@ -2021,6 +2023,7 @@ int main(int argc, char** argv) {
         }
       }
     }
+    (*ui)->setVisualTime(visualSeconds);
     (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);
     (*ui)->newFrame();

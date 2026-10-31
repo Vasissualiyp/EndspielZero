@@ -45,8 +45,10 @@ TEST_CASE("themes select independent ambient backgrounds", "[unit][view]") {
   CHECK(Theme::manifold().backdrop == Backdrop::Grid);
   CHECK(Theme::console().panelStyle == PanelStyle::Plate);
   CHECK_FALSE(Theme::console().monoLabels);
+  CHECK_FALSE(Theme::console().liveControls);
   CHECK(Theme::manifold().panelStyle == PanelStyle::Brackets);
   CHECK(Theme::manifold().monoLabels);
+  CHECK(Theme::manifold().liveControls);
 }
 
 TEST_CASE("manifold is a dark, legible glass alternative", "[unit][view]") {

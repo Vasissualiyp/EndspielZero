@@ -17,6 +17,20 @@
 /// here is a real draw-list sprite with the stock widget underneath only for input.
 namespace cb::render::widgets {
 
+/// Explicit, nested presentation-time input for widgets on the current ImGui context.
+/// No backend clock is read; leaving the scope restores the caller's input.
+class ScopedVisualTime {
+ public:
+  explicit ScopedVisualTime(double seconds) noexcept;
+  ~ScopedVisualTime();
+  ScopedVisualTime(const ScopedVisualTime&) = delete;
+  ScopedVisualTime& operator=(const ScopedVisualTime&) = delete;
+
+ private:
+  ImGuiContext* previousContext_;
+  double previousSeconds_;
+};
+
 inline ImVec4 col(const view::Rgba& c, float alpha = 1.0f) {
   return ImVec4{c.r, c.g, c.b, c.a * alpha};
 }
