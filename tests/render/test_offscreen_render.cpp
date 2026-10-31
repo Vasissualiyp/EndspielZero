@@ -261,12 +261,14 @@ TEST_CASE("manifold dispatches glass, holograms and portal glow", "[render]") {
   BoardRenderer renderer;
   renderer.setTheme(view::Theme::manifold());
   const auto set = renderer.buildInstances(snap, view::ViewConfig::forBoard(v.dims));
-  int glass = 0, crystal = 0;
+  int glass = 0, crystal = 0, led = 0;
   for (const Instance& i : set.instances) {
     if (i.material == 3.0f) ++glass;
     if (i.material == 4.0f) ++crystal;
+    if (i.material == 7.0f) ++led;
   }
-  CHECK(glass == 65);
+  CHECK(glass == 1);
+  CHECK(led == 64);
   CHECK(crystal == 32);
   auto glued = app::Session::create(test::loadVariant("torus"));
   REQUIRE(glued.has_value());
@@ -289,7 +291,7 @@ TEST_CASE("manifold dispatches glass, holograms and portal glow", "[render]") {
 }
 
 #ifdef CB_HAVE_IMGUI
-TEST_CASE("manifold shape glass reveals the far side by default", "[render]") {
+TEST_CASE("manifold LED shape is opaque unless explicitly ghosted", "[render]") {
   const VariantSpec v = test::loadVariant("torus");
   const Position p = Position::startPosition(v);
   BoardRenderer renderer;
@@ -300,9 +302,13 @@ TEST_CASE("manifold shape glass reveals the far side by default", "[render]") {
   const auto set = renderer.buildInstances(view::PositionView::capture(p),
                                            view::ViewConfig::forBoard(v.dims));
   REQUIRE_FALSE(set.surfaceVertices.empty());
-  CHECK(set.instances[set.surfaceInstance].material == 3.0f);
-  CHECK(set.surfaceVertices.front().color[3] > 0.35f);
-  CHECK(set.surfaceVertices.front().color[3] < 0.8f);
+  CHECK(set.instances[set.surfaceInstance].material == 7.0f);
+  CHECK(set.surfaceVertices.front().color[3] == 1.0f);
+  options.surfaceGhost = 0.4f;
+  renderer.setOptions(options);
+  const auto ghost = renderer.buildInstances(view::PositionView::capture(p),
+                                             view::ViewConfig::forBoard(v.dims));
+  CHECK(ghost.surfaceVertices.front().color[3] == 0.4f);
 }
 #endif
 
@@ -470,6 +476,160 @@ TEST_CASE("visual time changes hologram pixels without changing instances",
     CHECK(std::memcmp(before.instances.data(), after.instances.data(),
                       before.instances.size() * sizeof(Instance)) == 0);
   }
+}
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("LED patch coordinates stay attached through slide and inversion",
+          "[render][led]") {
+  constexpr int side = PlaySurface::kSubdiv + 1;
+  constexpr std::size_t faceVertices = side * side;
+  constexpr std::size_t perPatch = 2 * faceVertices + 16 * PlaySurface::kSubdiv;
+  for (const char* name : {"torus", "klein"}) {
+    INFO(name);
+    const auto v = test::loadVariant(name);
+    const auto snap = view::PositionView::capture(Position::startPosition(v));
+    const auto cfg = view::ViewConfig::forBoard(v.dims);
+    BoardRenderer renderer;
+    BoardOptions opts;
+    opts.surface = true;
+    renderer.setOptions(opts);
+    const auto first = renderer.buildInstances(snap, cfg);
+    REQUIRE(first.surfaceVertices.size() == perPatch * v.dims.cellCount());
+    for (std::size_t base = 0; base < first.surfaceVertices.size(); base += perPatch) {
+      for (int i = 0; i < side; ++i) {
+        for (int j = 0; j < side; ++j) {
+          const auto& top =
+              first.surfaceVertices[base + static_cast<std::size_t>(i * side + j)];
+          const auto& bottom =
+              first.surfaceVertices[base + faceVertices +
+                                    static_cast<std::size_t>(i * side + j)];
+          CHECK(top.panelCoord[0] == static_cast<float>(j) / PlaySurface::kSubdiv);
+          CHECK(top.panelCoord[1] == static_cast<float>(i) / PlaySurface::kSubdiv);
+          CHECK(top.panelCoord[2] == 1);
+          CHECK(std::equal(std::begin(top.panelCoord), std::end(top.panelCoord),
+                           bottom.panelCoord));
+        }
+      }
+      for (std::size_t k = 2 * faceVertices; k < perPatch; ++k) {
+        const auto& vert = first.surfaceVertices[base + k];
+        CHECK(vert.panelCoord[2] == -1);
+        CHECK(vert.panelCoord[0] >= 0);
+        CHECK(vert.panelCoord[0] <= 1);
+        CHECK(vert.panelCoord[1] >= 0);
+        CHECK(vert.panelCoord[1] <= 1);
+      }
+    }
+    for (std::size_t k = 0; k < first.surfaceIndices.size(); k += 3) {
+      const float tag = first.surfaceVertices[first.surfaceIndices[k]].panelCoord[2];
+      CHECK(first.surfaceVertices[first.surfaceIndices[k + 1]].panelCoord[2] == tag);
+      CHECK(first.surfaceVertices[first.surfaceIndices[k + 2]].panelCoord[2] == tag);
+    }
+    opts.surfaceSlideU = 0.6f;
+    opts.surfaceEvert = 1;
+    renderer.setOptions(opts);
+    const auto posed = renderer.buildInstances(snap, cfg);
+    REQUIRE(posed.surfaceVertices.size() == first.surfaceVertices.size());
+    CHECK(posed.surfaceIndices == first.surfaceIndices);
+    bool moved = false;
+    for (std::size_t k = 0; k < first.surfaceVertices.size(); ++k) {
+      const auto& a = first.surfaceVertices[k];
+      const auto& b = posed.surfaceVertices[k];
+      CHECK(std::equal(std::begin(a.panelCoord), std::end(a.panelCoord), b.panelCoord));
+      moved = moved || !std::equal(std::begin(a.pos), std::end(a.pos), b.pos);
+    }
+    CHECK(moved);
+  }
+  const auto lib = MeshLibrary::build();
+  for (const auto& v : lib.vertices)
+    CHECK(std::all_of(std::begin(v.panelCoord), std::end(v.panelCoord),
+                      [](float f) { return f == 0; }));
+}
+#endif
+
+TEST_CASE("LED cells resolve a pixel matrix nearby and filter to a steady mean afar",
+          "[render][gpu][led]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  auto target = OffscreenTarget::create(gpu().ctx, 512, 512);
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(target.has_value());
+  REQUIRE(renderer.has_value());
+  InstanceSet set;
+  Instance cell;
+  cell.scale[0] = cell.scale[1] = cell.scale[2] = 1;
+  cell.color[0] = cell.color[1] = cell.color[2] = 0.4f;
+  cell.color[3] = 1;
+  cell.material = 7;
+  set.instances.push_back(cell);
+  set.batches[static_cast<std::size_t>(Archetype::Cell)] = {0, 1};
+  view::OrbitCamera cam;
+  cam.yaw = 0;
+  cam.pitch = std::numbers::pi_v<float> * 0.5f;
+  cam.orthographic = true;
+  const auto shot = [&](float distance) {
+    cam.distance = distance;
+    (void)gpu().ctx.takeValidationMessages();
+    REQUIRE(renderer->render(*target, set, cam).has_value());
+    auto pixels = target->readPixels();
+    REQUIRE(pixels.has_value());
+    REQUIRE(gpu().ctx.takeValidationMessages().empty());
+    return Image{512, 512, std::move(*pixels)};
+  };
+  const auto near = shot(1.4f);
+  REQUIRE(writePpm(near, capturePath("led-near")).has_value());
+  const auto transitions = [](const Image& img, bool horizontal, bool patterned = true) {
+    int count = 0, lo = 255, hi = 0, previous = -1;
+    for (std::uint32_t t = 136; t < 376; ++t) {
+      const int value = horizontal ? img.at(t, 261).r : img.at(261, t).r;
+      lo = std::min(lo, value);
+      hi = std::max(hi, value);
+      if (previous >= 0 && std::abs(value - previous) >= 4) ++count;
+      previous = value;
+    }
+    if (patterned) CHECK(hi - lo >= 8);
+    return count;
+  };
+  CHECK(transitions(near, true) > 15);
+  CHECK(transitions(near, false) > 15);
+  const auto far = shot(30);
+  REQUIRE(writePpm(far, capturePath("led-far")).has_value());
+  int lo = 255, hi = 0;
+  for (std::uint32_t y = 254; y <= 258; ++y) {
+    for (std::uint32_t x = 254; x <= 258; ++x) {
+      const int value = far.at(x, y).r;
+      lo = std::min(lo, value);
+      hi = std::max(hi, value);
+    }
+  }
+  CHECK(hi - lo <= 2);
+  CHECK(lo > 75);
+  CHECK(hi < 110);
+  set.instances[0].material = 3;  // the plinth remains glass, without an emitter matrix
+  const auto glass = shot(1.4f);
+  CHECK(transitions(glass, true, false) == 0);
+  // A sampled face standing vertically cannot use world XY as its panel UV.
+  set.instances[0].material = 7;
+  set.batches = {};
+  for (const auto& uv :
+       std::array<std::array<float, 2>, 4>{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}}) {
+    MeshVertex v{};
+    v.pos[0] = uv[0] - 0.5f;
+    v.pos[2] = uv[1] - 0.5f;
+    v.normal[1] = -1;
+    v.panelCoord[0] = uv[0];
+    v.panelCoord[1] = uv[1];
+    v.panelCoord[2] = 1;
+    set.surfaceVertices.push_back(v);
+  }
+  set.surfaceIndices = {0, 1, 2, 0, 2, 3};
+  cam.pitch = 0;
+  const auto vertical = shot(1.4f);
+  REQUIRE(writePpm(vertical, capturePath("led-sampled-vertical")).has_value());
+  CHECK(transitions(vertical, true) > 15);
+  CHECK(transitions(vertical, false) > 15);
+  for (auto& v : set.surfaceVertices) v.panelCoord[2] = -1;
+  const auto sidewall = shot(1.4f);
+  CHECK(transitions(sidewall, true, false) == 0);
+  CHECK(transitions(sidewall, false, false) == 0);
 }
 
 TEST_CASE("wood and glass change the rendered board without changing its geometry",

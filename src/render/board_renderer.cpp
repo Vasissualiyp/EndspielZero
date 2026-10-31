@@ -79,6 +79,7 @@ float shaderMaterial(view::Material m, Cut cut, float variation) {
   if (m == view::Material::Glass) return 3.0f;
   if (m == view::Material::Hologram) return 4.0f;
   if (m == view::Material::Glow) return 5.0f;
+  if (m == view::Material::Led) return 7.0f;
   return 0.0f;
 }
 
@@ -239,11 +240,12 @@ Result<void> BoardRenderer::buildPipeline() {
   const VkVertexInputBindingDescription bindings[2]{
       {0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-  const VkVertexInputAttributeDescription attrs[12]{
+  const VkVertexInputAttributeDescription attrs[13]{
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, pos)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
       {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, height)},
       {11, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color)},
+      {12, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, panelCoord)},
       {3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, center)},
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, scale)},
       {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, color)},
@@ -257,7 +259,7 @@ Result<void> BoardRenderer::buildPipeline() {
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vi.vertexBindingDescriptionCount = 2;
   vi.pVertexBindingDescriptions = bindings;
-  vi.vertexAttributeDescriptionCount = 12;
+  vi.vertexAttributeDescriptionCount = 13;
   vi.pVertexAttributeDescriptions = attrs;
 
   VkPipelineInputAssemblyStateCreateInfo ia{};
@@ -886,7 +888,7 @@ InstanceSet BoardRenderer::buildInstances(
     constexpr int kSide = PlaySurface::kSubdiv + 1;
     constexpr float kHalf = PlaySurface::kThickness * 0.5f;
     const auto push = [&](const view::Vec3& at, const view::Vec3& n, float h,
-                          const float rgba[4]) {
+                          const float rgba[4], float u, float panelV, float tag) {
       MeshVertex mv{};
       mv.pos[0] = at.x;
       mv.pos[1] = at.y;
@@ -895,6 +897,9 @@ InstanceSet BoardRenderer::buildInstances(
       mv.normal[1] = n.y;
       mv.normal[2] = n.z;
       mv.height = h;
+      mv.panelCoord[0] = u;
+      mv.panelCoord[1] = panelV;
+      mv.panelCoord[2] = tag;
       for (int c = 0; c < 4; ++c) mv.color[c] = rgba[c];
       out.surfaceVertices.push_back(mv);
       return static_cast<std::uint32_t>(out.surfaceVertices.size() - 1);
@@ -967,7 +972,9 @@ InstanceSet BoardRenderer::buildInstances(
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
           float rgba[4]{};
           toFloat4(tinted(fill, i, j), rgba);
-          push(patch.pos[k] + patch.normal[k] * kHalf, patch.normal[k], 1.0f, rgba);
+          push(patch.pos[k] + patch.normal[k] * kHalf, patch.normal[k], 1.0f, rgba,
+               static_cast<float>(j) / PlaySurface::kSubdiv,
+               static_cast<float>(i) / PlaySurface::kSubdiv, 1);
         }
       }
       for (int i = 0; i < kSide; ++i) {
@@ -977,7 +984,8 @@ InstanceSet BoardRenderer::buildInstances(
           toFloat4(tinted(fill, i, j), rgba);
           push(patch.pos[k] - patch.normal[k] * kHalf,
                view::Vec3{-patch.normal[k].x, -patch.normal[k].y, -patch.normal[k].z},
-               0.80f, rgba);
+               0.80f, rgba, static_cast<float>(j) / PlaySurface::kSubdiv,
+               static_cast<float>(i) / PlaySurface::kSubdiv, 1);
         }
       }
       const std::uint32_t backBase = base + kSide * kSide;
@@ -1008,14 +1016,18 @@ InstanceSet BoardRenderer::buildInstances(
         float c1[4]{};
         toFloat4(tinted(grooveBase, i0, j0), c0);
         toFloat4(tinted(grooveBase, i1, j1), c1);
-        const std::uint32_t a =
-            push(patch.pos[k0] + patch.normal[k0] * kHalf, n, 1.0f, c0);
-        const std::uint32_t b =
-            push(patch.pos[k1] + patch.normal[k1] * kHalf, n, 1.0f, c1);
-        const std::uint32_t c =
-            push(patch.pos[k1] - patch.normal[k1] * kHalf, n, 0.80f, c1);
-        const std::uint32_t d =
-            push(patch.pos[k0] - patch.normal[k0] * kHalf, n, 0.80f, c0);
+        const std::uint32_t a = push(patch.pos[k0] + patch.normal[k0] * kHalf, n, 1.0f,
+                                     c0, static_cast<float>(j0) / PlaySurface::kSubdiv,
+                                     static_cast<float>(i0) / PlaySurface::kSubdiv, -1);
+        const std::uint32_t b = push(patch.pos[k1] + patch.normal[k1] * kHalf, n, 1.0f,
+                                     c1, static_cast<float>(j1) / PlaySurface::kSubdiv,
+                                     static_cast<float>(i1) / PlaySurface::kSubdiv, -1);
+        const std::uint32_t c = push(patch.pos[k1] - patch.normal[k1] * kHalf, n, 0.80f,
+                                     c1, static_cast<float>(j1) / PlaySurface::kSubdiv,
+                                     static_cast<float>(i1) / PlaySurface::kSubdiv, -1);
+        const std::uint32_t d = push(patch.pos[k0] - patch.normal[k0] * kHalf, n, 0.80f,
+                                     c0, static_cast<float>(j0) / PlaySurface::kSubdiv,
+                                     static_cast<float>(i0) / PlaySurface::kSubdiv, -1);
         quad(a, b, c, d);
       };
       for (int i = 0; i + 1 < kSide; ++i) {
@@ -1434,11 +1446,13 @@ InstanceSet BoardRenderer::buildInstances(
         rail.scale[2] = 0.055f / half.z;
         toFloat4(f.color, rail.color);
         // A mirror is drawn as metal; a glued portal keeps the matte seam colour.
-        rail.material = shaderMaterial(
-            f.kind == view::SeamKind::Mirror                  ? view::Material::Metal
-            : theme_.materials.cells == view::Material::Glass ? view::Material::Glow
-                                                              : view::Material::Matte,
-            Cut::Plank, 0.0f);
+        rail.material =
+            shaderMaterial(f.kind == view::SeamKind::Mirror ? view::Material::Metal
+                           : (theme_.materials.cells == view::Material::Glass ||
+                              theme_.materials.cells == view::Material::Led)
+                               ? view::Material::Glow
+                               : view::Material::Matte,
+                           Cut::Plank, 0.0f);
         byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
       }
     }

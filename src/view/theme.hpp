@@ -28,7 +28,8 @@ enum class Material : std::uint8_t {
   Wood = 2,
   Glass = 3,
   Hologram = 4,
-  Glow = 5
+  Glow = 5,
+  Led = 7
 };
 
 struct Materials {
@@ -160,7 +161,7 @@ struct Theme {
   /// A dark, cool glass alternative to the default wooden set.
   [[nodiscard]] static Theme manifold() {
     Theme t;
-    t.materials = Materials{Material::Glass, Material::Hologram, Material::Glass};
+    t.materials = Materials{Material::Led, Material::Hologram, Material::Glass};
     t.backdrop = Backdrop::Grid;
     t.panelStyle = PanelStyle::Brackets;
     t.monoLabels = true;

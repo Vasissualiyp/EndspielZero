@@ -55,7 +55,7 @@ struct Instance {
   /// buffer (M17).
   float quat[4]{0.0f, 0.0f, 0.0f, 1.0f};
   /// Shader material: integer part selects matte (0), metal (1), plank wood (2),
-  /// glass (3), hologram (4), glow (5), or turned wood (6).
+  /// glass (3), hologram (4), glow (5), turned wood (6), or LED panel (7).
   /// Fractional part varies wood grain.
   float material{0};
 };

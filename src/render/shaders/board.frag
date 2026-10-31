@@ -14,6 +14,7 @@ layout(location = 6) in vec2 fragEdgeInset;
 layout(location = 7) flat in float fragMaterial;
 layout(location = 8) in vec3 fragWorld;
 layout(location = 9) in vec3 fragObject;
+layout(location = 10) in vec3 fragPanel;
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
@@ -102,6 +103,9 @@ void main() {
     shade *= mix(0.80, 1.06, clamp(fragHeight, 0.0, 1.0));
 
     vec3 rgb = fragColor.rgb * shade;
+    // Evaluate footprints before material/face branches so derivatives remain defined.
+    vec2 panelPitch = fragPanel.xy * 24.0;
+    vec2 panelFootprint = max(fwidth(panelPitch), vec2(0.0001));
 
     if (matId == 2 || matId == 6) {
         rgb *= woodFactor(fragObject, matVar, matId == 6);
@@ -139,6 +143,20 @@ void main() {
         vec3 base = mix(fragColor.rgb, vec3(luminance), 0.35);
         rgb = base * (0.86 + 0.16 * face) * (0.92 + 0.08 * lines) +
               emission * (0.12 * rim + 0.16 * scan);
+    }
+
+    if (matId == 7) {
+        vec2 distanceToCentre = abs(fract(panelPitch) - vec2(0.5));
+        vec2 emitters = vec2(1.0) - smoothstep(
+            vec2(0.36) - panelFootprint * 0.5,
+            vec2(0.36) + panelFootprint * 0.5, distanceToCentre);
+        float undersampled = smoothstep(0.35, 0.65,
+                                         max(panelFootprint.x, panelFootprint.y));
+        float pixels = mix(emitters.x * emitters.y, 0.72 * 0.72, undersampled);
+        vec2 border = min(fragPanel.xy, vec2(1.0) - fragPanel.xy);
+        float face = smoothstep(0.0, 0.018, min(border.x, border.y));
+        rgb = fragColor.rgb * (0.82 + 0.22 * pixels) * mix(0.58, 1.0, face);
+        if (fragPanel.z < 0.5) rgb = fragColor.rgb * 0.55;
     }
 
     if (matId == 5) {

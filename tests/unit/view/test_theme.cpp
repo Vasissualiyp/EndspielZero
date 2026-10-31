@@ -53,7 +53,7 @@ TEST_CASE("manifold is a dark, legible glass alternative", "[unit][view]") {
   const Theme t = Theme::manifold();
   CHECK_FALSE(t.light);
   CHECK(luminance(t.ink) < 0.02f);
-  CHECK(t.materials.cells == Material::Glass);
+  CHECK(t.materials.cells == Material::Led);
   CHECK(t.materials.pieces == Material::Hologram);
   CHECK(t.materials.plinth == Material::Glass);
 }
@@ -147,7 +147,7 @@ TEST_CASE("the candlelit theme is still dark, and unchanged", "[unit][view]") {
 
 TEST_CASE("a palette is chosen by name, and an unknown name is the shipped one",
           "[unit][view]") {
-  CHECK(themeFromName("manifold").materials.cells == Material::Glass);
+  CHECK(themeFromName("manifold").materials.cells == Material::Led);
   CHECK_FALSE(themeFromName("console").light);
   // A settings file from a newer build, or a typo, still produces a usable palette.
   CHECK(themeFromName("tesseract").light == themeFromName("console").light);

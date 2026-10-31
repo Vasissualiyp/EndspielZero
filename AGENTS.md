@@ -270,7 +270,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | UI colours | `src/view/theme.hpp` - two themes, one struct, no renderer changes | |
 | UI panel treatment and action labels | `Theme::panelStyle`, `monoLabels` and `interfaceRule`; `widgets::panelCorners` in `src/render/ui_widgets.cpp` and `Ui::actionFont` in `src/render/ui.cpp`. Settings → Looks → Theme selects the whole look, including the backdrop | |
 | Ambient background (drifting shapes or a perspective grid floor) | `Theme::backdrop` in `src/view/theme.hpp`, dispatched by `DepthField::draw` in `src/render/deco.cpp`; the same field draws behind menus and behind the board | |
-| A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021 and ADR-0022; `--visual-time` samples hologram light | |
+| A surface's material (wood, metal, glass, crystal, glow) | `Theme::materials` + `shaderMaterial` in `src/render/board_renderer.cpp` + the dispatch in `src/render/shaders/board.frag`; see ADR-0021, ADR-0022 and ADR-0023; `--visual-time` samples hologram light | |
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
@@ -370,10 +370,14 @@ These are the ones that have actually cost time here, not hypotheticals.
   leaves out is derived from how the piece moves. An unknown name falls back rather
   than failing - a variant is never unplayable for want of a model.
 - The palette is `view::Theme`, one struct, and there are two of them: `console()` is
-  the shipped candlelit wooden set and `manifold()` the dark glass/hologram alternative.
+  the shipped candlelit wooden set and `manifold()` the dark LED/hologram alternative.
   Colours live in the theme; shader material branches live in the renderer.
   `tests/unit/view/test_theme.cpp` pins the load-bearing part: both piece colours must
   read on both squares. That test found the old board pair sitting at 1.2:1.
+- **LED panels use cell-local UVs**, not world XY. `MeshVertex::panelCoord` carries
+  sampled face UVs/tag; top/bottom span [0,1]² and sidewalls disable the emitter grid.
+  Slides and inversion preserve the UVs. Ordinary slabs use local-XY fallback;
+  other materials retain their existing coordinates. See ADR-0023.
 - **A material is sampled in object space** (`fragObject`) and keyed on what the object
   is, not where it is. A piece's grain is keyed by type and colour so it does not swim
   when moved or shrunk; the surface mesh is one identity instance and its wood grain

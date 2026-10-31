@@ -24,7 +24,12 @@ struct MeshVertex {
   /// sixty-four colours in it, because the squares are patches of one surface rather
   /// than sixty-four copies of a slab.
   float color[4]{1.0f, 1.0f, 1.0f, 1.0f};
+  /// Cell-local panel UV; tag 0 uses the ordinary slab's coordinates, +1 is a
+  /// sampled surface face, -1 is a sidewall. Independent of slide/world position.
+  float panelCoord[3]{};
 };
+
+static_assert(sizeof(MeshVertex) == 56);
 
 /// A range inside the shared vertex and index buffers.
 struct MeshRange {
@@ -88,10 +93,10 @@ enum class Archetype : std::uint8_t {
   Count
 };
 
-/// A variant's own pieces can bring bodies of their own, and each takes one of these extra
-/// shape slots after the archetypes. A shape index at or above `Archetype::Count` is
-/// therefore a custom body; a variant with more custom pieces than slots draws the rest
-/// from their archetype, which is the fallback that keeps a variant playable.
+/// A variant's own pieces can bring bodies of their own, and each takes one of these
+/// extra shape slots after the archetypes. A shape index at or above `Archetype::Count`
+/// is therefore a custom body; a variant with more custom pieces than slots draws the
+/// rest from their archetype, which is the fallback that keeps a variant playable.
 inline constexpr std::size_t kCustomShapes = 12;
 inline constexpr std::size_t kShapeSlots =
     static_cast<std::size_t>(Archetype::Count) + kCustomShapes;

@@ -259,4 +259,5 @@ does not establish that budget. Hardware FPS validation remains open.
 
 Actual game pieces now use the tested height-scanning hologram material and explicit
 presentation clock in [M23.4](M23.4-holograms-led-and-live-controls.md), checkpoint A.
-LED panels and live controls are the following independently committed checkpoints.
+LED panels on ordinary/flat/sampled boards are built in checkpoint B, with local
+UVs, derivative filtering and an opaque default. Live controls are checkpoint C.
