@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <map>
 #include <vector>
@@ -137,14 +138,182 @@ void keyValue(const char* key, const std::string& value, const view::Theme& them
 
 namespace {
 
+struct ControlLayout {
+  ImFont* font{};
+  std::string caption, tail;
+  float width{}, height{}, fontSize{}, tailSize{}, wrap{}, tailWrap{};
+  ImVec2 label{}, value{}, number{};
+  bool showNumber{}, showTail{};
+};
+
+ControlLayout measureControl(const char* label, const char* tail, ImFont* font,
+                             float width, float height, float s, int index) {
+  ControlLayout l;
+  l.font = font ? font : ImGui::GetFont();
+  l.fontSize = font ? font->FontSize : ImGui::GetFontSize();
+  l.caption = upper(label);
+  l.tail = tail ? upper(tail) : "";
+  l.tailSize = index >= 0 ? l.fontSize * 0.58f : l.fontSize;
+  const auto measure = [&](const std::string& text, float size, float wrap = 0) {
+    return l.font->CalcTextSizeA(size, FLT_MAX, wrap, text.c_str());
+  };
+  const float textWidth = measure(l.caption, l.fontSize).x;
+  const float valueWidth = measure(l.tail, l.tailSize).x;
+  // Auto-fit windows measure their contents; their previous width cannot constrain
+  // those same contents without a frame-history feedback loop (notably the HUD).
+  const auto* window = ImGui::GetCurrentWindow();
+  const auto* viewport = ImGui::GetMainViewport();
+  const float room =
+      (window->Flags & ImGuiWindowFlags_AlwaysAutoResize)
+          ? viewport->WorkPos.x + viewport->WorkSize.x - ImGui::GetCursorScreenPos().x
+          : ImGui::GetContentRegionAvail().x;
+  const float available = std::max(1.0f, room);
+  const float natural = textWidth + 24 * s + (tail ? valueWidth + 12 * s : 0);
+  l.width = std::max(1.0f, std::min(width > 0 ? width : natural, available));
+  l.showNumber = index >= 0;
+  l.showTail = tail != nullptr;
+  float left = l.showNumber ? 36 * s : 12 * s;
+  if (index >= 0 && textWidth + left + 12 * s + valueWidth + 12 * s > l.width) {
+    l.showNumber = false;
+    left = 12 * s;
+    if (l.tail == ">") l.showTail = false;
+  }
+  const bool below = l.showTail && textWidth + left + 24 * s + valueWidth > l.width;
+  l.wrap = std::max(
+      1.0f, l.width - left - 12 * s - (l.showTail && !below ? valueWidth + 12 * s : 0));
+  const ImVec2 labelSize = measure(l.caption, l.fontSize, l.wrap);
+  l.tailWrap = std::max(1.0f, l.width - 24 * s);
+  const ImVec2 tailSize = measure(l.tail, l.tailSize, l.tailWrap);
+  const float contentH = labelSize.y + (below ? 4 * s + tailSize.y : 0);
+  l.height = std::ceil(std::max(height, contentH + 16 * s));
+  l.label = ImVec2(left, (l.height - contentH) * 0.5f);
+  l.number = ImVec2(6 * s, (l.height - l.tailSize) * 0.5f);
+  l.value = below ? ImVec2(12 * s, l.label.y + labelSize.y + 4 * s)
+                  : ImVec2(l.width - 12 * s - valueWidth, (l.height - l.tailSize) * 0.5f);
+  return l;
+}
+
+std::uint32_t controlHash(std::uint32_t x) {
+  x ^= x >> 16;
+  x *= 0x7feb352du;
+  x ^= x >> 15;
+  x *= 0x846ca68bu;
+  return x ^ (x >> 16);
+}
+
+void drawControlGlitch(ImDrawList* dl, ImVec2 min, ImVec2 max, const ControlLayout& l,
+                       const view::Theme& theme, float s) {
+  const ImGuiID id = ImGui::GetItemID();
+  const double seconds = visualInput.context == ImGui::GetCurrentContext()
+                             ? std::fmod(visualInput.seconds, 120.0)
+                             : 0;
+  const double offset = static_cast<double>(controlHash(id)) / 4294967296.0 * 1.2;
+  const double phase = std::fmod(seconds + offset, 1.2);
+  const auto smooth = [](double x) {
+    x = std::clamp(x, 0.0, 1.0);
+    return x * x * (3 - 2 * x);
+  };
+  const auto pulse = [&](double start, double end) {
+    return smooth((phase - start) / 0.025) * smooth((end - phase) / 0.025);
+  };
+  const float burst = static_cast<float>(std::max(pulse(0, 0.16), pulse(0.30, 0.38)));
+  const auto step = static_cast<std::uint32_t>(std::floor((seconds + offset) * 8));
+  const auto seed = controlHash(id ^ controlHash(step));
+  const auto tint = mix(theme.bone, theme.ember, 0.20f);
+  const ImVec2 text(min.x + l.label.x, min.y + l.label.y);
+  const float labelH =
+      l.font->CalcTextSizeA(l.fontSize, FLT_MAX, l.wrap, l.caption.c_str()).y;
+  const auto lines = std::max(1u, static_cast<unsigned>(std::round(labelH / l.fontSize)));
+  const float lineY = text.y + static_cast<float>(seed % lines) * l.fontSize;
+  const float thickness = std::min(2 * s, l.fontSize * 0.12f);
+  for (unsigned i = 0; i < 2; ++i) {
+    const auto noise = controlHash(seed + i * 0x9e3779b9u);
+    const float direction = (noise & 1u) ? 1.0f : -1.0f;
+    const float dx =
+        direction * (1 + burst * static_cast<float>(1u + (noise >> 1) % 2u)) * s;
+    const float y = lineY + (i == 0 ? 0.30f : 0.70f) * l.fontSize;
+    dl->PushClipRect(ImVec2(text.x - 3 * s, y),
+                     ImVec2(text.x + l.wrap + 3 * s, y + thickness), true);
+    const ImVec2 clipMin = dl->GetClipRectMin(), clipMax = dl->GetClipRectMax();
+    const ImVec4 clip(clipMin.x, clipMin.y, clipMax.x, clipMax.y);
+    dl->AddText(l.font, l.fontSize, ImVec2(text.x + dx, text.y),
+                u32(i == 0 ? tint : theme.boneDim,
+                    (0.16f + 0.22f * burst) * (i == 0 ? 1.0f : 0.65f)),
+                l.caption.c_str(), nullptr, l.wrap, &clip);
+    dl->PopClipRect();
+    const float length =
+        std::min((8 + static_cast<float>((noise >> 4) % 15u)) * s, l.width * 0.25f);
+    const float x = i == 0 ? min.x + 8 * s : max.x - length - 8 * s;
+    const float edgeY = i == 0 ? min.y + 4 * s : max.y - 4 * s;
+    dl->AddRectFilled(ImVec2(x + dx, edgeY), ImVec2(x + dx + length, edgeY + s),
+                      u32(tint, 0.25f + 0.45f * burst));
+    dl->AddLine(ImVec2(x - dx, edgeY + 2 * s),
+                ImVec2(x - dx + length * 0.45f, edgeY + 2 * s),
+                u32(theme.boneDim, 0.20f + 0.35f * burst), s);
+  }
+}
+
+void drawLiveControl(ImDrawList* dl, ImVec2 min, ImVec2 max, const ControlLayout& l,
+                     const view::Theme& theme, float s, int index, bool usable,
+                     bool primary, bool cold, bool hovered, bool focused, bool held) {
+  const bool hot = hovered || focused;
+  const auto accent = mix(theme.bone, theme.ember, 0.20f);
+  const auto edge = hot ? theme.boneDim : theme.interfaceRule;
+  dl->PushClipRect(min, max, true);
+  const float cut = std::min({6 * s, (max.y - min.y) * 0.15f, (max.x - min.x) * 0.15f});
+  const ImVec2 plate[] = {min, ImVec2(max.x - cut, min.y), ImVec2(max.x, min.y + cut),
+                          max, ImVec2(min.x + cut, max.y), ImVec2(min.x, max.y - cut)};
+  dl->AddConvexPolyFilled(plate, 6,
+                          u32(hot || held ? theme.panelHi : theme.panel, held  ? 0.96f
+                                                                         : hot ? 0.86f
+                                                                               : 0.68f));
+  // Broken corners and side rails give the plate a definite right end.
+  dl->AddLine(ImVec2(min.x + 1 * s, min.y + 8 * s),
+              ImVec2(min.x + 1 * s, max.y - cut - 2 * s), u32(edge, 0.6f), s);
+  dl->AddLine(ImVec2(max.x - 1 * s, min.y + cut + 2 * s),
+              ImVec2(max.x - 1 * s, max.y - 8 * s), u32(edge, hot ? 0.9f : 0.6f), s);
+  const float corner = std::min(18 * s, l.width * 0.2f);
+  dl->AddLine(min, ImVec2(min.x + corner, min.y), u32(hot ? accent : edge, 0.8f), s);
+  dl->AddLine(ImVec2(max.x - corner, max.y - s), ImVec2(max.x, max.y - s),
+              u32(hot ? accent : edge, 0.8f), s);
+  if (focused || held) {
+    const float x = min.x + 3 * s;
+    dl->AddLine(ImVec2(x, min.y + 8 * s), ImVec2(x, max.y - 8 * s), u32(accent, 0.9f),
+                (held ? 3 : 2) * s);
+  }
+  if (usable && (hot || held)) drawControlGlitch(dl, min, max, l, theme, s);
+  const ImVec2 clipMin = dl->GetClipRectMin(), clipMax = dl->GetClipRectMax();
+  const ImVec4 textClip(clipMin.x, clipMin.y, clipMax.x, clipMax.y);
+  if (l.showNumber) {
+    char number[4]{};
+    std::snprintf(number, sizeof(number), "%02d", std::clamp(index, 0, 99));
+    dl->AddText(l.font, l.tailSize, ImVec2(min.x + l.number.x, min.y + l.number.y),
+                u32(theme.boneFaint), number, nullptr, 0, &textClip);
+  }
+  const ImU32 labelColour = u32(!usable   ? theme.boneFaint
+                                : primary ? theme.ember
+                                : cold    ? theme.rift
+                                          : theme.bone);
+  dl->AddText(l.font, l.fontSize, ImVec2(min.x + l.label.x, min.y + l.label.y),
+              labelColour, l.caption.c_str(), nullptr, l.wrap, &textClip);
+  if (l.showTail)
+    dl->AddText(l.font, l.tailSize, ImVec2(min.x + l.value.x, min.y + l.value.y),
+                u32(usable ? theme.boneDim : theme.boneFaint), l.tail.c_str(), nullptr,
+                l.tailWrap, &textClip);
+  dl->PopClipRect();
+}
+
 /// The shell's one interactive row. A menu entry and a Start/Back button are the same
-/// control: type on a hairline with an accent wash under the pointer, never a filled
-/// key. A list entry adds a number and a tail; a button adds neither. One drawing here
+/// control: manifold uses a signal plate, console a hairline and pointer wash.
+/// A list entry adds a number and a tail; a button adds neither. One drawing here
 /// is what keeps the two from drifting apart again.
 bool rowControl(const char* id, const char* label, const view::Theme& theme, ImFont* font,
                 float width, float height, float scale, bool enabled, bool primary,
                 bool cold, int index, const char* tail) {
   const float s = scale;
+  const auto layout = theme.liveControls
+                          ? measureControl(label, tail, font, width, height, s, index)
+                          : ControlLayout{};
   // The stock button is only an input target: every pixel is drawn after it.
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
@@ -153,7 +322,9 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
   // The stock label is hidden; every pixel is drawn here instead.
   ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 0));
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ImGui::Button(id, ImVec2(width, height));
+  const bool pressed =
+      ImGui::Button(id, theme.liveControls ? ImVec2(layout.width, layout.height)
+                                           : ImVec2(width, height));
   const bool usable =
       theme.liveControls
           ? enabled && (ImGui::GetItemFlags() & ImGuiItemFlags_Disabled) == 0
@@ -172,92 +343,56 @@ bool rowControl(const char* id, const char* label, const view::Theme& theme, ImF
   const ImVec2 max = ImGui::GetItemRectMax();
   ImDrawList* dl = ImGui::GetWindowDrawList();
 
-  // A wash that sweeps in from the left rather than a filled row: the row is type on a
-  // page, and a solid block would turn the list back into a stack of buttons.
-  const view::Rgba wash = cold ? theme.rift : theme.ember;
-  if (hot) {
-    dl->AddRectFilledMultiColor(min, max, u32(wash, 0.16f), u32(wash, 0.0f),
-                                u32(wash, 0.0f), u32(wash, 0.16f));
-  }
-  if (theme.liveControls) dl->PushClipRect(min, max, true);
-  dl->AddLine(min, ImVec2(max.x, min.y),
-              u32(theme.liveControls && hot ? wash : theme.interfaceRule, 0.8f),
-              theme.liveControls ? s : 1.0f);
-  if (theme.liveControls && usable) {
-    const float widthInside = max.x - min.x - 4.0f * s;
-    const float length = std::min(28.0f * s, (max.x - min.x) * 0.16f);
-    if (widthInside > length && max.y > min.y) {
-      const double seconds =
-          visualInput.context == ImGui::GetCurrentContext() ? visualInput.seconds : 0;
-      const double phase = static_cast<double>(ImGui::GetItemID() & 0xFFFFu) / 65536.0;
-      const double cycle = std::fmod(seconds, 6.0) / 6.0 + phase;
-      const float t = static_cast<float>(cycle - std::floor(cycle));
-      const auto ease = [](float x) {
-        x = std::clamp(x, 0.0f, 1.0f);
-        return x * x * (3.0f - 2.0f * x);
-      };
-      const float envelope = ease(t / 0.1f) * ease((1.0f - t) / 0.1f);
-      const float x = min.x + 2.0f * s + (widthInside - length) * t;
-      const float y = min.y + 1.5f * s;
-      dl->AddLine(ImVec2(x, y), ImVec2(x + length, y),
-                  u32(wash, envelope * (hot ? 0.22f : 0.08f)), 3.0f * s);
-      dl->AddLine(ImVec2(x, y), ImVec2(x + length, y),
-                  u32(wash, envelope * (hot ? 0.85f : 0.35f)), s);
-    }
-    const float mid = (min.y + max.y) * 0.5f;
-    if (focused) {
-      dl->AddLine(ImVec2(min.x + 3.0f * s, mid - 6.0f * s),
-                  ImVec2(min.x + 3.0f * s, mid + 6.0f * s), u32(wash, 0.9f), 2.0f * s);
-    }
-    if (held) {
-      const float x = min.x + 6.0f * s;
-      dl->AddLine(ImVec2(x + 4.0f * s, mid - 5.0f * s), ImVec2(x, mid - 5.0f * s),
-                  u32(wash), s);
-      dl->AddLine(ImVec2(x, mid - 5.0f * s), ImVec2(x, mid + 5.0f * s), u32(wash), s);
-      dl->AddLine(ImVec2(x, mid + 5.0f * s), ImVec2(x + 4.0f * s, mid + 5.0f * s),
-                  u32(wash), s);
-    }
-  }
-  if (theme.liveControls) dl->PopClipRect();
-
-  const float labelHeight = font != nullptr ? font->FontSize : ImGui::GetFontSize();
-  const float top = min.y + (max.y - min.y - labelHeight) * 0.5f;
-  // Live labels stay fixed; console retains its existing pointer step.
-  const float slide = hovered && !theme.liveControls ? 12.0f * s : 0.0f;
-  const float inset = index >= 0 ? 36.0f * s : 12.0f * s;
-  const float textX = min.x + inset + slide;
-
-  const ImU32 labelColor = u32(!usable   ? theme.boneFaint
-                               : primary ? theme.ember
-                               : cold    ? theme.rift
-                               : hot     ? theme.ember
-                                         : theme.bone);
-  const std::string caption = upper(label);
-  if (font != nullptr) {
-    const float small = font->FontSize * 0.58f;
-    if (index >= 0) {
-      char idx[4]{};
-      std::snprintf(idx, sizeof(idx), "%02d", std::clamp(index, 0, 99));
-      dl->AddText(font, small,
-                  ImVec2(min.x + 6.0f * s, min.y + (max.y - min.y - small) * 0.5f),
-                  u32(theme.boneFaint), idx);
-    }
-    dl->AddText(font, labelHeight, ImVec2(textX, top), labelColor, caption.c_str());
-    if (tail != nullptr) {
-      const ImVec2 w = font->CalcTextSizeA(small, FLT_MAX, 0.0f, tail);
-      dl->AddText(font, small,
-                  ImVec2(max.x - 8.0f * s - w.x, min.y + (max.y - min.y - small) * 0.5f),
-                  u32(usable ? (hot ? theme.ember : theme.rule) : theme.boneFaint), tail);
-    }
+  if (theme.liveControls) {
+    drawLiveControl(dl, min, max, layout, theme, s, index, usable, primary, cold, hovered,
+                    focused, held);
   } else {
-    dl->AddText(ImVec2(textX, top), labelColor, caption.c_str());
-    // The far-end value is drawn here too, so a control without a display font - the
-    // settings rows - still shows what it is set to.
-    if (tail != nullptr) {
-      const ImVec2 w = ImGui::CalcTextSize(upper(tail).c_str());
-      dl->AddText(ImVec2(max.x - 10.0f * s - w.x, min.y + (max.y - min.y - w.y) * 0.5f),
-                  u32(usable ? (hot ? theme.ember : theme.boneDim) : theme.boneFaint),
-                  upper(tail).c_str());
+    const view::Rgba wash = cold ? theme.rift : theme.ember;
+    if (hot) {
+      dl->AddRectFilledMultiColor(min, max, u32(wash, 0.16f), u32(wash, 0.0f),
+                                  u32(wash, 0.0f), u32(wash, 0.16f));
+    }
+    dl->AddLine(min, ImVec2(max.x, min.y), u32(theme.interfaceRule, 0.8f), 1.0f);
+
+    const float labelHeight = font != nullptr ? font->FontSize : ImGui::GetFontSize();
+    const float top = min.y + (max.y - min.y - labelHeight) * 0.5f;
+    const float slide = hovered ? 12.0f * s : 0.0f;
+    const float inset = index >= 0 ? 36.0f * s : 12.0f * s;
+    const float textX = min.x + inset + slide;
+
+    const ImU32 labelColor = u32(!usable   ? theme.boneFaint
+                                 : primary ? theme.ember
+                                 : cold    ? theme.rift
+                                 : hot     ? theme.ember
+                                           : theme.bone);
+    const std::string caption = upper(label);
+    if (font != nullptr) {
+      const float small = font->FontSize * 0.58f;
+      if (index >= 0) {
+        char idx[4]{};
+        std::snprintf(idx, sizeof(idx), "%02d", std::clamp(index, 0, 99));
+        dl->AddText(font, small,
+                    ImVec2(min.x + 6.0f * s, min.y + (max.y - min.y - small) * 0.5f),
+                    u32(theme.boneFaint), idx);
+      }
+      dl->AddText(font, labelHeight, ImVec2(textX, top), labelColor, caption.c_str());
+      if (tail != nullptr) {
+        const ImVec2 w = font->CalcTextSizeA(small, FLT_MAX, 0.0f, tail);
+        dl->AddText(
+            font, small,
+            ImVec2(max.x - 8.0f * s - w.x, min.y + (max.y - min.y - small) * 0.5f),
+            u32(usable ? (hot ? theme.ember : theme.rule) : theme.boneFaint), tail);
+      }
+    } else {
+      dl->AddText(ImVec2(textX, top), labelColor, caption.c_str());
+      // The far-end value is drawn here too, so a control without a display font - the
+      // settings rows - still shows what it is set to.
+      if (tail != nullptr) {
+        const ImVec2 w = ImGui::CalcTextSize(upper(tail).c_str());
+        dl->AddText(ImVec2(max.x - 10.0f * s - w.x, min.y + (max.y - min.y - w.y) * 0.5f),
+                    u32(usable ? (hot ? theme.ember : theme.boneDim) : theme.boneFaint),
+                    upper(tail).c_str());
+      }
     }
   }
   // One chokepoint for every control the shell draws: a menu row, a button and a cycling
@@ -521,6 +656,37 @@ bool cycleButton(const char* label, const std::string& value, const view::Theme&
                     true, -1, tail.c_str());
 }
 
+ActionPairLayout actionPairLayout(const char* first, const char* second,
+                                  const view::Theme& theme, float firstWidth,
+                                  float secondWidth, ImFont* font, float available) {
+  const float s = uiScale();
+  const float spacing = ImGui::GetStyle().ItemSpacing.x;
+  if (!theme.liveControls)
+    return {{firstWidth, controlHeight()},
+            {secondWidth, controlHeight()},
+            controlHeight(),
+            false};
+  if (available <= 0) available = ImGui::GetContentRegionAvail().x;
+  const float room = std::max(1.0f, available - std::min(8 * s, available * 0.04f));
+  auto a = measureControl(first, nullptr, font, firstWidth, controlHeight(), s, -1);
+  auto b = measureControl(second, nullptr, font, secondWidth, controlHeight(), s, -1);
+  bool stacked = false;
+  if (firstWidth + spacing + secondWidth > room) {
+    a = measureControl(first, nullptr, font, 0, controlHeight(), s, -1);
+    b = measureControl(second, nullptr, font, 0, controlHeight(), s, -1);
+    if (a.width + spacing + b.width > room) {
+      stacked = true;
+      a = measureControl(first, nullptr, font, room, controlHeight(), s, -1);
+      b = measureControl(second, nullptr, font, room, controlHeight(), s, -1);
+    }
+  }
+  return {{a.width, a.height},
+          {b.width, b.height},
+          stacked ? a.height + ImGui::GetStyle().ItemSpacing.y + b.height
+                  : std::max(a.height, b.height),
+          stacked};
+}
+
 float controlHeight() {
   return 42.0f * uiScale();
 }
@@ -565,6 +731,13 @@ void screenTitle(const char* text, const view::Theme& theme, ImFont* displayFont
 
 bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* labelFont,
                float width, bool enabled, float scale) {
+  if (theme.liveControls) {
+    const float available = std::max(0.0f, ImGui::GetContentRegionAvail().x);
+    const float room = std::min(width > 0 ? width : available, available);
+    const float gutter =
+        room >= 200 * scale ? 24 * scale : std::min(8 * scale, room * 0.04f);
+    width = std::max(1.0f, std::min(320 * scale, room - gutter));
+  }
   const std::string id = "##" + std::string(label);
   // What is coming stays in the list and says so, in two words at the far end of the
   // row. It does not need a paragraph underneath it every time the pointer goes past.
@@ -682,6 +855,21 @@ void endPane() {
       ImVec2& p = dl->VtxBuffer[i].pos;
       p.x = c.x + (p.x - c.x) * k;
       p.y = c.y + (p.y - c.y) * k;
+    }
+    // Item and glyph-slice scissors travel with their vertices. The viewport itself
+    // remains the fixed outer limit, including when the departing pane grows.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const ImVec4 viewport(vp->WorkPos.x, vp->WorkPos.y, vp->WorkPos.x + vp->WorkSize.x,
+                          vp->WorkPos.y + vp->WorkSize.y);
+    for (auto& cmd : dl->CmdBuffer) {
+      auto& r = cmd.ClipRect;
+      if (cmd.ElemCount == 0 || (r.x == viewport.x && r.y == viewport.y &&
+                                 r.z == viewport.z && r.w == viewport.w))
+        continue;
+      r.x = std::clamp(c.x + (r.x - c.x) * k, viewport.x, viewport.z);
+      r.y = std::clamp(c.y + (r.y - c.y) * k, viewport.y, viewport.w);
+      r.z = std::clamp(c.x + (r.z - c.x) * k, viewport.x, viewport.z);
+      r.w = std::clamp(c.y + (r.w - c.y) * k, viewport.y, viewport.w);
     }
   }
   ImGui::PopClipRect();

@@ -38,6 +38,15 @@ bool computerLevelSlider(int& level) {
 
 using namespace widgets;
 
+// Keep useful text width when scaling a narrow menu. Wide settled panes retain their
+// existing padding; the content can use up to 84% of a narrow half-screen pane.
+float menuPanePadding(const view::Theme& theme, ImVec2 min, ImVec2 max, float scale) {
+  const float preferred = 46 * scale;
+  if (!theme.liveControls) return preferred;
+  const float width = std::max(0.0f, max.x - min.x);
+  return std::min(preferred, (width - std::min(200 * scale, width * 0.84f)) * 0.5f);
+}
+
 /// The colour a difficulty is advertised with. A switch, not an array lookup, so that
 /// adding a level to the enum is a compile error here rather than a silent wrap.
 view::Rgba difficultyColor(const view::Theme& t, Difficulty d) {
@@ -154,8 +163,8 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##mainmenu", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
-            !ghosting_);
+  beginPane("##mainmenu", menuMin, menuMax, move.scale, move.alpha,
+            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   screenTitle("ENDSPIELZERO", t, display, scale_, 2.4f);
   ImGui::Dummy(ImVec2(0, px(14)));
 
@@ -216,7 +225,8 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##watch", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  beginPane("##watch", menuMin, menuMax, move.scale, move.alpha,
+            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow("watch", t, mono, scale_);
   screenTitle("Watch a game", t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -231,7 +241,10 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
 
   const float rowH = px(26.0f);
   const float listW = ImGui::GetContentRegionAvail().x * 0.44f;
-  const float footer = px(10) + px(40) + px(6);
+  const auto actions =
+      actionPairLayout("START WATCHING", "BACK", t, px(180), px(110), actionFont());
+  const float footer =
+      t.liveControls ? px(10) + actions.height + px(6) : px(10) + px(40) + px(6);
   const float wantH = static_cast<float>(games.size()) * rowH + px(18.0f);
   const float room = std::max(1.0f, ImGui::GetContentRegionAvail().y - footer);
   const float listH = std::clamp(wantH, std::min(px(60.0f), room), room);
@@ -302,7 +315,8 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
                      (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
   if (!games.empty() &&
-      (button("START WATCHING", t, px(180), true, false, true, actionFont()) || enter)) {
+      (button("START WATCHING", t, actions.first.x, true, false, true, actionFont()) ||
+       enter)) {
     request.watchGame = pickedWatch_;
   } else if (games.empty()) {
     ImGui::PushFont(small);
@@ -311,8 +325,8 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
   }
-  ImGui::SameLine();
-  if (button("BACK", t, px(110), false, false, true, actionFont())) shell.back();
+  if (!actions.stacked) ImGui::SameLine();
+  if (button("BACK", t, actions.second.x, false, false, true, actionFont())) shell.back();
   if (!shell.message().empty()) {
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
@@ -338,7 +352,8 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##welcome", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  beginPane("##welcome", menuMin, menuMax, move.scale, move.alpha,
+            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow("tutorial", t, mono, scale_);
   screenTitle("Start here", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -493,7 +508,8 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##newgame", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  beginPane("##newgame", menuMin, menuMax, move.scale, move.alpha,
+            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow("new game", t, mono, scale_);
   screenTitle("Library", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -506,7 +522,9 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
 
   // Keep actions outside the scrolling body. The list and game options can scroll
   // together even when the large-scale form is taller than the whole pane.
-  const float actionH = controlHeight() + px(8);
+  const auto actions =
+      actionPairLayout("START", "BACK", t, px(150), px(110), actionFont());
+  const float actionH = actions.height + px(8);
   ImGui::BeginChild("##newgamebody",
                     ImVec2(0, std::max(1.0f, ImGui::GetContentRegionAvail().y - actionH -
                                                  ImGui::GetStyle().ItemSpacing.y)),
@@ -620,11 +638,11 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   const bool enter = !ghosting_ && !ImGui::GetIO().WantTextInput &&
                      (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
-  if (button("START", t, px(150), true, false, true, actionFont()) || enter) {
+  if (button("START", t, actions.first.x, true, false, true, actionFont()) || enter) {
     request.loadVariant = pickedVariant_;
   }
-  ImGui::SameLine();
-  if (button("BACK", t, px(110), false, false, true, actionFont())) shell.back();
+  if (!actions.stacked) ImGui::SameLine();
+  if (button("BACK", t, actions.second.x, false, false, true, actionFont())) shell.back();
   if (!shell.message().empty()) {
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.blood));
@@ -647,7 +665,8 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##pause", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  beginPane("##pause", menuMin, menuMax, move.scale, move.alpha,
+            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow(shell.currentVariant().c_str(), t, mono, scale_);
   screenTitle("Paused", t, display, scale_, 1.8f);
   ImGui::Dummy(ImVec2(0, px(8)));
@@ -744,7 +763,9 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   drawShellFrame(shell, menuMin, menuMax);
 
   const PaneMove move = paneMove();
-  beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  beginPane("##editor", menuMin, menuMax, move.scale, move.alpha,
+            editorPage_ == 0 ? menuPanePadding(t, menuMin, menuMax, scale_) : px(46.0f),
+            !ghosting_);
   eyebrow("editor", t, mono, scale_);
 
   // Leaving with unsaved changes is asked about, never assumed: `Shell::back` (a BACK or
@@ -1144,8 +1165,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
     drawShellFrame(shell, menuMin, menuMax);
   }
   const PaneMove move = paneMove();
-  beginPane("##settings", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
-            !ghosting_);
+  beginPane("##settings", menuMin, menuMax, move.scale, move.alpha,
+            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   ImGui::PushFont(static_cast<ImFont*>(t.monoLabels ? fontLabel_ : fontBody_));
   eyebrow("settings", t, mono, scale_);
   screenTitle("Settings", t, display, scale_, 2.0f);
@@ -1154,11 +1175,23 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // The body is the one scroller and takes whatever is left once a footer row's height
   // has been reserved. The footer is a box of its own below, so its buttons keep their
   // full height however large the interface scale grows - the body scrolls instead.
-  const float footerH = controlHeight() + px(14.0f);
-  ImGui::BeginChild("##settingsbody",
-                    ImVec2(0, std::max(px(120.0f), ImGui::GetContentRegionAvail().y -
-                                                       footerH - px(8.0f))),
-                    0, ImGuiWindowFlags_NavFlattened);
+  const float footerWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x - px(16) -
+                                               2 * ImGui::GetStyle().ChildBorderSize);
+  const auto actions = actionPairLayout("BACK", "RESET TO DEFAULTS", t, px(120), px(200),
+                                        actionFont(), footerWidth);
+  const float noteH = small
+                          ->CalcTextSizeA(small->FontSize, FLT_MAX, footerWidth,
+                                          "saved as you change them")
+                          .y;
+  const float footerH = t.liveControls
+                            ? actions.height + px(8) + ImGui::GetStyle().ItemSpacing.y +
+                                  std::ceil(noteH) + 2 * ImGui::GetStyle().ChildBorderSize
+                            : controlHeight() + px(14.0f);
+  ImGui::BeginChild(
+      "##settingsbody",
+      ImVec2(0, std::max(t.liveControls ? 1.0f : px(120.0f),
+                         ImGui::GetContentRegionAvail().y - footerH - px(8.0f))),
+      0, ImGuiWindowFlags_NavFlattened);
   ImGui::PushItemWidth(px(220));
 
   heading("DISPLAY", t, small);
@@ -1395,20 +1428,27 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // scrolls if it must. The border is the box the buttons live in.
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8.0f), px(4.0f)));
   ImGui::BeginChild("##settingsfooter", ImVec2(0, footerH), ImGuiChildFlags_Border,
-                    ImGuiWindowFlags_NavFlattened);
-  if (button("BACK", t, px(120), true, false, true, actionFont())) shell.back();
-  ImGui::SameLine();
-  if (button("RESET TO DEFAULTS", t, px(200), false, false, true, actionFont())) {
+                    ImGuiWindowFlags_NavFlattened |
+                        (t.liveControls ? ImGuiWindowFlags_NoScrollbar |
+                                              ImGuiWindowFlags_NoScrollWithMouse
+                                        : 0));
+  if (button("BACK", t, actions.first.x, true, false, true, actionFont())) shell.back();
+  if (!actions.stacked) ImGui::SameLine();
+  if (button("RESET TO DEFAULTS", t, actions.second.x, false, false, true,
+             actionFont())) {
     const std::string keepVariant = s.lastVariant;
     s = app::Settings{};
     s.lastVariant = keepVariant;
     request.applyScale = true;
     request.settingsChanged = true;
   }
-  ImGui::SameLine();
+  if (!t.liveControls) ImGui::SameLine();
   ImGui::PushFont(small);
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-  ImGui::TextUnformatted("saved as you change them");
+  if (t.liveControls)
+    ImGui::TextWrapped("saved as you change them");
+  else
+    ImGui::TextUnformatted("saved as you change them");
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::EndChild();

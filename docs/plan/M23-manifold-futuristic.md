@@ -264,3 +264,11 @@ UVs, derivative filtering and an opaque default. Live controls are built in chec
 fixed labels, keyboard focus and held feedback, with disabled controls stationary.
 All 254 view/render cases, 42 GUI gates and precommit pass; see the companion spec
 for live captures, software timings and retained hardware/bloom deferrals.
+
+
+The requested menu revision is implemented in [M23.7](M23.7-manifold-glitch-controls.md):
+finite dark signal plates replace idle travelling rules, rows end before the right
+edge, and hover/visible keyboard focus adds explicit-time clipped text echoes and
+frame fragments behind intact labels. Labels/values and footer pairs are measured,
+wrap or stack, and remain reachable through the existing scrollers. Normal Console
+captures are unchanged. See that slice's status for review and final validation.

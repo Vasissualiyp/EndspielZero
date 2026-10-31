@@ -59,8 +59,8 @@ void heading(const char* text, const view::Theme& theme, ImFont* font);
 void keyValue(const char* key, const std::string& value, const view::Theme& theme,
               bool cold = false);
 
-/// An action, drawn as a menu row: type on a hairline with an ember wash under the
-/// pointer, never a filled key - so a Start/Back pair and the main menu are one control.
+/// An action sharing its input and treatment with menu rows. Manifold uses finite
+/// plates and local hover glitches; console retains its hairline and pointer wash.
 /// "primary" sets the label in the accent; "cold" marks a control that acts on geometry
 /// or time rather than on the game; `font` is the label typeface, the same one a menu
 /// entry passes, or null for the interface's body font.
@@ -117,6 +117,19 @@ bool button(const char* label, const view::Theme& theme, float width = 0.0f,
 bool cycleButton(const char* label, const std::string& value, const view::Theme& theme,
                  float scale, float width = 0.0f);
 
+/// Measured action pair. The same widths feed button() and the footer reservation;
+/// narrow panes compact captions first, then stack instead of losing the second action.
+struct ActionPairLayout {
+  ImVec2 first, second;
+  float height{};
+  bool stacked{};
+};
+[[nodiscard]] ActionPairLayout actionPairLayout(const char* first, const char* second,
+                                                const view::Theme& theme,
+                                                float firstWidth, float secondWidth,
+                                                ImFont* font = nullptr,
+                                                float available = 0);
+
 /// The height a `button` row draws at, so a layout can reserve room for one and the row
 /// is never the thing that gets clipped when the interface scale grows.
 [[nodiscard]] float controlHeight();
@@ -133,7 +146,7 @@ void eyebrow(const char* text, const view::Theme& theme, ImFont* monoFont, float
 void screenTitle(const char* text, const view::Theme& theme, ImFont* displayFont,
                  float scale, float sizeMul = 2.1f);
 
-/// A menu row: type on a hairline, not a box.
+/// A menu row: console uses a hairline; manifold uses a bounded signal plate.
 ///
 /// `index` is the row's number, set small and monospaced at the left - it says the list
 /// is ordered and gives the eye somewhere to start. `scale` is required rather than

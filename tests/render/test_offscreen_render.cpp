@@ -1999,6 +1999,10 @@ TEST_CASE("the first HUD frame measures current turn and recent rows",
       for (int i = 0; i < 3; ++i) (void)frame(1, false);
       const auto equalFrames = [&] {
         const auto first = frame(0, true), next = frame(0, true);
+        if (first.rgba != next.rgba) {
+          REQUIRE(writePpm(first, capturePath("m237-hud-first")).has_value());
+          REQUIRE(writePpm(next, capturePath("m237-hud-next")).has_value());
+        }
         CHECK(bool(first.rgba == next.rgba));
       };
       for (const char* move :
@@ -2287,6 +2291,86 @@ TEST_CASE("SDL keyboard ownership distinguishes navigation from active UI",
         (void)press(SDLK_SPACE, SDL_SCANCODE_SPACE);
         CHECK_FALSE(session.pendingPromotion().active);
         CHECK(session.game().plyCount() == 1);
+      }
+    }
+  }
+  CHECK(gpu().ctx.validationErrorCount() == 0);
+}
+
+TEST_CASE("manifold settings footer actions remain clickable after responsive reflow",
+          "[render][gpu][control-layout]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  for (const auto& size :
+       {std::array{1920, 1080, 1}, std::array{1920, 1080, 3}, std::array{960, 540, 3}}) {
+    for (bool reset : {false, true}) {
+      CAPTURE(size, reset);
+      SDL_Window* window =
+          SDL_CreateWindow("responsive-footer", size[0], size[1], SDL_WINDOW_HIDDEN);
+      REQUIRE(window != nullptr);
+      struct WindowGuard {
+        SDL_Window* window;
+        ~WindowGuard() { SDL_DestroyWindow(window); }
+      } guard{window};
+      auto shell = app::Shell::create(
+          {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "responsive-footer.conf");
+      shell->go(app::Screen::Settings);
+      shell->settings().guiScale = static_cast<float>(size[2]);
+      shell->settings().vsync = false;  // Reset has a measurable independent result.
+      auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+      REQUIRE(ui.has_value());
+      REQUIRE((*ui)->setScale(static_cast<float>(size[2])).has_value());
+      const auto frame = [&] {
+        (*ui)->tick(1);
+        (*ui)->newFrame();
+        auto request = (*ui)->build(*shell, 60);
+        (*ui)->endFrame();
+        return request;
+      };
+      for (int i = 0; i < 4; ++i) (void)frame();
+      ImGuiWindow* footer = nullptr;
+      for (auto* candidate : GImGui->Windows)
+        if (std::strstr(candidate->Name, "settingsfooter")) footer = candidate;
+      REQUIRE(footer != nullptr);
+      const ImGuiID id = footer->GetID(reset ? "RESET TO DEFAULTS" : "BACK");
+      // Locate the actual real widget via its navigation rectangle, and use normal
+      // scrolling to bring it into view. No assumed screen pixel or forced capture.
+      ImGui::FocusWindow(footer);
+      ImGui::SetFocusID(id, footer);
+      (void)frame();
+      const auto rect = [&] {
+        ImRect r = footer->NavRectRel[ImGuiNavLayer_Main];
+        r.Translate(footer->Pos);
+        return r;
+      };
+      for (int i = 0; i < 3; ++i) {
+        ImGui::ScrollToRect(footer, rect(), ImGuiScrollFlags_KeepVisibleCenterY);
+        (void)frame();
+      }
+      const ImRect target = rect();
+      REQUIRE(target.GetWidth() > 0);
+      REQUIRE(target.GetHeight() > 0);
+      const ImVec2 center = target.GetCenter();
+      CHECK(center.x >= 0);
+      CHECK(center.x < static_cast<float>(size[0]));
+      CHECK(center.y >= 0);
+      CHECK(center.y < static_cast<float>(size[1]));
+      (*ui)->injectMouse(center.x, center.y, false);
+      (void)frame();
+      (*ui)->injectMouse(center.x, center.y, true);
+      (void)frame();
+      (*ui)->injectMouse(center.x, center.y, false);
+      const auto request = frame();
+      if (reset) {
+        CHECK(request.applyScale);
+        CHECK(request.settingsChanged);
+        CHECK(shell->settings().vsync);
+      } else {
+        CHECK(shell->screen() == app::Screen::MainMenu);
       }
     }
   }

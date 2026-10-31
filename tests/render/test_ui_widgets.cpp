@@ -4,6 +4,7 @@
 #ifdef CB_HAVE_IMGUI
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -89,6 +90,13 @@ struct ControlHarness {
   ImGuiContext* context{ImGui::CreateContext()};
   float scale;
   int kind;
+  float available{1200};
+  float requested{240};
+  std::string caption{"Play"};
+  std::string value{"Standard"};
+  bool pane{false};
+  bool autoResize{false};
+  float paneScale{1};
   ControlHarness(float s, int k) : scale(s), kind(k) {
     ImGui::SetCurrentContext(context);
     auto& io = ImGui::GetIO();
@@ -117,10 +125,18 @@ struct ControlHarness {
     ImGui::NewFrame();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(1920, 1080));
-    ImGui::Begin("controls", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground);
+    ImGui::SetNextWindowSize(autoResize ? ImVec2(0, 0)
+                                        : ImVec2(40 + available * scale, 1080));
+    if (pane)
+      render::widgets::beginPane("transition-controls", ImVec2(0, 0),
+                                 ImVec2(40 + available * scale, 1080), paneScale, 1, 0,
+                                 false);
+    else
+      ImGui::Begin(autoResize ? "auto-controls" : "controls", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
+                       (autoResize ? ImGuiWindowFlags_AlwaysAutoResize : 0));
     ImGui::SetCursorScreenPos(ImVec2(40, 40));
+    ImGui::PushItemWidth(available * scale);
     auto* dl = ImGui::GetWindowDrawList();
     // Keep stroke UVs distinct from glyph UVs for text-position measurements.
     dl->Flags &= ~ImDrawListFlags_AntiAliasedLinesUseTex;
@@ -130,14 +146,14 @@ struct ControlHarness {
     if (!enabled) ImGui::BeginDisabled();
     bool pressed = false;
     if (kind == 0)
-      pressed = render::widgets::menuEntry("Play", 1, theme, nullptr, 240 * scale,
-                                           enabled, scale);
+      pressed = render::widgets::menuEntry(caption.c_str(), 1, theme, nullptr,
+                                           requested * scale, enabled, scale);
     if (kind == 1)
-      pressed =
-          render::widgets::button("Play", theme, 240 * scale, false, false, enabled);
+      pressed = render::widgets::button(caption.c_str(), theme, requested * scale, false,
+                                        false, enabled);
     if (kind == 2)
-      pressed =
-          render::widgets::cycleButton("Mode", "Standard", theme, scale, 240 * scale);
+      pressed = render::widgets::cycleButton(caption.c_str(), value, theme, scale,
+                                             requested * scale);
     ControlSample out;
     out.pressed = pressed;
     out.focused = ImGui::IsItemFocused();
@@ -145,6 +161,12 @@ struct ControlHarness {
     const auto min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
     out.rect = {min.x, min.y, max.x, max.y};
     if (!enabled) ImGui::EndDisabled();
+    if (clipped) dl->PopClipRect();
+    ImGui::PopItemWidth();
+    if (pane)
+      render::widgets::endPane();
+    else
+      ImGui::End();
     const auto white = ImGui::GetFontTexUvWhitePixel();
     for (int i = start; i < dl->VtxBuffer.Size; ++i) {
       const auto& v = dl->VtxBuffer[i];
@@ -156,8 +178,6 @@ struct ControlHarness {
       if (cmd.ElemCount > 0)
         out.clips.push_back(
             {cmd.ClipRect.x, cmd.ClipRect.y, cmd.ClipRect.z, cmd.ClipRect.w});
-    if (clipped) dl->PopClipRect();
-    ImGui::End();
     ImGui::PopStyleVar();
     ImGui::EndFrame();
     return out;
@@ -174,7 +194,148 @@ bool sameDrawing(const ControlSample& a, const ControlSample& b) {
 }
 }  // namespace
 
-TEST_CASE("live controls use explicit time without moving text or hit rectangles",
+TEST_CASE("manifold menu plates have finite hit targets and measured wrapped captions",
+          "[render][control-layout]") {
+  for (float scale : {1.0f, 3.0f}) {
+    for (float width : {600.0f, 260.0f, 110.0f}) {
+      CAPTURE(scale, width);
+      ControlHarness h(scale, 0);
+      h.available = width;
+      h.requested = width;
+      h.caption = "Show me all the boards";
+      const auto theme = view::Theme::manifold();
+      const auto a = h.read(theme, 0.3);
+      const float expected =
+          std::min(320.0f, width - (width >= 200 ? 24 : std::min(8.0f, width * 0.04f))) *
+          scale;
+      CHECK(std::abs(a.rect[2] - a.rect[0] - expected) < 0.001f);
+      CHECK(a.rect[3] - a.rect[1] >= 42 * scale);
+      REQUIRE_FALSE(a.glyphs.empty());
+      for (const auto& v : a.glyphs) {
+        CHECK(v[0] >= a.rect[0]);
+        CHECK(v[0] <= a.rect[2]);
+        CHECK(v[1] >= a.rect[1]);
+        CHECK(v[1] <= a.rect[3]);
+      }
+      auto& io = ImGui::GetIO();
+      io.AddMousePosEvent(a.rect[2] + 8 * scale, (a.rect[1] + a.rect[3]) * 0.5f);
+      io.AddMouseButtonEvent(0, true);
+      CHECK_FALSE(h.read(theme, 0.3).pressed);
+      io.AddMouseButtonEvent(0, false);
+      CHECK_FALSE(h.read(theme, 0.3).pressed);
+      CHECK(h.read(theme, 0.3).rect == a.rect);
+      if (width == 110) CHECK(a.rect[3] - a.rect[1] > 42 * scale);
+      const auto disabled = h.read(theme, 0.3, false);
+      CHECK(disabled.rect[2] == a.rect[2]);
+      CHECK(disabled.rect[3] >= a.rect[3]);
+    }
+  }
+}
+
+TEST_CASE("manifold values and automatic actions measure visible text",
+          "[render][control-layout]") {
+  for (float scale : {1.0f, 3.0f}) {
+    ControlHarness h(scale, 2);
+    h.caption = "Mode";
+    h.value = "A deliberately long setting value";
+    h.available = 150;
+    h.requested = 150;
+    const auto a = h.read(view::Theme::manifold(), 0.3);
+    CHECK(a.rect[3] - a.rect[1] > 42 * scale);
+    for (const auto& v : a.glyphs) CHECK(v[0] <= a.rect[2]);
+    h.available = 600;
+    h.requested = 0;
+    const auto automatic = h.read(view::Theme::manifold(), 0.3);
+    CHECK(automatic.rect[2] - automatic.rect[0] > 200 * scale);
+    CHECK(automatic.rect[2] - automatic.rect[0] <= 600 * scale);
+  }
+}
+
+TEST_CASE("auto-fit HUD controls retain their explicit width from the first frame",
+          "[render][control-layout]") {
+  ControlHarness h(1, 1);
+  h.autoResize = true;
+  h.requested = 78;
+  h.caption = "UNDO";
+  const auto first = h.read(view::Theme::manifold(), 0.3);
+  CHECK(first.rect[2] - first.rect[0] == 78);
+  for (int i = 0; i < 4; ++i) {
+    const auto next = h.read(view::Theme::manifold(), 0.3);
+    CHECK(next.rect[2] - next.rect[0] == 78);
+    CHECK(next.rect[3] - next.rect[1] == first.rect[3] - first.rect[1]);
+  }
+}
+
+TEST_CASE("manifold footer pairs compact then stack without losing either action",
+          "[render][control-layout]") {
+  for (float scale : {1.0f, 3.0f}) {
+    for (float available : {700.0f, 300.0f, 150.0f}) {
+      CAPTURE(scale, available);
+      WidgetFrame frame(scale);
+      ImGui::SetNextWindowSize(ImVec2(available * scale + 32, 1000));
+      ImGui::Begin("pair");
+      const auto pair = render::widgets::actionPairLayout(
+          "BACK", "RESET TO DEFAULTS", view::Theme::manifold(), 120 * scale, 200 * scale,
+          nullptr, available * scale);
+      CHECK(pair.first.x > 0);
+      CHECK(pair.second.x > 0);
+      CHECK(pair.first.x <= available * scale);
+      CHECK(pair.second.x <= available * scale);
+      if (available == 150) REQUIRE(pair.stacked);
+      render::widgets::button("BACK", view::Theme::manifold(), pair.first.x);
+      const auto firstMin = ImGui::GetItemRectMin(), firstMax = ImGui::GetItemRectMax();
+      if (!pair.stacked) ImGui::SameLine();
+      render::widgets::button("RESET TO DEFAULTS", view::Theme::manifold(),
+                              pair.second.x);
+      const auto secondMin = ImGui::GetItemRectMin(), secondMax = ImGui::GetItemRectMax();
+      CHECK(std::abs(firstMax.y - firstMin.y - pair.first.y) < 0.001f);
+      CHECK(std::abs(secondMax.y - secondMin.y - pair.second.y) < 0.001f);
+      CHECK(std::abs(secondMax.y - firstMin.y - pair.height) < 0.01f);
+      if (pair.stacked)
+        CHECK(secondMin.y >= firstMax.y);
+      else
+        CHECK(secondMin.x >= firstMax.x);
+      ImGui::End();
+    }
+  }
+}
+
+TEST_CASE("menu transition scales control and glitch clips with their vertices",
+          "[render][live-controls]") {
+  ControlHarness h(1, 0);
+  h.available = 1880;
+  h.pane = true;
+  h.mouse(false);
+  const auto theme = view::Theme::manifold();
+  (void)h.read(theme, 0.3);
+  (void)h.read(theme, 0.3);
+  const auto base = h.read(theme, 0.3);
+  for (float k : {0.8f, 1.1f}) {
+    h.paneScale = k;
+    const auto sample = h.read(theme, 0.3);
+    CHECK(sample.rect == base.rect);
+    REQUIRE(sample.clips.size() == base.clips.size());
+    REQUIRE(sample.glyphs.size() == base.glyphs.size());
+    for (std::size_t i = 0; i < base.clips.size(); ++i) {
+      const auto& a = base.clips[i];
+      if (a == std::array<float, 4>{0, 0, 1920, 1080}) continue;
+      const std::array<float, 4> want{std::clamp(960 + (a[0] - 960) * k, 0.0f, 1920.0f),
+                                      std::clamp(540 + (a[1] - 540) * k, 0.0f, 1080.0f),
+                                      std::clamp(960 + (a[2] - 960) * k, 0.0f, 1920.0f),
+                                      std::clamp(540 + (a[3] - 540) * k, 0.0f, 1080.0f)};
+      for (std::size_t j = 0; j < 4; ++j)
+        CHECK(std::abs(sample.clips[i][j] - want[j]) < 0.01f);
+    }
+    for (std::size_t i = 0; i < base.glyphs.size(); ++i) {
+      CHECK(std::abs(sample.glyphs[i][0] - (960 + (base.glyphs[i][0] - 960) * k)) <
+            0.01f);
+      CHECK(std::abs(sample.glyphs[i][1] - (540 + (base.glyphs[i][1] - 540) * k)) <
+            0.01f);
+    }
+  }
+}
+
+TEST_CASE("hover glitches use explicit time behind intact text and fixed hit rectangles",
           "[render][live-controls]") {
   for (float scale : {1.0f, 3.0f}) {
     for (int kind : {0, 1, 2}) {
@@ -183,14 +344,27 @@ TEST_CASE("live controls use explicit time without moving text or hit rectangles
       const auto theme = view::Theme::manifold();
       const auto a = h.read(theme, 0.3), b = h.read(theme, 2.3),
                  again = h.read(theme, 0.3);
-      CHECK_FALSE(sameDrawing(a, b));
+      CHECK(sameDrawing(a, b));
       CHECK(sameDrawing(a, again));
       CHECK(a.rect == b.rect);
       CHECK(bool(a.glyphs == b.glyphs));
       h.mouse(false);
       const auto hover = h.read(theme, 0.3);
       CHECK(hover.rect == a.rect);
-      CHECK(bool(hover.glyphs == a.glyphs));
+      REQUIRE(hover.glyphs.size() > a.glyphs.size());
+      CHECK(std::equal(a.glyphs.rbegin(), a.glyphs.rend(), hover.glyphs.rbegin()));
+      std::vector<ControlSample> phases;
+      for (double t : {0.3, 0.425, 0.55, 0.675}) {
+        phases.push_back(h.read(theme, t));
+        REQUIRE(phases.back().glyphs.size() >= a.glyphs.size());
+        CHECK(std::equal(a.glyphs.rbegin(), a.glyphs.rend(),
+                         phases.back().glyphs.rbegin()));
+        CHECK(phases.back().rect == a.rect);
+      }
+      CHECK(std::any_of(phases.begin() + 1, phases.end(), [&](const auto& sample) {
+        return !sameDrawing(phases.front(), sample);
+      }));
+      CHECK(sameDrawing(hover, h.read(theme, 0.3)));
       CHECK_FALSE(sameDrawing(a, hover));
       h.mouse(false, false);
       (void)h.read(theme, 0.3);
@@ -225,7 +399,8 @@ TEST_CASE("live controls retain one activation and a visible stationary keyboard
       CHECK(release.pressed);
       CHECK_FALSE(h.read(theme, 0.3).pressed);
       CHECK(held.rect == idle.rect);
-      CHECK(bool(held.glyphs == idle.glyphs));
+      REQUIRE(held.glyphs.size() >= idle.glyphs.size());
+      CHECK(std::equal(idle.glyphs.rbegin(), idle.glyphs.rend(), held.glyphs.rbegin()));
       h.mouse(false, false);
       auto& io = ImGui::GetIO();
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
@@ -237,7 +412,9 @@ TEST_CASE("live controls retain one activation and a visible stationary keyboard
       REQUIRE(focused.focused);
       CHECK_FALSE(sameDrawing(idle, focused));
       CHECK(focused.rect == idle.rect);
-      CHECK(bool(focused.glyphs == idle.glyphs));
+      REQUIRE(focused.glyphs.size() >= idle.glyphs.size());
+      CHECK(
+          std::equal(idle.glyphs.rbegin(), idle.glyphs.rend(), focused.glyphs.rbegin()));
       const auto disabled = h.read(theme, 0.3, false);
       CHECK(sameDrawing(disabled, h.read(theme, 2.3, false)));
       h.mouse(true);
@@ -252,7 +429,9 @@ TEST_CASE("scoped widget time restores nesting and is local to its ImGui context
           "[render][live-controls]") {
   ControlHarness h(1, 1);
   const auto theme = view::Theme::manifold();
+  h.mouse(false);
   const auto zero = h.read(theme, 0), one = h.read(theme, 1);
+  CHECK_FALSE(sameDrawing(zero, one));
   CHECK(sameDrawing(zero, h.read(theme, -1)));
   CHECK(sameDrawing(zero, h.read(theme, std::numeric_limits<double>::quiet_NaN())));
   {

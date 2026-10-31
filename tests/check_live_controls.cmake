@@ -1,29 +1,45 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# A menu has no board material animation: changed pixels prove real UI clock wiring.
+# Idle plates are quiet; hover must sample the explicit clock without shifting input.
 foreach(theme console manifold)
-  foreach(time 0.3 2.3)
-    set(path "${OUT_DIR}/live-${theme}-${time}.ppm")
-    execute_process(COMMAND "${GUI}" --screen menu --theme ${theme}
-                    --width 1280 --height 720 --visual-time ${time} --shot "${path}"
-                    WORKING_DIRECTORY "${WORKDIR}" RESULT_VARIABLE rc
-                    OUTPUT_QUIET ERROR_VARIABLE err)
-    if(NOT rc EQUAL 0)
-      message(FATAL_ERROR "${theme} live control capture failed: ${err}")
-    endif()
-    file(SHA256 "${path}" hash_${time})
+  unset(first_idle)
+  unset(first_hover)
+  set(changed FALSE)
+  foreach(time 0.3 0.425 0.55 0.675)
+    foreach(state idle hover)
+      set(path "${OUT_DIR}/live-${theme}-${state}-${time}.ppm")
+      set(input)
+      if(state STREQUAL "hover")
+        # Start in empty pane space, release in the measured first row (x686..1006).
+        set(input --ui-click "drag:650,193,760,193,0")
+      endif()
+      execute_process(COMMAND "${GUI}" --screen menu --theme ${theme}
+                      --width 1280 --height 720 --visual-time ${time} ${input} --shot "${path}"
+                      WORKING_DIRECTORY "${WORKDIR}" RESULT_VARIABLE rc
+                      OUTPUT_QUIET ERROR_VARIABLE err)
+      if(NOT rc EQUAL 0)
+        message(FATAL_ERROR "${theme} ${state} control capture failed: ${err}")
+      endif()
+      file(SHA256 "${path}" hash)
+      if(NOT DEFINED first_${state})
+        set(first_${state} "${hash}")
+      elseif(state STREQUAL "idle" OR theme STREQUAL "console")
+        if(NOT hash STREQUAL first_${state})
+          message(FATAL_ERROR "${theme} ${state} controls move while they should be quiet")
+        endif()
+      elseif(NOT hash STREQUAL first_hover)
+        set(changed TRUE)
+      endif()
+    endforeach()
   endforeach()
-  if(theme STREQUAL "manifold")
-    if(hash_0.3 STREQUAL hash_2.3)
-      message(FATAL_ERROR "manifold controls ignore explicit time")
-    endif()
-  elseif(NOT hash_0.3 STREQUAL hash_2.3)
-    message(FATAL_ERROR "console UI changes with visual time")
+  if(theme STREQUAL "manifold" AND NOT changed)
+    message(FATAL_ERROR "manifold hover glitches ignore explicit time")
+  endif()
+  execute_process(COMMAND "${GUI}" --screen menu --theme ${theme} --width 1280 --height 720
+                  --visual-time 0.3 --ui-click "drag:650,193,760,193,0;drag:650,193,760,193,0"
+                  --shot "${OUT_DIR}/live-${theme}-again.ppm"
+                  WORKING_DIRECTORY "${WORKDIR}" RESULT_VARIABLE rc OUTPUT_QUIET)
+  file(SHA256 "${OUT_DIR}/live-${theme}-again.ppm" again)
+  if(NOT rc EQUAL 0 OR NOT again STREQUAL first_hover)
+    message(FATAL_ERROR "pointer warmup shifted ${theme} hover phase or activated a row")
   endif()
 endforeach()
-execute_process(COMMAND "${GUI}" --screen menu --theme manifold --width 1280 --height 720
-                --visual-time 0.3 --ui-click "1,1" --shot "${OUT_DIR}/live-again.ppm"
-                WORKING_DIRECTORY "${WORKDIR}" RESULT_VARIABLE rc OUTPUT_QUIET)
-file(SHA256 "${OUT_DIR}/live-again.ppm" again)
-if(NOT rc EQUAL 0 OR NOT again STREQUAL hash_0.3)
-  message(FATAL_ERROR "pointer warmup shifted control visual time")
-endif()
