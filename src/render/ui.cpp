@@ -13,6 +13,7 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
+#include <imgui_internal.h>
 
 #include "io/notation.hpp"
 #include "pieces/atom.hpp"
@@ -64,6 +65,21 @@ ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
 }
 
 namespace {
+
+// Trailer and hot-seat keys must not also navigate the HUD. Menus and pending
+// move/promotion choices retain navigation; active controls and text still capture.
+void updateKeyboardNavigation(const app::Shell& shell) {
+  ImGuiIO& io = ImGui::GetIO();
+  const auto* session = shell.session();
+  const bool boardKeys = shell.screen() == app::Screen::Game && session &&
+                         session->hotSeat() && !session->pendingPromotion().active &&
+                         !session->pendingMove().active;
+  if (shell.attracting() || boardKeys) {
+    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+  } else {
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  }
+}
 
 struct HudTextRow {
   std::string text;
@@ -314,6 +330,9 @@ Result<std::unique_ptr<Ui>> Ui::create(const VulkanContext& ctx, SDL_Window* win
   // Keyboard navigation is on: the whole menu tree is reachable without a mouse, and the
   // focus ring is drawn in the accent so it matches the rest (see applyStyle).
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  // Idle navigation focus must leave app shortcuts available. Active widgets, text
+  // fields and modals still capture keys; the SDL backend receives every event.
+  io.ConfigNavCaptureKeyboard = false;
 
   if (auto r = ui->loadFonts(); !r.has_value()) {
     return fail(r.error().code, r.error().message);
@@ -638,7 +657,7 @@ bool Ui::processEvent(const SDL_Event& e) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
     case SDL_EVENT_TEXT_INPUT:
-      return io.WantCaptureKeyboard;
+      return capturesKeyboard();
     default:
       return false;
   }
@@ -648,7 +667,9 @@ bool Ui::capturesMouse() const {
   return ImGui::GetIO().WantCaptureMouse;
 }
 bool Ui::capturesKeyboard() const {
-  return ImGui::GetIO().WantCaptureKeyboard;
+  // A modal can open during build, after NewFrame computed IO capture. Its current
+  // popup ownership must protect the first visible frame as well as settled frames.
+  return ImGui::GetIO().WantCaptureKeyboard || ImGui::GetTopMostPopupModal() != nullptr;
 }
 
 void Ui::setTheme(const view::Theme& t) noexcept {
@@ -1319,19 +1340,7 @@ void Ui::drawDebugConsole(app::Shell& shell) {
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
   const widgets::ScopedVisualTime visualTime(visualTime_);
-  // The trailer's keys (Space pauses, the arrows step, Enter records a keyframe) are the
-  // app's, not the interface's. With keyboard navigation on, ImGui captures the keyboard
-  // whenever a panel button or slider has focus - as soon as one has been clicked - and
-  // Space would then press that button instead of pausing. So navigation is off while the
-  // trailer plays; a text field still captures what is typed into it.
-  {
-    ImGuiIO& io = ImGui::GetIO();
-    if (shell.attracting()) {
-      io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
-    } else {
-      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    }
-  }
+  updateKeyboardNavigation(shell);
   // Start the frame with an empty field list. Only the board screen fills it; every other
   // screen, and cinema, leaves it empty so `recordBackground` submits nothing.
   resetBoardFieldList();
@@ -1419,6 +1428,9 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
       break;
   }
   drawCheckEdges(shell);
+  // An action may have closed a modal or changed screens. Prepare navigation before
+  // the next NewFrame processes queued Tab/Space events with the new ownership.
+  updateKeyboardNavigation(shell);
   return request;
 }
 

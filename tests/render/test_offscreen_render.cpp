@@ -2030,6 +2030,269 @@ TEST_CASE("the first HUD frame measures current turn and recent rows",
   }
 }
 
+TEST_CASE("SDL keyboard ownership distinguishes navigation from active UI",
+          "[render][gpu][keyboard-routing]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("keyboard-routing", 1280, 720, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    DYNAMIC_SECTION("live controls " << theme.liveControls) {
+      auto shell = app::Shell::create(
+          {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "keyboard-routing.conf");
+      shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+        return test::loadVariant(name);
+      });
+      REQUIRE(shell->startGame("standard").has_value());
+      auto ui = Ui::create(gpu().ctx, window, theme);
+      REQUIRE(ui.has_value());
+      auto& u = **ui;
+      auto& session = *shell->session();
+      auto& io = ImGui::GetIO();
+      const auto frame = [&] {
+        u.tick(0.25f);
+        u.newFrame();
+        (void)u.build(*shell, 60.0f);
+        u.endFrame();
+      };
+      const auto settle = [&] {
+        for (int i = 0; i < 4; ++i) frame();
+      };
+      const auto key = [&](SDL_Keycode code, SDL_Scancode scan, bool down) {
+        SDL_Event event{};
+        event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+        event.key.windowID = SDL_GetWindowID(window);
+        event.key.key = code;
+        event.key.scancode = scan;
+        event.key.down = down;
+        event.key.repeat = false;
+        const bool consumed = u.processEvent(event);
+        CHECK(consumed == u.capturesKeyboard());
+        return consumed;
+      };
+      const auto press = [&](SDL_Keycode code, SDL_Scancode scan) {
+        const bool consumed = key(code, scan, true);
+        frame();
+        (void)key(code, scan, false);
+        settle();
+        return consumed;
+      };
+      const auto mouse = [&](bool down) {
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_MOTION;
+        event.motion.windowID = SDL_GetWindowID(window);
+        event.motion.x = 220;
+        event.motion.y = 658;
+        (void)u.processEvent(event);
+        event = {};
+        event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+        event.button.windowID = SDL_GetWindowID(window);
+        event.button.button = SDL_BUTTON_LEFT;
+        event.button.down = down;
+        event.button.x = 220;
+        event.button.y = 658;
+        (void)u.processEvent(event);
+      };
+      const auto idleKeys = [&] {
+        REQUIRE_FALSE(io.WantTextInput);
+        REQUIRE(GImGui->ActiveId == 0);
+        for (const auto& [code, scan] :
+             {std::pair{SDLK_U, SDL_SCANCODE_U},
+              {SDLK_R, SDL_SCANCODE_R},
+              {SDLK_F, SDL_SCANCODE_F},
+              {SDLK_G, SDL_SCANCODE_G},
+              {SDLK_LEFTBRACKET, SDL_SCANCODE_LEFTBRACKET},
+              {SDLK_RIGHTBRACKET, SDL_SCANCODE_RIGHTBRACKET}}) {
+          CAPTURE(code);
+          CHECK_FALSE(press(code, scan));
+        }
+      };
+      settle();
+      REQUIRE(session.playMoveText("e2e4").has_value());
+      settle();
+
+      SECTION(
+          "idle pointer and visible navigation focus pass app keys; Enter undoes once") {
+        // Hold and release the view-mode button without changing the game.
+        mouse(false);
+        frame();
+        mouse(true);
+        frame();
+        frame();  // capture flags describe the owner established by the previous frame
+        CHECK(io.WantCaptureKeyboard);  // a held widget still owns keys
+        CHECK(key(SDLK_U, SDL_SCANCODE_U, true));
+        (void)key(SDLK_U, SDL_SCANCODE_U, false);
+        mouse(false);
+        settle();
+        REQUIRE(session.game().plyCount() == 1);
+        REQUIRE(io.NavActive);
+        idleKeys();
+        (void)press(SDLK_TAB, SDL_SCANCODE_TAB);
+        REQUIRE(io.NavVisible);
+        const ImGuiID first = GImGui->NavId;
+        (void)press(SDLK_TAB, SDL_SCANCODE_TAB);
+        CHECK(GImGui->NavId != first);
+        idleKeys();
+        ImGuiWindow* controls = ImGui::FindWindowByName("##controls");
+        REQUIRE(controls != nullptr);
+        const ImGuiID undo = controls->GetID("UNDO");
+        for (int i = 0; i < 8 && GImGui->NavId != undo; ++i)
+          (void)press(SDLK_TAB, SDL_SCANCODE_TAB);
+        REQUIRE(GImGui->NavId == undo);
+        (void)press(SDLK_RETURN, SDL_SCANCODE_RETURN);
+        CHECK(session.game().plyCount() == 0);
+        settle();
+        CHECK(session.game().plyCount() == 0);
+        CHECK_FALSE(press(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE));
+      }
+
+      SECTION("the real F12 text field captures shortcuts and accepts SDL text") {
+        (void)press(SDLK_F12, SDL_SCANCODE_F12);
+        REQUIRE(io.WantTextInput);
+        REQUIRE(GImGui->ActiveId != 0);
+        REQUIRE(key(SDLK_U, SDL_SCANCODE_U, true));
+        SDL_Event text{};
+        text.type = SDL_EVENT_TEXT_INPUT;
+        text.text.windowID = SDL_GetWindowID(window);
+        text.text.text = "u";
+        CHECK(u.processEvent(text));
+        frame();
+        (void)key(SDLK_U, SDL_SCANCODE_U, false);
+        settle();
+        const ImGuiInputTextState* input = ImGui::GetInputTextState(GImGui->ActiveId);
+        REQUIRE(input != nullptr);
+        CHECK(std::string(input->TextA.Data) == "u");
+        CHECK(session.game().plyCount() == 1);
+        (void)press(SDLK_F12, SDL_SCANCODE_F12);
+        idleKeys();
+      }
+
+      SECTION("hot-seat Tab belongs to the board; menus restore navigation") {
+        session.setHotSeat(true);
+        settle();
+        CHECK_FALSE(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+        const ImGuiID focus = GImGui->NavId;
+        CHECK_FALSE(press(SDLK_Y, SDL_SCANCODE_Y));
+        CHECK_FALSE(press(SDLK_TAB, SDL_SCANCODE_TAB));
+        CHECK_FALSE(press(SDLK_BACKSLASH, SDL_SCANCODE_BACKSLASH));
+        CHECK(GImGui->NavId == focus);
+        CHECK(session.game().plyCount() == 1);
+        shell->pause();
+        settle();
+        CHECK(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+        (void)press(SDLK_TAB, SDL_SCANCODE_TAB);
+        CHECK(io.NavVisible);
+        shell->resume();
+        settle();
+        CHECK_FALSE(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+        (void)press(SDLK_F12, SDL_SCANCODE_F12);
+        CHECK(io.WantTextInput);
+        CHECK(press(SDLK_R, SDL_SCANCODE_R));
+      }
+
+      SECTION(
+          "hot-seat move confirmation captures app keys and permits modal navigation") {
+        session.setHotSeat(true);
+        session.setConfirmMoves(true);
+        REQUIRE(session.applyScript("click e7\nclick e5").has_value());
+        REQUIRE(session.pendingMove().active);
+        frame();
+        CHECK(u.capturesKeyboard());
+        CHECK(key(SDLK_U, SDL_SCANCODE_U, true));
+        (void)key(SDLK_U, SDL_SCANCODE_U, false);
+        CHECK(key(SDLK_R, SDL_SCANCODE_R, true));
+        (void)key(SDLK_R, SDL_SCANCODE_R, false);
+        settle();
+        CHECK(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+        CHECK(io.WantCaptureKeyboard);
+        CHECK(press(SDLK_U, SDL_SCANCODE_U));
+        CHECK(press(SDLK_R, SDL_SCANCODE_R));
+        CHECK(press(SDLK_Y, SDL_SCANCODE_Y));
+        CHECK(session.game().plyCount() == 1);
+        auto* modal = ImGui::FindWindowByName("confirmmove");
+        REQUIRE(modal != nullptr);
+        const ImGuiID play = modal->GetID("PLAY");
+        (void)press(SDLK_TAB, SDL_SCANCODE_TAB);
+        for (int i = 0; i < 5 && GImGui->NavId != play; ++i)
+          (void)press(SDLK_TAB, SDL_SCANCODE_TAB);
+        REQUIRE(GImGui->NavId == play);
+        (void)key(SDLK_RETURN, SDL_SCANCODE_RETURN, true);
+        frame();
+        CHECK_FALSE(session.pendingMove().active);
+        CHECK(ImGui::GetTopMostPopupModal() == nullptr);
+        CHECK_FALSE(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+        (void)key(SDLK_RETURN, SDL_SCANCODE_RETURN, false);
+        const ImGuiID closedFocus = GImGui->NavId;
+        (void)key(SDLK_TAB, SDL_SCANCODE_TAB, true);
+        frame();
+        CHECK(GImGui->NavId == closedFocus);
+        (void)key(SDLK_TAB, SDL_SCANCODE_TAB, false);
+        frame();
+        CHECK_FALSE(u.capturesKeyboard());
+        CHECK_FALSE(press(SDLK_TAB, SDL_SCANCODE_TAB));
+        CHECK(session.game().plyCount() == 2);
+        CHECK_FALSE(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+      }
+
+      SECTION("trailer authoring keys do not also activate HUD navigation") {
+        app::AttractStep step;
+        step.variant = "standard";
+        step.moves = {"e2e4"};
+        shell->startAttract({step});
+        REQUIRE(shell->attracting());
+        settle();
+        CHECK_FALSE(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+        const bool paused = shell->trailerPaused();
+        CHECK_FALSE(press(SDLK_SPACE, SDL_SCANCODE_SPACE));
+        CHECK_FALSE(press(SDLK_LEFT, SDL_SCANCODE_LEFT));
+        CHECK_FALSE(press(SDLK_RIGHT, SDL_SCANCODE_RIGHT));
+        CHECK_FALSE(press(SDLK_RETURN, SDL_SCANCODE_RETURN));
+        CHECK_FALSE(press(SDLK_DELETE, SDL_SCANCODE_DELETE));
+        CHECK(shell->attracting());
+        CHECK(shell->trailerPaused() == paused);
+        CHECK_FALSE(io.NavVisible);
+        shell->stopAttract();
+        settle();
+        CHECK(io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard);
+      }
+
+      SECTION("promotion choices retain modal capture") {
+        REQUIRE(session.loadFen("4k3/1P6/8/8/8/8/8/4K3 w - - 0 1").has_value());
+        REQUIRE(session.applyScript("click b7\nclick b8").has_value());
+        REQUIRE(session.pendingPromotion().active);
+        frame();
+        CHECK(u.capturesKeyboard());
+        CHECK(key(SDLK_U, SDL_SCANCODE_U, true));
+        (void)key(SDLK_U, SDL_SCANCODE_U, false);
+        CHECK(key(SDLK_R, SDL_SCANCODE_R, true));
+        (void)key(SDLK_R, SDL_SCANCODE_R, false);
+        settle();
+        CHECK(press(SDLK_U, SDL_SCANCODE_U));
+        CHECK(press(SDLK_R, SDL_SCANCODE_R));
+        CHECK(session.game().plyCount() == 0);
+        auto* modal = ImGui::FindWindowByName("promotion");
+        REQUIRE(modal != nullptr);
+        const ImGuiID queen = modal->GetID("QUEEN");
+        for (int i = 0; i < 7 && GImGui->NavId != queen; ++i)
+          (void)press(SDLK_TAB, SDL_SCANCODE_TAB);
+        REQUIRE(GImGui->NavId == queen);
+        (void)press(SDLK_SPACE, SDL_SCANCODE_SPACE);
+        CHECK_FALSE(session.pendingPromotion().active);
+        CHECK(session.game().plyCount() == 1);
+      }
+    }
+  }
+  CHECK(gpu().ctx.validationErrorCount() == 0);
+}
+
 TEST_CASE("the library Start action is clickable at three times UI scale",
           "[render][gpu]") {
   if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);

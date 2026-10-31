@@ -275,6 +275,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
 | Game status / recent-move text | `Ui::buildGameHud` and the measured `drawHudText` overlay in `src/render/ui.cpp`; size current rows before `Begin`, so first replay frames agree with settled frames. See `docs/plan/M23.5-capture-hud-refresh.md` | |
+| Keyboard ownership between the game and interface | `Ui::create`, `Ui::processEvent`/`capturesKeyboard` and `updateKeyboardNavigation` in `src/render/ui.cpp`; idle navigation passes shortcuts, active widgets/text/modal choices capture them, and hot-seat/trailer keys disable HUD navigation. See `docs/plan/M23.6-game-keyboard-shortcuts.md` | |
 | A menu control's animation | `Theme::liveControls`, `Ui::setVisualTime` and `widgets::rowControl` in `src/render/ui_widgets.cpp`; the scoped input uses the GUI's explicit presentation seconds, never ImGui's backend clock | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
