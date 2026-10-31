@@ -44,6 +44,27 @@ std::unique_ptr<Session> standardSession() {
 
 }  // namespace
 
+TEST_CASE("runner resets and watch seeks invalidate presentation, steps do not",
+          "[unit][app][panel-response]") {
+  const auto file = parseOrThrow(kStandardGame);
+  auto session = standardSession();
+  GameRunner runner(file, *session);
+  auto epoch = session->presentationEpoch();
+  REQUIRE(runner.reset().has_value());
+  CHECK(session->presentationEpoch() != epoch);
+  epoch = session->presentationEpoch();
+  REQUIRE(runner.step().has_value());
+  CHECK(session->presentationEpoch() == epoch);
+  REQUIRE(session->startWatching(file, 0.5f).has_value());
+  CHECK(session->presentationEpoch() != epoch);
+  epoch = session->presentationEpoch();
+  REQUIRE(session->watchSeek(2).has_value());
+  CHECK(session->presentationEpoch() != epoch);
+  epoch = session->presentationEpoch();
+  REQUIRE(session->watchStep());
+  CHECK(session->presentationEpoch() == epoch);
+}
+
 TEST_CASE("the runner plays a game one move at a time to the same position",
           "[unit][app][game-runner]") {
   const GameFile file = parseOrThrow(kStandardGame);

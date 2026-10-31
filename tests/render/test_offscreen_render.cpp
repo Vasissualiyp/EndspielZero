@@ -25,6 +25,7 @@
 #include "io/fen.hpp"
 #include "render/board_renderer.hpp"
 #include "render/offscreen_target.hpp"
+#include "render/panel_response.hpp"
 #include "render/piece_icon.hpp"
 #include "render/vulkan_context.hpp"
 #ifdef CB_HAVE_IMGUI
@@ -752,6 +753,93 @@ TEST_CASE("LED interference is sparse local subtle and reproducible",
   }
   const auto sidewall = shot(0);
   CHECK(shot(eventTime).rgba == sidewall.rgba);
+  CHECK(gpu().ctx.validationErrorCount() == 0);
+}
+
+TEST_CASE("LCD overdrive settles to the new colour without delaying semantic cues",
+          "[render][gpu][panel-response]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  auto target = OffscreenTarget::create(gpu().ctx, 512, 512);
+  auto renderer = BoardRenderer::create(gpu().ctx);
+  REQUIRE(target.has_value());
+  REQUIRE(renderer.has_value());
+  InstanceSet set;
+  Instance cell;
+  cell.scale[0] = cell.scale[1] = cell.scale[2] = 1;
+  cell.color[0] = cell.color[1] = cell.color[2] = .2f;
+  cell.color[3] = 1;
+  cell.material = 7;
+  cell.panelSignal[0] = .125f;
+  cell.panelSignal[2] = 1;
+  set.instances.push_back(cell);
+  set.batches[static_cast<std::size_t>(Archetype::Cell)] = {0, 1};
+  view::OrbitCamera cam;
+  cam.yaw = 0;
+  cam.pitch = std::numbers::pi_v<float> * .5f;
+  cam.orthographic = true;
+  cam.distance = 1.4f;
+  renderer->setVisualTime(0);  // quiet ambient phase, fixed for every event age
+  PanelResponse response;
+  std::vector<PanelTarget> targets{
+      {1, {.2f, .2f, .2f, 1}, PanelDestination::Instance, 0, 1}};
+  response.apply(set, targets, 0);
+  const auto shot = [&] {
+    REQUIRE(renderer->render(*target, set, cam).has_value());
+    auto pixels = target->readPixels();
+    REQUIRE(pixels.has_value());
+    REQUIRE(gpu().ctx.takeValidationMessages().empty());
+    return Image{512, 512, std::move(*pixels)};
+  };
+  targets[0].color = {.5f, .3f, .2f, 1};
+  const auto color = targets[0].color.array();
+  std::copy(color.begin(), color.end(), set.instances[0].color);
+  const auto settled = shot();
+  std::uint64_t previous = std::numeric_limits<std::uint64_t>::max();
+  for (const double age : {0.0, .06, .12, .24}) {
+    response.apply(set, targets, 1 + age);
+    CHECK(std::equal(color.begin(), color.end(), set.instances[0].color));
+    const auto image = shot();
+    std::uint64_t difference = 0;
+    std::size_t changed = 0;
+    for (std::size_t i = 0; i < image.rgba.size(); i += 4) {
+      CHECK(image.rgba[i + 3] == settled.rgba[i + 3]);
+      bool different = false;
+      for (std::size_t c = 0; c < 3; ++c) {
+        const int delta = int(image.rgba[i + c]) - int(settled.rgba[i + c]);
+        CHECK(delta >= 0);
+        CHECK(delta <= 5);
+        difference += static_cast<std::uint64_t>(delta);
+        different = different || delta != 0;
+      }
+      if (different) ++changed;
+    }
+    CHECK(difference <= previous);
+    if (age < .24) {
+      CHECK(difference > 0);
+      CHECK(changed > 0);
+    } else
+      CHECK(image.rgba == settled.rgba);
+    previous = difference;
+    const std::string name = "lcd-response-" + std::to_string(int(age * 1000));
+    REQUIRE(writePpm(image, capturePath(name)).has_value());
+  }
+  REQUIRE(writePpm(settled, capturePath("lcd-response-settled")).has_value());
+  // The payload cannot affect a protected rail or a non-panel material.
+  set.instances[0].panelSignal[2] = 0;
+  set.instances[0].panelSignal[1] = 0;
+  const auto protectedPanel = shot();
+  set.instances[0].panelSignal[1] = .018f;
+  CHECK(shot().rgba == protectedPanel.rgba);
+  set.instances[0].material = 3;
+  set.instances[0].panelSignal[2] = 1;
+  const auto glass = shot();
+  set.instances[0].panelSignal[1] = 0;
+  CHECK(shot().rgba == glass.rgba);
+  set.instances[0].material = 7;
+  cam.distance = 30;
+  const auto distant = shot();
+  set.instances[0].panelSignal[1] = .018f;
+  CHECK(shot().rgba == distant.rgba);
   CHECK(gpu().ctx.validationErrorCount() == 0);
 }
 
@@ -2502,6 +2590,90 @@ TEST_CASE("SDL keyboard ownership distinguishes navigation from active UI",
       }
     }
   }
+  CHECK(gpu().ctx.validationErrorCount() == 0);
+}
+
+TEST_CASE("console submission resets LCD history in the same UI frame",
+          "[render][gpu][panel-response]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("panel-console", 1280, 720, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  auto shell = app::Shell::create(
+      {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "panel-console.conf");
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    return test::loadVariant(name);
+  });
+  REQUIRE(shell->startGame("standard").has_value());
+  const auto theme = view::Theme::manifold();
+  auto ui = Ui::create(gpu().ctx, window, theme);
+  REQUIRE(ui.has_value());
+  auto& u = **ui;
+  BoardRenderer renderer;
+  renderer.setTheme(theme);
+  PanelResponse response;
+  std::vector<PanelTarget> targets;
+  InstanceSet set;
+  auto* session = shell->session();
+  const auto frame = [&] {
+    u.tick(.016f);
+    u.setVisualTime(100);
+    u.newFrame();
+    (void)u.build(*shell, 60);
+    // This boundary is after console_.run, exactly as in interactive main.
+    REQUIRE(response.prepare(shell->session(), renderer.theme(), renderer.options()));
+    set = renderer.buildInstances(session->snapshot(), session->viewConfig(),
+                                  &session->seams(), nullptr, {}, {}, {}, &targets);
+    response.apply(set, targets, 100);
+    u.endFrame();
+  };
+  const auto key = [&](SDL_Keycode code, SDL_Scancode scan, bool down) {
+    SDL_Event event{};
+    event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    event.key.windowID = SDL_GetWindowID(window);
+    event.key.key = code;
+    event.key.scancode = scan;
+    event.key.down = down;
+    (void)u.processEvent(event);
+  };
+  const auto anyActive = [&] {
+    return std::any_of(targets.begin(), targets.end(), [&](const auto& target) {
+      return set.instances[target.first].panelSignal[1] > 0;
+    });
+  };
+  for (int i = 0; i < 4; ++i) frame();
+  key(SDLK_F12, SDL_SCANCODE_F12, true);
+  frame();
+  key(SDLK_F12, SDL_SCANCODE_F12, false);
+  for (int i = 0; i < 4; ++i) frame();
+  REQUIRE(ImGui::GetIO().WantTextInput);
+  const auto epoch = session->presentationEpoch();
+  const std::string command = "setfen " + toFen(session->game().position());
+  SDL_Event text{};
+  text.type = SDL_EVENT_TEXT_INPUT;
+  text.text.windowID = SDL_GetWindowID(window);
+  text.text.text = command.c_str();
+  CHECK(u.processEvent(text));
+  frame();
+  REQUIRE(session->applyScript("click e2").has_value());
+  frame();
+  REQUIRE(anyActive());
+  key(SDLK_RETURN, SDL_SCANCODE_RETURN, true);
+  frame();
+  CHECK(shell->session() == session);
+  CHECK(session->presentationEpoch() != epoch);
+  CHECK_FALSE(anyActive());
+  key(SDLK_RETURN, SDL_SCANCODE_RETURN, false);
+  for (int i = 0; i < 4; ++i) frame();
+  CHECK_FALSE(anyActive());
   CHECK(gpu().ctx.validationErrorCount() == 0);
 }
 

@@ -275,6 +275,9 @@ captures are unchanged. See that slice's status for review and final validation.
 
 Sparse cell-local LED interference is implemented in [M23.8](M23.8-led-ambient-and-response.md),
 checkpoint A. Tiny interior strips briefly dim without changing hue or geometry;
-portal rails, sidewalls and distant panels are protected. Actual colour-change
-settling remains checkpoint B. Optional Astra design ideas are listed in the root
+portal rails, sidewalls and distant panels are protected. Checkpoint B implements
+actual colour-change settling through GUI-owned explicit-time presentation history;
+new colours appear immediately, with at most 1.8% overdrive for 240 ms. Reset/load
+discontinuities baseline settled. Independent CLI captures retain settled response
+gains; event-age offscreen fixtures and live play cover the transient. Optional Astra design ideas are listed in the root
 `visual_ideas.md` for the user to select; they are not implementation commitments.

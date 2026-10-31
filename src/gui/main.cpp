@@ -33,6 +33,7 @@
 #include "io/variant_toml.hpp"
 #include "render/board_renderer.hpp"
 #include "render/image_io.hpp"
+#include "render/panel_response.hpp"
 #include "render/window.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"
@@ -1532,6 +1533,8 @@ int main(int argc, char** argv) {
   auto lastFrame = std::chrono::steady_clock::now();
   float fps = 0.0f;
   double visualSeconds = 0;
+  render::PanelResponse panelResponse;
+  std::vector<render::PanelTarget> panelTargets;
   // Hover aids (M20): events only mark the pointer dirty; the cell is resolved once per
   // frame, because the shape view's pick builds a whole surface.
   bool hoverDirty = false;
@@ -2164,6 +2167,11 @@ int main(int argc, char** argv) {
 
     render::InstanceSet instances;
     view::OrbitCamera camera;
+    // Check after Ui::build and request processing: the console may replace a
+    // position in the existing Session without producing a load request.
+    const bool collectPanels = panelResponse.prepare(
+        shell->showsBoard() && !shell->attracting() ? shell->session() : nullptr,
+        renderer->theme(), renderer->options());
     if (shell->showsBoard()) {
       if (boardRect.valid()) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
@@ -2199,7 +2207,8 @@ int main(int argc, char** argv) {
           &shell->session()->seams(), &shell->session()->animation(),
           [&](CellId c) { return shell->session()->boardVisible(c); },
           [&](CellId c) { return shell->session()->game().cellInPresent(c); },
-          shell->session()->timelineLinks());
+          shell->session()->timelineLinks(), collectPanels ? &panelTargets : nullptr);
+      if (collectPanels) panelResponse.apply(instances, panelTargets, visualSeconds);
       camera = boardCamera(*shell, shapeSeq);
     }
 

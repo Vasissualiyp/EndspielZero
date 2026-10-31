@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "io/fen.hpp"
 #include "io/notation.hpp"
 #include "support/variants.hpp"
 
@@ -34,6 +35,43 @@ CellId cell(const Session& s, const char* name) {
 }
 
 }  // namespace
+
+TEST_CASE("presentation epochs identify replacement rather than ordinary activity",
+          "[unit][app][panel-response]") {
+  auto s = open("standard");
+  const std::string fen = toFen(s->game().position());
+  const auto epoch = s->presentationEpoch();
+  REQUIRE(
+      s->applyScript("click e2\nhover e3\norbit 0.1 0.1\nclick e4\nundo").has_value());
+  s->advanceAnimation(0.1f);
+  CHECK(s->presentationEpoch() == epoch);
+  REQUIRE_FALSE(s->loadFen("bad fen").has_value());
+  CHECK(s->presentationEpoch() == epoch);
+  REQUIRE(s->loadFen(fen).has_value());
+  CHECK(s->presentationEpoch() != epoch);
+  auto before = s->presentationEpoch();
+  REQUIRE(s->loadFen(fen).has_value());
+  CHECK(s->presentationEpoch() != before);
+  before = s->presentationEpoch();
+  REQUIRE(s->applyScript("reset").has_value());
+  CHECK(s->presentationEpoch() != before);
+
+  GameFile file;
+  file.variant = "another-variant";
+  file.startFen = fen;
+  before = s->presentationEpoch();
+  REQUIRE_FALSE(s->loadGame(file).has_value());
+  CHECK(s->presentationEpoch() == before);
+  file.variant = "standard";
+  file.moves = {"e2e4", "e7e5"};
+  REQUIRE(s->loadGame(file).has_value());
+  CHECK(s->presentationEpoch() != before);
+  before = s->presentationEpoch();
+  file.moves = {"e2e4", "e2e4"};
+  REQUIRE_FALSE(s->loadGame(file).has_value());
+  CHECK(s->game().plyCount() == 1);  // import may mutate before reporting failure
+  CHECK(s->presentationEpoch() != before);
+}
 
 TEST_CASE("clicking a piece selects it and shows its legal moves", "[unit][app]") {
   auto s = open("standard");

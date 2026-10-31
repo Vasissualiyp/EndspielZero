@@ -26,8 +26,8 @@ float wrapAngle(float a) noexcept {
 
 /// Half-extent of a cell's pick box. Slightly over half a cell, so neighbouring boxes
 /// overlap and there is no dead strip on a divider line: the nearer cell wins, which puts
-/// the switch at the middle of the line. (It was 0.45, leaving a 0.1 gap where nothing was
-/// picked, and the hover flickered off between two squares.)
+/// the switch at the middle of the line. (It was 0.45, leaving a 0.1 gap where nothing
+/// was picked, and the hover flickered off between two squares.)
 const view::Vec3 kPickHalfExtent{0.505f, 0.505f, 0.06f};
 
 }  // namespace
@@ -564,8 +564,8 @@ void Session::refreshHints() {
     v.erase(std::unique(v.begin(), v.end()), v.end());
     return v;
   };
-  const auto fold = [&](const std::vector<MoveGen::Attacker>& as, std::vector<CellId>& from,
-                        std::vector<CellId>& path) {
+  const auto fold = [&](const std::vector<MoveGen::Attacker>& as,
+                        std::vector<CellId>& from, std::vector<CellId>& path) {
     for (const auto& a : as) {
       from.push_back(a.from);
       path.insert(path.end(), a.path.begin(), a.path.end());
@@ -575,8 +575,8 @@ void Session::refreshHints() {
   };
 
   const auto highlighted = snapshot_.highlighted();
-  const bool isTarget = std::find(highlighted.begin(), highlighted.end(), cell) !=
-                        highlighted.end();
+  const bool isTarget =
+      std::find(highlighted.begin(), highlighted.end(), cell) != highlighted.end();
   std::vector<CellId> af, ap, df, dp;
   if (hints_.attackHints && isTarget && selected_ != kInvalidCell) {
     // A legal destination: judged on the position after the move.
@@ -603,8 +603,8 @@ void Session::refreshHints() {
       snapshot_.setPeekMoves(distinct(std::move(to)));
     }
     if (!hints_.attackHints) return;
-    // The piece's own square: the other side's attackers, and its own side's defenders (the
-    // probe lifts the piece itself off its square, so it never defends itself).
+    // The piece's own square: the other side's attackers, and its own side's defenders
+    // (the probe lifts the piece itself off its square, so it never defends itself).
     const Color own = pos.at(cell).colorOf();
     fold(gen.attackers(pos, cell, opponent(own)), af, ap);
     fold(gen.attackers(pos, cell, own), df, dp);
@@ -757,6 +757,7 @@ Result<void> Session::apply(const Action& a) {
     case ActionKind::Reset:
       stopEngine();
       game_->reset();
+      ++presentationEpoch_;
       pending_ = PendingPromotion{};
       pendingMove_ = PendingMove{};
       selected_ = kInvalidCell;
@@ -839,6 +840,7 @@ Result<void> Session::loadFen(std::string_view fen) {
   if (!p.has_value()) return fail(p.error().code, p.error().message);
   game_ = std::make_unique<Game>(*variant_);
   game_->position() = std::move(*p);
+  ++presentationEpoch_;
   selected_ = kInvalidCell;
   // A position entry replaces the game, so no move can still be in flight: a stale
   // animation would otherwise let the move camera keep shooting the old route.
@@ -863,6 +865,8 @@ Result<void> Session::loadGame(const GameFile& file) {
     return fail(ErrorCode::ValidationError, "game file is for variant '" + file.variant +
                                                 "', not '" + variant_->name + "'");
   }
+  // applyGameFile can replace the start and play several moves before failing.
+  ++presentationEpoch_;
   if (auto ok = applyGameFile(file, *game_); !ok.has_value()) return ok;
   selected_ = kInvalidCell;
   pending_ = PendingPromotion{};

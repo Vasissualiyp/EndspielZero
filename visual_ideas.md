@@ -7,7 +7,7 @@ support a game that remains readable for an entire session, not just a trailer.
 
 **Already requested:** rare tiny panel-interference strips and a
 barely visible LCD settling response when a square's gameplay colour changes.
-Ambient interference is implemented; colour settling is the next checkpoint.
+Both effects are implemented.
 See `docs/plan/M23.8-led-ambient-and-response.md`. These are not extra choices below.
 The existing LED matrix, hologram scan, moving ground and hover-glitch buttons are
 also already part of the design. No optional item below is approved for implementation.

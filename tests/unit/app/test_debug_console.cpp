@@ -23,7 +23,9 @@ std::unique_ptr<Shell> makeShell() {
   shell->dismissWelcome();
   return shell;
 }
-bool has(const std::string& s, const char* t) { return s.find(t) != std::string::npos; }
+bool has(const std::string& s, const char* t) {
+  return s.find(t) != std::string::npos;
+}
 }  // namespace
 
 TEST_CASE("the debug console reaches what the interface does not", "[unit][app][debug]") {
@@ -42,4 +44,20 @@ TEST_CASE("the debug console reaches what the interface does not", "[unit][app][
   CHECK(!c.log().empty());
   c.run(*shell, "clear");
   CHECK(c.log().empty());
+}
+
+TEST_CASE("console position edits invalidate presentation on the same session",
+          "[unit][app][panel-response]") {
+  auto shell = makeShell();
+  REQUIRE(shell->startGame("standard").has_value());
+  DebugConsole console;
+  auto* session = shell->session();
+  auto epoch = session->presentationEpoch();
+  CHECK(console.run(*shell, "setfen " + console.run(*shell, "fen")) == "position set");
+  CHECK(shell->session() == session);
+  CHECK(session->presentationEpoch() != epoch);
+  epoch = session->presentationEpoch();
+  CHECK_FALSE(has(console.run(*shell, "remove a2"), "error"));
+  CHECK(shell->session() == session);
+  CHECK(session->presentationEpoch() != epoch);
 }

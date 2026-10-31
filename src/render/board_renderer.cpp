@@ -824,11 +824,17 @@ Result<void> BoardRenderer::syncBodies(const VariantSpec& v) {
   return {};
 }
 
-InstanceSet BoardRenderer::buildInstances(
-    const view::PositionView& p, const view::ViewConfig& cfg, const view::SeamMap* seams,
-    const view::MoveAnimation* anim, const std::function<bool(CellId)>& visible,
-    const std::function<bool(CellId)>& present,
-    const std::vector<view::TimelineLink>& links) const {
+InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
+                                          const view::ViewConfig& cfg,
+                                          const view::SeamMap* seams,
+                                          const view::MoveAnimation* anim,
+                                          const std::function<bool(CellId)>& visible,
+                                          const std::function<bool(CellId)>& present,
+                                          const std::vector<view::TimelineLink>& links,
+                                          std::vector<PanelTarget>* panelTargets) const {
+  if (panelTargets) panelTargets->clear();
+  const bool collectPanels =
+      panelTargets && theme_.materials.cells == view::Material::Led;
   const VariantSpec& v = p.variant();
   // Custom bodies are used only while they are the ones synced for *this* variant.
   const bool useCustom = bodiesSig_ != 0 && bodiesSignature(v) == bodiesSig_;
@@ -1059,6 +1065,11 @@ InstanceSet BoardRenderer::buildInstances(
       for (int j = 0; j + 1 < kSide; ++j) {
         rim(0, j + 1, 0, j);
         rim(kSide - 1, j, kSide - 1, j + 1);
+      }
+      if (collectPanels) {
+        panelTargets->push_back(
+            {patch.cell, fill, PanelDestination::Surface, base,
+             static_cast<std::uint32_t>(out.surfaceVertices.size()) - base});
       }
     }
 
@@ -1446,7 +1457,8 @@ InstanceSet BoardRenderer::buildInstances(
       }
       fill = withHint(fill, p, pl.cell, theme_);
     }
-    toFloat4(withHover(fill, p, pl.cell), cell.color);
+    fill = withHover(fill, p, pl.cell);
+    toFloat4(fill, cell.color);
     cell.material =
         shaderMaterial(theme_.materials.cells, Cut::Plank,
                        0.5f * static_cast<float>(parity & 1) + 0.49f * hash01(pl.cell));
@@ -1455,6 +1467,13 @@ InstanceSet BoardRenderer::buildInstances(
       cell.panelSignal[2] = 1;
     }
 
+    if (collectPanels) {
+      panelTargets->push_back(
+          {pl.cell, fill, PanelDestination::Instance,
+           static_cast<std::uint32_t>(
+               byShape[static_cast<std::size_t>(Archetype::Cell)].size()),
+           1});
+    }
     byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(cell);
 
     // A seam is drawn as a coloured rail along the face, one instance per face, so the
@@ -1877,6 +1896,10 @@ InstanceSet BoardRenderer::buildInstances(
     out.batches[s].first = static_cast<std::uint32_t>(out.instances.size());
     out.batches[s].count = static_cast<std::uint32_t>(byShape[s].size());
     out.instances.insert(out.instances.end(), byShape[s].begin(), byShape[s].end());
+  }
+  if (collectPanels) {
+    const auto offset = out.batches[static_cast<std::size_t>(Archetype::Cell)].first;
+    for (auto& target : *panelTargets) target.first += offset;
   }
   for (std::size_t s = 0; s < byShapeFlourish.size(); ++s) {
     out.flourishBatches[s].first = static_cast<std::uint32_t>(out.flourish.size());

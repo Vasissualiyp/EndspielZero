@@ -2,6 +2,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <future>
 #include <memory>
@@ -75,6 +76,11 @@ class Session {
 
   [[nodiscard]] const VariantSpec& variant() const noexcept { return *variant_; }
   [[nodiscard]] const Game& game() const noexcept { return *game_; }
+  /// Presentation discontinuity: reset or position/game replacement, including an
+  /// import attempt that may partially mutate before failing. Never replay/hash data.
+  [[nodiscard]] std::uint64_t presentationEpoch() const noexcept {
+    return presentationEpoch_;
+  }
   [[nodiscard]] const view::PositionView& snapshot() const noexcept { return snapshot_; }
   [[nodiscard]] const view::ViewConfig& viewConfig() const noexcept { return viewCfg_; }
   /// The camera to draw and to pick with.
@@ -358,6 +364,7 @@ class Session {
 
   std::unique_ptr<VariantSpec> variant_;
   std::unique_ptr<Game> game_;
+  std::uint64_t presentationEpoch_{0};
   view::PositionView snapshot_;
   /// What the player asked for; `viewCfg_` is this with the flat-mode adjustment applied.
   view::ViewConfig chosenCfg_;
@@ -391,8 +398,8 @@ class Session {
   HintOptions hints_{};
   CellId hoverCell_{kInvalidCell};
   bool hoverCtrl_{false};
-  /// A square a piece just arrived on under the pointer: not hover-marked until the pointer
-  /// has left it.
+  /// A square a piece just arrived on under the pointer: not hover-marked until the
+  /// pointer has left it.
   CellId suppressedHover_{kInvalidCell};
   std::string promotionPreference_;
   /// The watching mode (M12.8): the file, the runner over it, and the dwell clock. The
