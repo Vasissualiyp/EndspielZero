@@ -29,6 +29,7 @@
 #include "render/vulkan_context.hpp"
 #ifdef CB_HAVE_IMGUI
 #include <SDL3/SDL.h>
+#include <imgui_internal.h>
 
 #include "render/overture_scene.hpp"  // derivedSurfaceAt, for the geometry view (M17)
 #include "render/play_surface.hpp"
@@ -1919,6 +1920,114 @@ TEST_CASE("the tesseract scaffold is drawn only for hyper4 and only with seams o
   CHECK(scaffoldCells("hyper4", true) == 32u);
   CHECK(scaffoldCells("hyper4", false) == 0u);
   CHECK(scaffoldCells("torus3d", true) == 0u);
+}
+
+TEST_CASE("the first HUD frame measures current turn and recent rows",
+          "[render][gpu][capture-hud]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("hud-history", 1920, 1080, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    for (float scale : {1.0f, 3.0f}) {
+      CAPTURE(scale, theme.liveControls);
+      auto shell = app::Shell::create(
+          {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "hud-history.conf");
+      shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+        return test::loadVariant(name);
+      });
+      REQUIRE(shell->startGame("standard").has_value());
+      auto ui = Ui::create(gpu().ctx, window, theme);
+      REQUIRE(ui.has_value());
+      REQUIRE((*ui)->setScale(scale).has_value());
+      (*ui)->setVisualTime(0.75);
+      auto target = OffscreenTarget::create(gpu().ctx, 1920, 1080);
+      auto renderer = BoardRenderer::create(gpu().ctx);
+      REQUIRE(target.has_value());
+      REQUIRE(renderer.has_value());
+      renderer->setTheme(theme);
+      renderer->setVisualTime(0.75);
+      const auto cam = view::OrbitCamera::frame(
+          view::boundsOf(view::layout(shell->session()->variant().dims,
+                                      shell->session()->viewConfig())),
+          1920.0f / 1080.0f);
+      const auto frame = [&](float dt, bool inspect) {
+        (*ui)->tick(dt);
+        (*ui)->newFrame();
+        (void)(*ui)->build(*shell, 60);
+        if (inspect) {
+          const auto* status = ImGui::FindWindowByName("##status");
+          REQUIRE(status != nullptr);
+          CHECK_FALSE(status->Hidden);
+          CHECK(status->DrawList->VtxBuffer.Size > 0);
+          const auto* recent = ImGui::FindWindowByName("##recent");
+          if (shell->session()->game().plyCount() > 0) {
+            REQUIRE(recent != nullptr);
+            CHECK(recent->Active);
+            CHECK_FALSE(recent->Hidden);
+            CHECK(recent->DrawList->VtxBuffer.Size >
+                  0);  // normal text glyphs, no window background
+            CHECK(recent->Pos.x >= 0);
+            CHECK(recent->Pos.y >= 0);
+            CHECK(recent->Pos.x + recent->Size.x <= 1920);
+            CHECK(recent->Pos.y + recent->Size.y <= 1080);
+          } else if (recent != nullptr)
+            CHECK_FALSE(recent->Active);
+        }
+        (*ui)->endFrame();
+        const auto set = renderer->buildInstances(shell->session()->snapshot(),
+                                                  shell->session()->viewConfig());
+        REQUIRE(renderer
+                    ->render(
+                        *target, set, cam,
+                        [&](VkCommandBuffer cmd) { (*ui)->record(cmd); },
+                        [&](VkCommandBuffer cmd) { (*ui)->recordBackground(cmd); })
+                    .has_value());
+        auto pixels = target->readPixels();
+        REQUIRE(pixels.has_value());
+        REQUIRE(gpu().ctx.takeValidationMessages().empty());
+        return Image{1920, 1080, std::move(*pixels)};
+      };
+      for (int i = 0; i < 3; ++i) (void)frame(1, false);
+      const auto equalFrames = [&] {
+        const auto first = frame(0, true), next = frame(0, true);
+        CHECK(bool(first.rgba == next.rgba));
+      };
+      for (const char* move :
+           {"e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4", "g8f6"}) {
+        INFO(move);
+        REQUIRE(shell->session()->playMoveText(move).has_value());
+        shell->session()->setMoveProgress(1);
+        equalFrames();
+      }
+      for (int i = 0; i < 3; ++i) {
+        REQUIRE(shell->session()
+                    ->apply(app::Action{.kind = app::ActionKind::Undo, .text = {}})
+                    .has_value());
+        equalFrames();
+      }
+      REQUIRE(shell->session()
+                  ->apply(app::Action{.kind = app::ActionKind::Reset, .text = {}})
+                  .has_value());
+      equalFrames();
+      REQUIRE(shell->session()->loadFen("4k3/8/8/8/8/8/4R3/4K3 b - - 0 1").has_value());
+      REQUIRE(shell->session()->game().inCheck());
+      equalFrames();
+      REQUIRE(shell->session()
+                  ->apply(app::Action{.kind = app::ActionKind::Resign, .text = {}})
+                  .has_value());
+      REQUIRE(shell->session()->game().result() != GameResult::InProgress);
+      equalFrames();
+    }
+  }
 }
 
 TEST_CASE("the library Start action is clickable at three times UI scale",

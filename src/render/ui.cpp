@@ -65,6 +65,52 @@ ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
 
 namespace {
 
+struct HudTextRow {
+  std::string text;
+  ImFont* font;
+  view::Rgba colour;
+};
+
+// Right/bottom pivots must use this frame's measured content, including a window's
+// first appearance. Auto-fit otherwise anchors against the previous frame's size.
+void drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anchor,
+                 ImVec2 pivot, ImGuiWindowFlags flags, float spacing) {
+  if (rows.empty()) return;
+  std::vector<ImVec2> extents;
+  extents.reserve(rows.size());
+  float width = 0, height = 0;
+  for (const auto& row : rows) {
+    if (row.font != nullptr) ImGui::PushFont(row.font);
+    ImVec2 size = ImGui::CalcTextSize(row.text.c_str());
+    size.y = std::max(size.y, ImGui::GetTextLineHeight());
+    if (row.font != nullptr) ImGui::PopFont();
+    extents.push_back(size);
+    width = std::max(width, size.x);
+    height += size.y;
+  }
+  width = std::max(1.0f, std::ceil(width));
+  height =
+      std::max(1.0f, std::ceil(height + spacing * static_cast<float>(rows.size() - 1)));
+  ImGui::SetNextWindowPos(anchor, ImGuiCond_Always, pivot);
+  ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1, 1));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, spacing));
+  ImGui::Begin(id, nullptr, flags & ~ImGuiWindowFlags_AlwaysAutoResize);
+  const float left = ImGui::GetCursorPosX();
+  for (std::size_t i = 0; i < rows.size(); ++i) {
+    const auto& row = rows[i];
+    if (row.font != nullptr) ImGui::PushFont(row.font);
+    ImGui::SetCursorPosX(left + width - extents[i].x);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(row.colour));
+    ImGui::TextUnformatted(row.text.c_str());
+    ImGui::PopStyleColor();
+    if (row.font != nullptr) ImGui::PopFont();
+  }
+  ImGui::End();
+  ImGui::PopStyleVar(3);
+}
+
 std::filesystem::path findFont(const char* name) {
   // Relative to the *binary*, not the working directory: the game must look the same
   // whether it is launched from the build tree, from an install, or from a menu entry
@@ -1806,76 +1852,46 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   ImGui::PopStyleVar();
 
   // ------------------------------------------------------------ status, top right
-  ImGui::SetNextWindowPos(
-      ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin, vp->WorkPos.y + margin),
-      ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::Begin("##status", nullptr, overlayFlags);
-  {
-    const GameResult result = game.result();
-    const auto rightAlign = [&](const char* text, ImFont* font,
-                                const view::Rgba& colour) {
-      if (font != nullptr) ImGui::PushFont(font);
-      const float width = ImGui::CalcTextSize(text).x;
-      const float avail = ImGui::GetContentRegionAvail().x;
-      if (avail > width) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - width);
-      ImGui::PushStyleColor(ImGuiCol_Text, col(colour));
-      ImGui::TextUnformatted(text);
-      ImGui::PopStyleColor();
-      if (font != nullptr) ImGui::PopFont();
-    };
-
-    if (result == GameResult::InProgress) {
-      const bool white = game.position().sideToMove() == Color::White;
-      rightAlign(white ? "WHITE TO MOVE" : "BLACK TO MOVE", display, t.ember);
-    } else {
-      rightAlign(upper(std::string(toString(result))).c_str(), display, t.blood);
-    }
-
-    char line[128];
-    std::snprintf(line, sizeof(line), "ply %zu   %zu legal", game.plyCount(),
-                  game.legalMoves().size());
-    rightAlign(line, small, t.boneDim);
-    if (result != GameResult::InProgress) {
-      rightAlign(("by " + std::string(toString(game.endReason()))).c_str(), small,
-                 t.boneFaint);
-    } else if (game.inCheck()) {
-      rightAlign("IN CHECK", small, t.blood);
-    }
+  const GameResult result = game.result();
+  std::vector<HudTextRow> status;
+  if (result == GameResult::InProgress) {
+    const bool white = game.position().sideToMove() == Color::White;
+    status.push_back({white ? "WHITE TO MOVE" : "BLACK TO MOVE", display, t.ember});
+  } else {
+    status.push_back({upper(std::string(toString(result))), display, t.blood});
   }
-  ImGui::End();
-  ImGui::PopStyleVar();
+  char statusLine[128];
+  std::snprintf(statusLine, sizeof(statusLine), "ply %zu   %zu legal", game.plyCount(),
+                game.legalMoves().size());
+  status.push_back({statusLine, small, t.boneDim});
+  if (result != GameResult::InProgress) {
+    status.push_back(
+        {"by " + std::string(toString(game.endReason())), small, t.boneFaint});
+  } else if (game.inCheck()) {
+    status.push_back({"IN CHECK", small, t.blood});
+  }
+  drawHudText("##status", status,
+              ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin, vp->WorkPos.y + margin),
+              ImVec2(1, 0), overlayFlags, ImGui::GetStyle().ItemSpacing.y);
 
   // ------------------------------------------------------- recent moves, bottom right
   if (game.plyCount() > 0) {
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin,
-                                   vp->WorkPos.y + vp->WorkSize.y - margin),
-                            ImGuiCond_Always, ImVec2(1.0f, 1.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, px(1)));
-    ImGui::Begin("##recent", nullptr, overlayFlags);
-    {
-      // The last handful of moves, not a ledger. The full history belongs on a screen
-      // someone opened on purpose, not permanently over the board.
-      const auto& moves = game.moveHistory();
-      const std::size_t show = std::min<std::size_t>(moves.size(), 6);
-      ImGui::PushFont(small);
-      for (std::size_t i = moves.size() - show; i < moves.size(); ++i) {
-        const bool last = i + 1 == moves.size();
-        char row[96];
-        std::snprintf(row, sizeof(row), "%2zu%s %s", i / 2 + 1, (i % 2 == 0) ? "." : "..",
-                      moveText(v, moves[i]).c_str());
-        const float width = ImGui::CalcTextSize(row).x;
-        const float avail = ImGui::GetContentRegionAvail().x;
-        if (avail > width) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - width);
-        ImGui::PushStyleColor(ImGuiCol_Text, col(last ? t.ember : t.boneFaint));
-        ImGui::TextUnformatted(row);
-        ImGui::PopStyleColor();
-      }
-      ImGui::PopFont();
+    // Keep the last six rows, measuring exactly the same strings/fonts we draw.
+    const auto& moves = game.moveHistory();
+    const std::size_t show = std::min<std::size_t>(moves.size(), 6);
+    std::vector<HudTextRow> recent;
+    recent.reserve(show);
+    for (std::size_t i = moves.size() - show; i < moves.size(); ++i) {
+      const bool last = i + 1 == moves.size();
+      char row[96];
+      std::snprintf(row, sizeof(row), "%2zu%s %s", i / 2 + 1, (i % 2 == 0) ? "." : "..",
+                    moveText(v, moves[i]).c_str());
+      recent.push_back({row, small, last ? t.ember : t.boneFaint});
     }
-    ImGui::End();
-    ImGui::PopStyleVar(2);
+    drawHudText("##recent", recent,
+                ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin,
+                       vp->WorkPos.y + vp->WorkSize.y - margin),
+                ImVec2(1, 1), overlayFlags, px(1));
   }
 
   // ------------------------------------------------------------ controls, bottom left
