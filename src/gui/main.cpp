@@ -46,6 +46,11 @@ namespace {
 
 std::string gThemeOverride;
 bool gMatteCapture = false;
+float gUiScaleOverride = -1.0f;
+
+float resolveUiScale(const app::Settings& settings) {
+  return gUiScaleOverride > 0.0f ? gUiScaleOverride : settings.guiScale;
+}
 
 view::Theme resolveTheme(const app::Settings& settings) {
   view::Theme theme = view::themeFromName(
@@ -744,7 +749,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   }
   // The capture has to show the interface at the scale the player set, or it is not a
   // picture of what they would see.
-  (void)(*ui)->setScale(shell->settings().guiScale);
+  (void)(*ui)->setScale(resolveUiScale(shell->settings()));
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   // Cinema dresses the frame with a grade and a vignette, not an interface (M18.3).
   (*ui)->setCinema(cinema);
@@ -1290,6 +1295,7 @@ int main(int argc, char** argv) {
           "picker.\n"
            "--width W --height H set the capture/window resolution (default 1920x1080).\n"
            "--theme console|manifold overrides the theme for this run; --matte disables materials.\n"
+           "--ui-scale 0.6..3.0 overrides interface size for this run (not saved).\n"
           "--ui-click \"x,y;x,y,button;drag:x1,y1,x2,y2,button\" replays pointer clicks and\n"
           "drags (pixels; button 0 left, 1 right, 2 middle) before the capture.\n"
           "--variants-dir DIR reads and saves the player's own variants there.\n"
@@ -1323,6 +1329,8 @@ int main(int argc, char** argv) {
       gThemeOverride = argv[++i];
     else if (arg == "--matte")
       gMatteCapture = true;
+    else if (arg == "--ui-scale" && i + 1 < argc)
+      gUiScaleOverride = std::strtof(argv[++i], nullptr);
     else if (arg == "--formed" && i + 1 < argc) {
       formed = std::strtof(argv[++i], nullptr);
       formedGiven = true;
@@ -1447,7 +1455,7 @@ int main(int argc, char** argv) {
                  ui.error().format().c_str());
     return 1;
   }
-  (void)(*ui)->setScale(shell->settings().guiScale);
+  (void)(*ui)->setScale(resolveUiScale(shell->settings()));
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   {
     const view::Theme theme = resolveTheme(shell->settings());
@@ -2196,7 +2204,7 @@ int main(int argc, char** argv) {
 
 #ifdef CB_HAVE_IMGUI
     // Rescaling rebuilds the font atlas, so it happens between frames, never inside one.
-    if (request.applyScale) (void)(*ui)->setScale(shell->settings().guiScale);
+    if (request.applyScale) (void)(*ui)->setScale(resolveUiScale(shell->settings()));
 #endif
 
     // Frame cap (M4.8): with vsync off the loop would redraw as fast as the CPU allows,

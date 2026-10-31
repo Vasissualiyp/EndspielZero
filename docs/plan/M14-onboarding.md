@@ -180,3 +180,33 @@ reachability), M14.5 (the accessibility pass). It reads variant
 descriptions and difficulty (already in the variant data), the move preview
 (`expandAtom`/`tracePath`, M4/M5) and the visuals M11/M13 produce; it does **not** depend on
 M7's editors, so Release Wave 2 can run M14 and M7's board and gamemode editors in either order.
+
+### M14.5 scale-capture slice (2026-10-30)
+
+The onboarding-scale acceptance lacked a capture override, so no test ever
+exercised the extreme `Ui::setScale` values (0.6 and 3.0). `--ui-scale S` is a
+run-only override, following the existing `--theme` capture pattern; it must not
+write `Settings`. A CMake capture compares Welcome and New Game at both values.
+The first red capture at 3.0 on 960x540 exposed a real layout abort in
+`Ui::buildNewGame`: `std::clamp(wantH, px(140), availableY - footerH)` receives a
+maximum below its minimum when the scaled footer takes the available height.
+The Watch picker uses the identical pattern with `px(60)`; fix both by bounding
+their available list height at a small positive size and their minimum to that
+available height, so even an impossible fit scrolls instead of asserting. The
+existing tests missed it because every GUI capture ran at scale 1. Test each
+picker at 0.6 and 3.0 with Vulkan validation and inspect the images: no abort,
+no clipped footer at a resolution that can reasonably fit 3.0 (1920x1080),
+and a small-window capture must still fail gracefully rather than crash.
+
+Built as the first M14.5 slice: `--ui-scale` resolves at the same capture/live
+`Ui::setScale` sites as the stored setting, but never writes it; the two list
+pickers bound their scrollable child heights even when the scaled footer leaves
+less than the nominal minimum. The shared menu pane permits vertical scrolling
+instead of hiding lower rows at high scale. `gui-onboarding-scale` captures
+Welcome, New Game and Watch at 0.6x and 3.0x at 1920x1080 and smoke-tests each
+at 3.0x in 960x540. Inspected 1080p frames: Welcome's rows, the library's list
+and footer, and the Watch choices/footer are visible, with scrollbars for content
+beyond the pane. On a 960x540 window at 3.0x the pane is intrinsically too narrow
+for some text; it now scrolls rather than aborting, but a responsive full-width
+layout remains for the broader M14.5 accessibility pass. This slice does **not**
+complete the played tutorial, reachability diagram or full accessibility audit.

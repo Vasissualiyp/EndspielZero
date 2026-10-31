@@ -568,8 +568,8 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   const bool began = ImGui::Begin(
       id, nullptr,
       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar |
-          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground);
+          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings |
+          ImGuiWindowFlags_NoBackground);
   currentPaneBuilt() = began;
   // Draw without the window's own clip, so a pane scaled up past its settled edge is not
   // cut off there.

@@ -233,8 +233,8 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
   const float listW = ImGui::GetContentRegionAvail().x * 0.44f;
   const float footer = px(10) + px(40) + px(6);
   const float wantH = static_cast<float>(games.size()) * rowH + px(18.0f);
-  const float listH =
-      std::clamp(wantH, px(60.0f), ImGui::GetContentRegionAvail().y - footer);
+  const float room = std::max(1.0f, ImGui::GetContentRegionAvail().y - footer);
+  const float listH = std::clamp(wantH, std::min(px(60.0f), room), room);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
   ImGui::BeginChild("##watchlist", ImVec2(listW, listH), ImGuiChildFlags_Border,
@@ -523,8 +523,8 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   // controls having fallen to the bottom of the screen rather than as a group sitting
   // under the thing they act on.
   const float wantH = static_cast<float>(shell.library().size()) * rowH + px(18.0f);
-  const float listH =
-      std::clamp(wantH, px(140.0f), ImGui::GetContentRegionAvail().y - footerH);
+  const float room = std::max(1.0f, ImGui::GetContentRegionAvail().y - footerH);
+  const float listH = std::clamp(wantH, std::min(px(140.0f), room), room);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, col(t.ink, 0.45f));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
   ImGui::BeginChild("##library", ImVec2(listW, listH), ImGuiChildFlags_Border,

@@ -91,6 +91,14 @@ if(TARGET endspielzero_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-wood-contrast PROPERTIES LABELS "render;gui" TIMEOUT 180
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-onboarding-scale
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR}
+            -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ui_scale.cmake
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-onboarding-scale PROPERTIES LABELS "render;gui" TIMEOUT 180
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   # The eversion flag at its halfway point: with the revised invert this is the rest
   # shape (the swap happens past 0.5), so it is a plain validation capture of the pose.
   add_test(NAME gui-evert

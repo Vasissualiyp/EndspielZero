@@ -154,6 +154,7 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --theme manifold # dark glass alternative
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --matte          # material-free A/B capture
+./build/dev/src/gui/endspielzero_gui standard --screen welcome --ui-scale 3 --shot o.ppm # scaling review
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen designer --dims 4
 ./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry        # the board as its shape
 ./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
