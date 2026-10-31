@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -37,6 +39,24 @@ Game playText(const VariantSpec& v, const std::vector<std::string>& moves) {
 }
 
 }  // namespace
+
+TEST_CASE("bundled watch games match and replay on the shipped variants", "[unit][io]") {
+  for (const char* name : {"opera", "torus-wrap"}) {
+    const std::string path = std::string(CB_SOURCE_DIR) + "/games/" + name + ".cbgame";
+    std::ifstream in(path);
+    REQUIRE(in.good());
+    std::ostringstream text;
+    text << in.rdbuf();
+    auto file = parseGameFile(text.str());
+    REQUIRE(file.has_value());
+    const VariantSpec variant = test::loadVariant(file->variant);
+    Game game(variant);
+    INFO(name);
+    REQUIRE(file->variantId == variant.variantId());
+    REQUIRE(applyGameFile(*file, game).has_value());
+    CHECK(game.plyCount() == file->moves.size());
+  }
+}
 
 TEST_CASE("a game round-trips through a game file", "[unit][io]") {
   const VariantSpec v = test::loadVariant("standard");

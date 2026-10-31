@@ -6,7 +6,7 @@
 # verified legal move by move. The opener 1. Qd5 is a queen capture across the rank seam;
 # the rooks then trade through the file seam and the bishops wrap diagonally.
 variant torus
-variant_id 12057290357954865990
+variant_id 4316608603513432665
 start 8/8/8/rnbqkbnr/pppppppp/8/PPPPPPPP/RNBQKBNR w - - 0 1
 move d1d5
 move e5d5

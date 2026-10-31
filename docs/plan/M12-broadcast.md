@@ -703,3 +703,26 @@ as its shape) — all validation-clean. Green: `tools/test.sh --build render app
 4.8M assertions), all 34 `gui-*` ctests, and `tools/precommit.sh` (arch, unit, property). A
 first visual pass confirmed the main-menu row, the picker with both games, and the STOP
 WATCHING control on both the flat and the shape board.
+
+### Bundled game compatibility regression (2026-10-30)
+
+The GUI `gui-watch-state-flat` and `gui-watch-state-shape` captures fail before
+rendering: `games/opera.cbgame` and `games/torus-wrap.cbgame` carry variant ids
+from before the recent pawn/unmoved/castling rule changes. This was not caused by
+the material/theme work; no variant file changed in that work. The loader correctly
+rejects a mismatched id (`io::verifyGameFileVariant`) and must keep doing so.
+
+Investigation: temporary copies with only `variant_id 0` replayed fully under the
+current engine (`open` reported 33 and 14 legal moves). `endspielzero info` gives
+current standard id `0xbee357a209a80123` and torus id
+`0x3be7aca78ed02a59`. The existing unit round-trip test generates a game and
+its id from the *same* spec, so it could not catch stale checked-in showcase
+games. Fix: update only these two metadata ids after replay validation; keep all
+moves and starts unchanged. Add a unit test that reads both shipped watch files,
+compares their ids with the current loaded variant and replays every move. The
+GUI watch captures must then render again. Never suppress the mismatch check or
+set the shipped ids to zero.
+
+Built: both ids updated after full CLI replay, starts and move lists unchanged;
+the new bundled-game unit test replays both under the current rule specs. Both
+`gui-watch-state-*` captures now render validation-clean on llvmpipe.

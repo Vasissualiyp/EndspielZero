@@ -3,7 +3,7 @@
 # A 17-move miniature ending in checkmate: a queen sacrifice and the classic back-rank
 # finish, chosen as the flat-board showcase because it is short, legible and decisive.
 variant standard
-variant_id 6406979786874926849
+variant_id 13754934040377950499
 start rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 move e2e4
 move e7e5
