@@ -3051,8 +3051,9 @@ float gap(const view::Vec3& a, const view::Vec3& b) {
 }
 }  // namespace
 
-TEST_CASE("the morph is continuous from the flat board for any thickness, width and slide",
-          "[render][morph]") {
+TEST_CASE(
+    "the morph is continuous from the flat board for any thickness, width and slide",
+    "[render][morph]") {
   // The trailer's cuts hide behind this: the flat board ignores the player's thickness,
   // width and rank slide, so a shape that applied them on its first rolled frame jumped.
   SurfacePose flat;
@@ -3115,12 +3116,13 @@ TEST_CASE("a long rank slide bends the torus the short way", "[render]") {
 
 TEST_CASE("seam rail weights follow the morph stages", "[render]") {
   using app::SurfaceKind;
-  for (const SurfaceKind k : {SurfaceKind::Tube, SurfaceKind::Torus, SurfaceKind::Klein,
-                              SurfaceKind::Band}) {
+  for (const SurfaceKind k :
+       {SurfaceKind::Tube, SurfaceKind::Torus, SurfaceKind::Klein, SurfaceKind::Band}) {
     for (const int axis : {0, 1}) {
       CAPTURE(static_cast<int>(k), axis);
       float prev = seamRailWeight(k, axis, 0.0f);
-      const bool staged = !(axis == 1 && (k == SurfaceKind::Tube || k == SurfaceKind::Band));
+      const bool staged =
+          !(axis == 1 && (k == SurfaceKind::Tube || k == SurfaceKind::Band));
       if (staged) CHECK(prev == 0.0f);
       for (int i = 1; i <= 100; ++i) {
         const float w = seamRailWeight(k, axis, static_cast<float>(i) / 100.0f);

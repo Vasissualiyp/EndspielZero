@@ -13,16 +13,17 @@ layout(location = 11) in vec4 inVertColor;  // white on authored shapes; the geo
                                             // view's board is one mesh of many colours
 
 layout(location = 12) in vec3 inPanelCoord;
-layout(location = 13) in vec3 inPanelSignal;
-layout(location = 14) in vec3 instPanelSignal;
+layout(location = 13) in vec4 inPanelSignal;
+layout(location = 14) in vec4 instPanelSignal;
+layout(location = 15) in vec4 inPanelPrev;
 
 layout(location = 3) in vec3 instCenter;
 layout(location = 4) in vec3 instScale;
 layout(location = 5) in vec4 instColor;
 layout(location = 6) in vec4 instEdge;    // seam colour; alpha 0 means no seam here
-layout(location = 7) in float instEdgeMask;
+layout(location = 7) in vec2 instEdgeRoll;  // x = edge mask, y = rotation about the mesh's own Z
 
-layout(location = 8) in float instRoll;     // rotation about the mesh's own Z, radians
+layout(location = 8) in vec4 instPanelPrev;
 layout(location = 9) in float instMaterial;
 layout(location = 10) in vec4 instQuat;     // full orientation (x,y,z,w); identity flat
 
@@ -45,7 +46,8 @@ layout(location = 7) flat out float fragMaterial;
 layout(location = 8) out vec3 fragWorld;
 layout(location = 9) out vec3 fragObject;
 layout(location = 10) out vec3 fragPanel;
-layout(location = 11) out vec3 fragPanelSignal;
+layout(location = 11) out vec4 fragPanelSignal;
+layout(location = 12) out vec4 fragPanelPrev;
 
 // Rotate a vector by a unit quaternion.
 vec3 rotateByQuat(vec3 v, vec4 q) {
@@ -56,8 +58,8 @@ vec3 rotateByQuat(vec3 v, vec4 q) {
 void main() {
     // Spin the mesh in its own plane before scaling, so one quarter-round corner can be
     // turned into any of the four quadrants it is needed in.
-    const float cr = cos(instRoll);
-    const float sr = sin(instRoll);
+    const float cr = cos(instEdgeRoll.y);
+    const float sr = sin(instEdgeRoll.y);
     const vec2 spun = vec2(inPosition.x * cr - inPosition.y * sr,
                            inPosition.x * sr + inPosition.y * cr);
     // Size it in its OWN frame, before it is turned. Scaling after the rotation scales
@@ -83,9 +85,12 @@ void main() {
         ? vec3(inPosition.xy + vec2(0.5), abs(inNormal.z) > 0.5 ? 1.0 : 0.0)
         : vec3(inPanelCoord.xy, inPanelCoord.z > 0.0 ? 1.0 : 0.0);
     fragPanelSignal = inPanelSignal + instPanelSignal;
+    // Exactly one source carries a transition; a settled source is (0,0,0,-1), so the
+    // other wins by taking the larger age and its colour.
+    fragPanelPrev = (inPanelPrev.w >= 0.0 ? inPanelPrev : instPanelPrev);
     fragLocal = inPosition.xy;
     fragEdge = instEdge;
-    fragEdgeMask = instEdgeMask;
+    fragEdgeMask = instEdgeRoll.x;
     fragHeight = inHeight;
     fragMaterial = instMaterial;
 

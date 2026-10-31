@@ -40,6 +40,7 @@ class PanelResponse {
   };
   struct Entry {
     view::Rgba target;
+    view::Rgba from;  ///< the colour the last change left (living colour change)
     double changedAt{0};
     std::uint64_t seen{0};
     float gain{0};

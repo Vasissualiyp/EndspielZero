@@ -415,8 +415,17 @@ void MoveAnimation::start(const ViewConfig& cfg, const std::vector<Placement>& p
     total += length[r];
   }
   leap_ = path.leap;
-  const float pause = 0.22f;
+  float pause = 0.22f;
   const int crossings = static_cast<int>(runs_.size()) - 1;
+  // Cap the total near the current duration: a long move shrinks its per-cell time and
+  // its portal pauses together instead of running long (M23.9 D).
+  const float raw =
+      std::max(0.08f, total * secondsPerCell) + static_cast<float>(crossings) * pause;
+  if (raw > kMaxMoveSeconds) {
+    const float k = kMaxMoveSeconds / raw;
+    secondsPerCell *= k;
+    pause *= k;
+  }
   duration_ =
       std::max(0.08f, total * secondsPerCell) + static_cast<float>(crossings) * pause;
 
@@ -540,6 +549,84 @@ std::vector<MoveAnimation::Portal> MoveAnimation::openPortals() const {
     live.intensity = 1.0f - d / window;
     out.push_back(live);
   }
+  return out;
+}
+
+namespace {
+float smooth01(float a, float b, float x) {
+  if (b <= a) return x >= b ? 1.0f : 0.0f;
+  const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+}  // namespace
+
+HandoffState handoffState(const MovePath& path, float progress, float intensity) {
+  HandoffState out;
+  progress = std::clamp(progress, 0.0f, 1.0f);
+  std::vector<CellId> route;
+  route.push_back(path.from);
+  const bool direct =
+      path.leap || path.unexplained || path.steps.empty() || intensity <= 0.0f;
+  if (!direct) {
+    for (const PathStep& s : path.steps)
+      if (s.to != route.back()) route.push_back(s.to);
+  }
+  if (route.back() != path.to) route.push_back(path.to);
+  const auto hops = static_cast<float>(route.size() - 1);
+  if (hops < 1.0f) return out;
+  const float h = kHandoffSpan / hops;  // progress per hop
+  const float rise = std::min(kHandoffMaxRise, 0.25f * h);
+  // Solid head, ghosts behind: at every moment exactly one copy is solid - the head, on
+  // the newest cell reached. Copy `j` takes over at `a_j` with a very short rise (well
+  // under a hop); the copy it left drops to ghost level and decays over about two hops.
+  // Nothing is ever drawn ahead of the head, and the destination is solid on landing.
+  for (std::size_t j = 0; j < route.size(); ++j) {
+    const float a = h * static_cast<float>(j);  // the head lands here
+    const bool origin = j == 0;
+    const bool dest = j + 1 == route.size();
+    HandoffCopy copy;
+    copy.cell = route[j];
+    copy.destination = dest;
+    copy.opacity = origin ? 1.0f : smooth01(a, a + rise, progress);
+    if (!dest) {
+      // The next head takes over at a + h; this copy leaves after that crossfade starts.
+      const float left = a + h + 0.5f * rise;
+      const float drop = smooth01(left, left + rise, progress);
+      const float decay =
+          smooth01(left + rise, std::min(left + 2.0f * h, 1.0f), progress);
+      copy.opacity *= (1.0f - (1.0f - kHandoffGhostOpacity) * drop) * (1.0f - decay);
+      copy.scan = kHandoffGhostScan * drop;
+    }
+    if (copy.opacity > 0.002f) out.copies.push_back(copy);
+
+    // Heat: warms from two hops ahead of the head to full half a hop ahead, then (behind
+    // it) cools with an afterglow, always back to nothing - or the footprint - by
+    // progress
+    // 1. It rises ahead of the solid piece: the base warms, then the piece appears.
+    float heat;
+    if (origin) {
+      heat =
+          kFootprintHeat + (0.70f - kFootprintHeat) * smooth01(0.0f, 0.5f * h, progress);
+      heat *= 1.0f - smooth01(0.5f * h, std::min(a + 2.5f * h, 1.0f), progress);
+    } else if (dest) {
+      heat = smooth01(std::max(a - 2.0f * h, 0.0f), a - 0.6f * h, progress);
+      heat = heat + (kFootprintHeat - heat) * smooth01(a, 1.0f, progress);
+    } else {
+      heat = smooth01(std::max(a - 2.0f * h, 0.0f), a - 0.6f * h, progress) *
+             (1.0f - smooth01(a + 0.5f * h, std::min(a + 2.5f * h, 1.0f), progress));
+    }
+    if (heat > 0.002f) out.heat.push_back({route[j], std::min(heat, 1.0f)});
+  }
+  return out;
+}
+
+CapturePulse capturePulse(float progress, float durationSeconds) noexcept {
+  CapturePulse out;
+  if (progress < kCaptureContact) return out;
+  out.active = true;
+  out.held = progress < kCaptureRelease;
+  const float since = progress - (out.held ? kCaptureContact : kCaptureRelease);
+  out.age = std::max(0.0f, since * durationSeconds * kCapturePulseSpeed);
   return out;
 }
 

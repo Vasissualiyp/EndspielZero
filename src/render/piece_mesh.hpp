@@ -27,12 +27,16 @@ struct MeshVertex {
   /// Cell-local panel UV; tag 0 uses the ordinary slab's coordinates, +1 is a
   /// sampled surface face, -1 is a sidewall. Independent of slide/world position.
   float panelCoord[3]{};
-  /// Cell display signal: stable seed, explicit response gain, effect weight.
-  /// Sampled LED faces supply this here; ordinary slabs use their instance instead.
-  float panelSignal[3]{};
+  /// Cell display signal: stable seed, explicit response gain, effect weight (negative
+  /// when the cell carries a gameplay cue), heat (own channel, M23.9 D). Sampled LED
+  /// faces supply this here; ordinary slabs use their instance instead.
+  float panelSignal[4]{};
+  /// Living colour change: the colour this cell is leaving (rgb) and seconds since it
+  /// changed (negative = settled, no transition). Written by `PanelResponse`.
+  float panelPrev[4]{0.0f, 0.0f, 0.0f, -1.0f};
 };
 
-static_assert(sizeof(MeshVertex) == 68);
+static_assert(sizeof(MeshVertex) == 88);
 
 /// A range inside the shared vertex and index buffers.
 struct MeshRange {

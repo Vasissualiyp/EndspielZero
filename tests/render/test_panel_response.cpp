@@ -50,6 +50,26 @@ float gain(const InstanceSet& set, const PanelTarget& target) {
 }
 }  // namespace
 
+TEST_CASE("a colour change hands the shader the old colour and the change's age",
+          "[render][panel-response]") {
+  ResponseFixture f;
+  f.sample(1);
+  CHECK(f.set.instances[1].panelPrev[3] < 0);  // first exposure: settled, final colour
+  f.targets[0].color.r = .6f;
+  f.sample(2);
+  const auto& at = f.set.instances[1];
+  CHECK(at.panelPrev[0] == Approx(.2f));
+  CHECK(at.panelPrev[1] == Approx(.3f));
+  CHECK(at.panelPrev[3] == Approx(0.0f).margin(1e-6));
+  f.sample(2.3);
+  CHECK(f.set.instances[1].panelPrev[3] == Approx(0.3f));
+  CHECK(f.set.instances[2].panelPrev[3] < 0);  // the other cell never changed
+  f.sample(2.7);                               // past the slowest emitter: settled again
+  CHECK(f.set.instances[1].panelPrev[3] < 0);
+  f.sample(1.0);  // rewind starts settled
+  CHECK(f.set.instances[1].panelPrev[3] < 0);
+}
+
 TEST_CASE("LCD response follows real colour events and explicit time",
           "[render][panel-response]") {
   ResponseFixture f;
@@ -213,8 +233,17 @@ TEST_CASE("real selection, move, hint and hover targets drive LCD responses",
       const auto raw = set;
       response.apply(set, targets, t);
       auto restored = set;
-      for (auto& instance : restored.instances) instance.panelSignal[1] = 0;
-      for (auto& vertex : restored.surfaceVertices) vertex.panelSignal[1] = 0;
+      const Instance settled;
+      for (auto& instance : restored.instances) {
+        instance.panelSignal[1] = 0;
+        std::copy(std::begin(settled.panelPrev), std::end(settled.panelPrev),
+                  instance.panelPrev);
+      }
+      for (auto& vertex : restored.surfaceVertices) {
+        vertex.panelSignal[1] = 0;
+        std::copy(std::begin(settled.panelPrev), std::end(settled.panelPrev),
+                  vertex.panelPrev);
+      }
       CHECK(std::memcmp(raw.instances.data(), restored.instances.data(),
                         raw.instances.size() * sizeof(Instance)) == 0);
       if (!raw.surfaceVertices.empty()) {

@@ -12,8 +12,8 @@
 #include "assets/piece_model.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
-#include "support/variants.hpp"
 #include "render/ui_widgets.hpp"
+#include "support/variants.hpp"
 
 using namespace cb;
 using namespace cb::render;
@@ -214,7 +214,8 @@ TEST_CASE("a valley in an outline stays a valley", "[render]") {
     // The designer fills the profile with this triangulator on a y-up screen mapping. A
     // fill that conserves area has no overlapping triangles, which is what showed up as
     // dark wedges across the rook's profile.
-    for (const char* name : {"dome", "tower", "wedge", "spire", "crown", "monolith", "horn"}) {
+    for (const char* name :
+         {"dome", "tower", "wedge", "spire", "crown", "monolith", "horn"}) {
       const assets::PieceModel m = assets::archetypeModel(name);
       std::vector<ImVec2> pts;
       for (const assets::ModelPoint& q : m.profile.points) {
@@ -255,8 +256,10 @@ TEST_CASE("a queen with triagonals is still a queen, and only a unicorn is a hor
   CHECK(archetypeFor(cube.pieces[cube.findPiece("unicorn")]) == Archetype::Horn);
 }
 
-TEST_CASE("an authored body assembles into a sound, deterministic mesh", "[render][model]") {
-  for (const char* name : {"dome", "tower", "wedge", "spire", "crown", "monolith", "horn"}) {
+TEST_CASE("an authored body assembles into a sound, deterministic mesh",
+          "[render][model]") {
+  for (const char* name :
+       {"dome", "tower", "wedge", "spire", "crown", "monolith", "horn"}) {
     INFO(name);
     const assets::PieceModel m = assets::archetypeModel(name);
     const ModelMesh a = assembleModel(m);
@@ -272,8 +275,10 @@ TEST_CASE("an authored body assembles into a sound, deterministic mesh", "[rende
       const auto& p = a.vertices[a.indices[t]];
       const auto& q = a.vertices[a.indices[t + 1]];
       const auto& r = a.vertices[a.indices[t + 2]];
-      const float ux = q.pos[0] - p.pos[0], uy = q.pos[1] - p.pos[1], uz = q.pos[2] - p.pos[2];
-      const float vx = r.pos[0] - p.pos[0], vy = r.pos[1] - p.pos[1], vz = r.pos[2] - p.pos[2];
+      const float ux = q.pos[0] - p.pos[0], uy = q.pos[1] - p.pos[1],
+                  uz = q.pos[2] - p.pos[2];
+      const float vx = r.pos[0] - p.pos[0], vy = r.pos[1] - p.pos[1],
+                  vz = r.pos[2] - p.pos[2];
       const float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
       const float agree = nx * (p.normal[0] + q.normal[0] + r.normal[0]) +
                           ny * (p.normal[1] + q.normal[1] + r.normal[1]) +
@@ -303,7 +308,8 @@ TEST_CASE("an authored body assembles into a sound, deterministic mesh", "[rende
     for (const MeshVertex& v : pair.vertices) {
       bool found = false;
       for (const MeshVertex& w : pair.vertices) {
-        if (std::abs(w.pos[0] - v.pos[0]) < 1e-4f && std::abs(w.pos[1] + v.pos[1]) < 1e-4f &&
+        if (std::abs(w.pos[0] - v.pos[0]) < 1e-4f &&
+            std::abs(w.pos[1] + v.pos[1]) < 1e-4f &&
             std::abs(w.pos[2] - v.pos[2]) < 1e-4f) {
           found = true;
           break;

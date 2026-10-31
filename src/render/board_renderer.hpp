@@ -58,11 +58,18 @@ struct Instance {
   /// glass (3), hologram (4), glow (5), turned wood (6), or LED panel (7).
   /// Fractional part varies wood grain.
   float material{0};
-  /// Cell display signal: stable seed, explicit response gain, effect weight.
-  /// Zero on non-panels and the sampled surface's identity instance.
-  float panelSignal[3]{};
+  /// Cell display signal: stable seed, explicit response gain, effect weight (negative
+  /// when the cell carries a gameplay cue: ambient glitches are suppressed there), and
+  /// heat - the projector base's warm light, 0..1, its own channel so it is never clamped
+  /// by the colour response (M23.9 D). On a hologram piece, `[3]` is instead its scan
+  /// dominance (0 solid .. 1 scan-only). Zero on non-panels and the sampled surface's
+  /// identity instance.
+  float panelSignal[4]{};
+  /// Living colour change: previous colour (rgb) and seconds since the change, negative
+  /// when settled (see `MeshVertex::panelPrev`).
+  float panelPrev[4]{0.0f, 0.0f, 0.0f, -1.0f};
 };
-static_assert(sizeof(Instance) == 96);
+static_assert(sizeof(Instance) == 116);
 
 /// The sub-rectangle of the target the board is drawn into, in pixels. Zero width means
 /// the whole target. At namespace scope because a nested class's default member
@@ -138,6 +145,11 @@ struct BoardOptions {
   /// piece it is. Only meaningful for the surface path; `buildInstances` ignores it for
   /// the flat board and the ordinary solid board.
   bool shapePieceCylinders{false};
+  /// The one shared presentation intensity (M23.9 F), 0 to 1. Every new animated effect -
+  /// LED breathing/sweep/flicker/glitches, the handoff trail, the far stars' twinkle -
+  /// reads this; 0 is the calm presentation (static emitters and footprints stay, no
+  /// glitches, no trail). A later calm setting is just this scalar.
+  float presentationIntensity{1.0f};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -154,6 +166,9 @@ struct InstanceSet {
   /// `cylinderRanges[s]`. Zero on every board that is not the shape view's puck board, so
   /// the ordinary per-shape draw is unchanged.
   std::array<std::uint32_t, kShapeSlots> discCounts{};
+  /// How many LED panels the board has: scales the sparse glitch schedule so the rate is
+  /// a few per ten seconds on any board size (M23.9 C).
+  std::uint32_t panelCells{0};
 
   /// The geometry view's board, as one mesh (M17). A square on a curved surface is a
   /// patch of that surface, not a slab turned to face it, so it cannot be an instance of

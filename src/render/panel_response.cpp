@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "app/session.hpp"
+#include "render/panel_alive.hpp"
 
 namespace cb::render {
 
@@ -58,6 +59,7 @@ void PanelResponse::apply(InstanceSet& set, std::span<const PanelTarget> targets
                                     std::abs(entry.target.g - target.color.g),
                                     std::abs(entry.target.b - target.color.b)});
       if (delta > 1.0f / 255.0f) {
+        entry.from = entry.target;
         entry.changedAt = seconds;
         entry.active = true;
       }
@@ -73,15 +75,34 @@ void PanelResponse::apply(InstanceSet& set, std::span<const PanelTarget> targets
   std::erase_if(entries_,
                 [&](const auto& item) { return item.second.seen != generation_; });
   for (const auto& target : targets) {
-    const float gain = entries_.at(target.cell).gain;
-    if (target.destination == PanelDestination::Instance) {
-      auto& signal = set.instances.at(target.first).panelSignal;
+    const Entry& entry = entries_.at(target.cell);
+    const float gain = entry.gain;
+    // Seconds since the change while any emitter may still be moving; negative once
+    // settled, so a capture long after the change (or at first exposure) shows the final
+    // colour only.
+    const double age = seconds - entry.changedAt;
+    const bool moving =
+        entry.active && age >= 0 && age < static_cast<double>(kTransitionMaxSeconds);
+    const auto write = [&](float (&signal)[4], float (&prev)[4]) {
       signal[1] = signal[0] > 0 ? gain : 0;
+      if (signal[0] > 0 && moving) {
+        prev[0] = entry.from.r;
+        prev[1] = entry.from.g;
+        prev[2] = entry.from.b;
+        prev[3] = static_cast<float>(age);
+      } else {
+        prev[0] = prev[1] = prev[2] = 0;
+        prev[3] = -1;
+      }
+    };
+    if (target.destination == PanelDestination::Instance) {
+      auto& inst = set.instances.at(target.first);
+      write(inst.panelSignal, inst.panelPrev);
     } else {
       for (std::size_t i = target.first;
            i < static_cast<std::size_t>(target.first) + target.count; ++i) {
-        auto& signal = set.surfaceVertices.at(i).panelSignal;
-        signal[1] = signal[0] > 0 ? gain : 0;
+        auto& v = set.surfaceVertices.at(i);
+        write(v.panelSignal, v.panelPrev);
       }
     }
   }

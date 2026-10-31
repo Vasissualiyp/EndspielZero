@@ -167,8 +167,10 @@ struct Theme {
     t.panelStyle = PanelStyle::Brackets;
     t.monoLabels = true;
     t.liveControls = true;
-    t.ink = Rgba::hex(0x05070F);
-    t.soot = Rgba::hex(0x0A0E1A);
+    // Neutral near-black with a trace of violet, so the cyan board separates from the room
+    // by hue as well as by value (M23.9 B).
+    t.ink = Rgba::hex(0x07060C);
+    t.soot = Rgba::hex(0x0C0B14);
     t.panel = Rgba::hex(0x10192A);
     t.panelHi = Rgba::hex(0x1A2940);
     t.rule = Rgba::hex(0x304460);

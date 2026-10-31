@@ -74,6 +74,61 @@ struct MovePath {
 /// and the same smoothstep shape `shotEnvelope` uses for the camera.
 [[nodiscard]] float captureFlash(float progress) noexcept;
 
+/// Projector handoff (M23.9 D). A hologram is light projected by a square, so a move
+/// hands the piece from panel to panel instead of gliding between them. Pure in
+/// `progress`.
+///
+/// `copies` are the partial projections to draw this frame, one per cell on the route
+/// (`from`, each step's `to`; a leap or an unexplained move is just `from` and `to`):
+/// `opacity` 0..1, `scan` 0 (solid figure) to 1 (scan lines only) - only the destination
+/// resolves to a solid figure. `heat` is the projector base's warm-up for cells on the
+/// route, ahead of the leading copy and cooling with an afterglow behind it.
+struct HandoffCopy {
+  CellId cell{kInvalidCell};
+  float opacity{0};
+  float scan{0};
+  bool destination{false};
+};
+struct HandoffHeat {
+  CellId cell{kInvalidCell};
+  float heat{0};
+};
+struct HandoffState {
+  std::vector<HandoffCopy> copies;
+  std::vector<HandoffHeat> heat;
+};
+/// The fraction of the move spent handing off; the rest is the destination resolving.
+inline constexpr float kHandoffSpan = 0.90f;
+/// A new head's copy rises to full opacity within this much progress (and under a quarter
+/// of a hop).
+inline constexpr float kHandoffMaxRise = 0.05f;
+/// Level a copy drops to once the head has moved on, and its scan dominance there.
+inline constexpr float kHandoffGhostOpacity = 0.40f;
+inline constexpr float kHandoffGhostScan = 0.75f;
+/// A standing piece's faint lit base, as heat. Far below any move cue.
+inline constexpr float kFootprintHeat = 0.22f;
+/// Total move duration cap, seconds; per-cell time shrinks on long moves.
+inline constexpr float kMaxMoveSeconds = 1.5f;
+/// An LED capture is a colour change on the captured cell's own emitters, not a slab
+/// drawn over the board: they switch to the capture colour while the heads meet and
+/// settle back. `held` = switching to the capture colour (age since contact), else
+/// settling back to the cell's own colour (age since release). Pure in `progress`.
+struct CapturePulse {
+  bool active{false};
+  bool held{false};
+  float age{0};  ///< seconds the per-emitter transition has been running
+};
+inline constexpr float kCaptureContact = 0.55f;
+inline constexpr float kCaptureRelease = 0.72f;
+/// The transition clock runs faster than the move's, so it settles before the move ends.
+inline constexpr float kCapturePulseSpeed = 1.6f;
+[[nodiscard]] CapturePulse capturePulse(float progress, float durationSeconds) noexcept;
+
+/// `intensity` is the shared presentation intensity: at 0 (calm) there is no trail, only
+/// the plain `from -> to` crossfade.
+[[nodiscard]] HandoffState handoffState(const MovePath& path, float progress,
+                                        float intensity = 1.0f);
+
 /// Trace the route a move took. `type` and `side` are the piece that moved, read from
 /// the position *before* the move is applied - which is also the position `pos` must be,
 /// because a sliding ray cannot pass through a piece, and the route a player watched is

@@ -6,7 +6,10 @@
 #include <cstddef>
 #include <cstring>
 #include <map>
+#include <unordered_map>
 
+#include "render/board_glow.hpp"
+#include "render/panel_alive.hpp"
 #include "shaders.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"  // the board as its shape (M17)
@@ -32,11 +35,16 @@ static_assert(sizeof(PushConstants) == 128);
 static_assert(offsetof(PushConstants, visual) == 112);
 
 struct BackdropPush {
-  float inner[4]{};
-  float outer[4]{};
-  float params[4]{0.5f, 0.34f, 1.25f, 0.62f};
+  float inner[4]{};                           // board emission colour
+  float outer[4]{};                           // the room's colour
+  float params[4]{0.5f, 0.45f, 0.0f, 0.45f};  // board centre uv, stars on, vignette
+  float board[4]{0.3f, 0.3f, 0.35f, 1.0f};    // half-size uv, floor spill, intensity
+  float right[4]{};                           // camera right, tan(fovY/2)
+  float up[4]{};                              // camera up, aspect
+  float fwd[4]{};                             // camera forward, seconds
+  float map[4]{};                             // uv -> board ndc scale/bias
 };
-static_assert(sizeof(BackdropPush) == 48);
+static_assert(sizeof(BackdropPush) == 128);
 
 struct BlurPush {
   float direction[2]{};
@@ -140,6 +148,10 @@ Instance plinthInstance(const view::Vec3& centre, float halfSpanX, float halfSpa
   // A warm rim around the edge of the table, which is what makes it read as an object
   // rather than as a darker rectangle.
   toFloat4(present ? t.ember : mix(t.boardRim, t.emberDeep, 0.35f), plinth.edge);
+  // A lit bezel (M23.9 B): on an emitting board the rim is the board's own light, a
+  // stronger version of the plinth rim - never the seam ramp's hues.
+  if (t.materials.cells == view::Material::Led)
+    toFloat4(present ? t.ember : mix(t.boardRim, t.ember, 0.62f), plinth.edge);
   plinth.edgeMask = 15.0f;
   plinth.material = shaderMaterial(t.materials.plinth, Cut::Plank, 0.25f);
   return plinth;
@@ -221,6 +233,8 @@ Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx,
     return fail(ok.error().code, ok.error().message);
   if (auto ok = r.buildBlurPipeline(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
+  if (auto ok = r.buildBackdropPipeline(); !ok.has_value())
+    return fail(ok.error().code, ok.error().message);
   if (auto ok = r.uploadGeometry(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
   return r;
@@ -249,28 +263,33 @@ Result<void> BoardRenderer::buildPipeline() {
   const VkVertexInputBindingDescription bindings[2]{
       {0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-  const VkVertexInputAttributeDescription attrs[15]{
+  // Sixteen locations, the Vulkan-guaranteed minimum: the edge mask and roll are adjacent
+  // floats in `Instance` and share one vec2 attribute.
+  static_assert(offsetof(Instance, roll) == offsetof(Instance, edgeMask) + sizeof(float));
+  const VkVertexInputAttributeDescription attrs[16]{
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, pos)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
       {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(MeshVertex, height)},
       {11, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, color)},
       {12, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, panelCoord)},
-      {13, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, panelSignal)},
+      {13, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, panelSignal)},
+      {15, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(MeshVertex, panelPrev)},
       {3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, center)},
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, scale)},
       {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, color)},
       {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, edge)},
-      {7, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, edgeMask)},
-      {8, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, roll)},
+      {7, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(Instance, edgeMask)},
+      {8, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, panelPrev)},
       {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, material)},
       {10, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, quat)},
-      {14, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, panelSignal)}};
+      {14, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, panelSignal)},
+  };
 
   VkPipelineVertexInputStateCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vi.vertexBindingDescriptionCount = 2;
   vi.pVertexBindingDescriptions = bindings;
-  vi.vertexAttributeDescriptionCount = 15;
+  vi.vertexAttributeDescriptionCount = 16;
   vi.pVertexAttributeDescriptions = attrs;
 
   VkPipelineInputAssemblyStateCreateInfo ia{};
@@ -836,6 +855,43 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
   const bool collectPanels =
       panelTargets && theme_.materials.cells == view::Material::Led;
   const VariantSpec& v = p.variant();
+  const bool ledCells = theme_.materials.cells == view::Material::Led;
+  const float intensity = std::clamp(options_.presentationIntensity, 0.0f, 1.0f);
+  // Projector handoff (M23.9 D): the leading copies and the warming bases, pure in the
+  // animation's progress. Heat is the projector base's own channel, never the colour
+  // response: standing pieces keep a faint footprint, a hop warms the cells just ahead of
+  // the leading copy and cools behind it.
+  const bool moving = anim != nullptr && anim->active();
+  view::HandoffState handoff;
+  std::unordered_map<CellId, float> handoffHeat;
+  if (moving) {
+    handoff = view::handoffState(anim->path(), anim->progress(), intensity);
+    for (const auto& h : handoff.heat) {
+      float& slot = handoffHeat[h.cell];
+      slot = std::max(slot, h.heat);
+    }
+  }
+  const auto heatFor = [&](CellId cell) {
+    if (!ledCells) return 0.0f;
+    float heat = 0.0f;
+    if (!p.at(cell).empty() && !(moving && cell == anim->travellingTo()))
+      heat = view::kFootprintHeat;
+    const auto it = handoffHeat.find(cell);
+    return it == handoffHeat.end() ? heat : std::max(heat, it->second);
+  };
+  // A cell that shows a gameplay cue never takes an ambient glitch.
+  const auto highlightedCells = p.highlighted();
+  const auto isCue = [&](CellId cell) {
+    if (cell == p.selected() || cell == checkCell_) return true;
+    if (options_.showLegalMoves &&
+        std::find(highlightedCells.begin(), highlightedCells.end(), cell) !=
+            highlightedCells.end())
+      return true;
+    if (cellIn(p.peekMoves(), cell)) return true;
+    if (options_.showLastMove && (cell == lastFrom_ || cell == lastTo_)) return true;
+    return cellIn(p.hintAttackers(), cell) || cellIn(p.hintPath(), cell) ||
+           cellIn(p.hintDefenders(), cell) || cellIn(p.hintDefendPath(), cell);
+  };
   // Custom bodies are used only while they are the ones synced for *this* variant.
   const bool useCustom = bodiesSig_ != 0 && bodiesSignature(v) == bodiesSig_;
 #ifdef CB_HAVE_IMGUI
@@ -864,6 +920,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     pose.formed = options_.surfaceFormed;
     pose.shellSpread = options_.surfaceShellSpread;
     const PlaySurface surf = PlaySurface::build(v, pose);
+    out.panelCells = ledCells ? static_cast<std::uint32_t>(surf.patches().size()) : 0;
 
     std::vector<Archetype> shape(v.pieces.size(), Archetype::Tower);
     std::vector<float> height(v.pieces.size(), 1.0f);
@@ -904,9 +961,11 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
 
     constexpr int kSide = PlaySurface::kSubdiv + 1;
     constexpr float kHalf = PlaySurface::kThickness * 0.5f;
+    std::array<float, 4> prevNow{0.0f, 0.0f, 0.0f,
+                                 -1.0f};  // per patch, see the capture pulse
     const auto push = [&](const view::Vec3& at, const view::Vec3& n, float h,
                           const float rgba[4], float u, float panelV, float tag,
-                          float seed = 0, float effectWeight = 0) {
+                          float seed = 0, float effectWeight = 0, float heat = 0) {
       MeshVertex mv{};
       mv.pos[0] = at.x;
       mv.pos[1] = at.y;
@@ -920,6 +979,8 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       mv.panelCoord[2] = tag;
       mv.panelSignal[0] = seed;
       mv.panelSignal[2] = effectWeight;
+      mv.panelSignal[3] = heat;
+      std::copy(prevNow.begin(), prevNow.end(), mv.panelPrev);
       for (int c = 0; c < 4; ++c) mv.color[c] = rgba[c];
       out.surfaceVertices.push_back(mv);
       return static_cast<std::uint32_t>(out.surfaceVertices.size() - 1);
@@ -931,8 +992,25 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
 
     for (const SurfacePatch& patch : surf.patches()) {
       const view::Rgba fill = fillFor(patch.cell);
+      // An LED capture: the captured cell's own emitters switch to the capture colour and
+      // settle back through the per-emitter transition (no slab drawn over the board).
+      view::Rgba shown = fill;
+      prevNow = {0.0f, 0.0f, 0.0f, -1.0f};
+      bool pulseCell = false;
+      if (ledCells && moving && anim->captures() && patch.cell == anim->captureCell()) {
+        const view::CapturePulse pulse =
+            view::capturePulse(anim->progress(), anim->duration());
+        if (pulse.active) {
+          pulseCell = true;
+          const view::Rgba from = pulse.held ? fill : theme_.blood;
+          if (pulse.held) shown = theme_.blood;
+          prevNow = {from.r, from.g, from.b, pulse.age};
+        }
+      }
       const float seed =
           theme_.materials.cells == view::Material::Led ? panelSeed(patch.cell) : 0;
+      const bool cue = ledCells && isCue(patch.cell);
+      const float heat = heatFor(patch.cell);
       // The seam rails (M17.21): a closed shape has no edge to draw a rim on the way the
       // flat board does, so the wrap ring is tinted into the patch's own vertices
       // instead. The colour is the flat view's own seam colour at the same cell, so the
@@ -959,7 +1037,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       const float railW1 = seamRailWeight(railKind, 1, options_.surfaceFormed);
       const auto tinted = [&](view::Rgba base, int i, int j,
                               float* effectWeight = nullptr) {
-        if (effectWeight) *effectWeight = seed > 0 ? 1.0f : 0.0f;
+        if (effectWeight) *effectWeight = seed > 0 ? (cue ? -1.0f : 1.0f) : 0.0f;
         if (rails) {
           SurfaceRail ru = surfaceRail(*seams, patch.cell, 0, i, j);
           SurfaceRail rv = surfaceRail(*seams, patch.cell, 1, i, j);
@@ -998,10 +1076,10 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
           float rgba[4]{};
           float effectWeight{};
-          toFloat4(tinted(fill, i, j, &effectWeight), rgba);
+          toFloat4(tinted(shown, i, j, &effectWeight), rgba);
           push(patch.pos[k] + patch.normal[k] * kHalf, patch.normal[k], 1.0f, rgba,
                static_cast<float>(j) / PlaySurface::kSubdiv,
-               static_cast<float>(i) / PlaySurface::kSubdiv, 1, seed, effectWeight);
+               static_cast<float>(i) / PlaySurface::kSubdiv, 1, seed, effectWeight, heat);
         }
       }
       for (int i = 0; i < kSide; ++i) {
@@ -1009,11 +1087,11 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           const std::size_t k = static_cast<std::size_t>(i * kSide + j);
           float rgba[4]{};
           float effectWeight{};
-          toFloat4(tinted(fill, i, j, &effectWeight), rgba);
+          toFloat4(tinted(shown, i, j, &effectWeight), rgba);
           push(patch.pos[k] - patch.normal[k] * kHalf,
                view::Vec3{-patch.normal[k].x, -patch.normal[k].y, -patch.normal[k].z},
                0.80f, rgba, static_cast<float>(j) / PlaySurface::kSubdiv,
-               static_cast<float>(i) / PlaySurface::kSubdiv, 1, seed, effectWeight);
+               static_cast<float>(i) / PlaySurface::kSubdiv, 1, seed, effectWeight, heat);
         }
       }
       const std::uint32_t backBase = base + kSide * kSide;
@@ -1066,7 +1144,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
         rim(0, j + 1, 0, j);
         rim(kSide - 1, j, kSide - 1, j + 1);
       }
-      if (collectPanels) {
+      if (collectPanels && !pulseCell) {
         panelTargets->push_back(
             {patch.cell, fill, PanelDestination::Surface, base,
              static_cast<std::uint32_t>(out.surfaceVertices.size()) - base});
@@ -1165,23 +1243,46 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
                        fit, seat.cell == checkCell_, 1.0f, 1.0f, seat.cell, false);
       emitSurfaceShadow(seat.centre, seat.normal, seat.quat, fit);
     }
-    // The mover, part-way along the surface between its start and its end.
-    if (anim != nullptr && anim->active()) {
-      const Piece moving = p.at(anim->travellingTo());
-      if (!moving.empty()) {
-        const SurfaceMoveSample s =
-            surfaceMoveSample(anim->path(), surf, anim->progress());
-        emitSurfacePiece(byShape, byShapeDisc, moving, s.position, s.normal, s.quat,
-                         s.fit, anim->travellingTo() == checkCell_, 1.0f, 1.0f,
-                         kInvalidCell, true);
-        emitSurfaceShadow(s.ground, s.normal, s.quat, s.fit);
+    // The mover (M23.9 D): handed from seat to seat as crossfaded projector copies rather
+    // than ridden along the surface. Copies are blended (partial projections) until the
+    // destination resolves solid; each leaves a soft contact shadow that fades with it,
+    // and the lit bases (patch heat) take the place of the old shadow pinned to the ride.
+    std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
+    std::vector<std::vector<Instance>> byShapeFlourishDisc(kShapeSlots);
+    if (moving) {
+      const Piece mover = p.at(anim->travellingTo());
+      if (!mover.empty()) {
+        const std::size_t sh = static_cast<std::size_t>(shape[mover.type]);
+        for (const view::HandoffCopy& copy : handoff.copies) {
+          const SurfaceSeat* seat = nullptr;
+          for (const SurfaceSeat& candidate : surf.seats())
+            if (candidate.cell == copy.cell) {
+              seat = &candidate;
+              break;
+            }
+          if (seat == nullptr) continue;
+          const float fit = std::min(std::sqrt(seat->stepU * seat->stepV), 1.0f);
+          const bool solid = copy.opacity >= 0.999f && copy.scan <= 0.001f;
+          auto& into = solid ? byShape : byShapeFlourish;
+          auto& discInto = solid ? byShapeDisc : byShapeFlourishDisc;
+          emitSurfacePiece(into, discInto, mover, seat->centre, seat->normal, seat->quat,
+                           fit, copy.destination && anim->travellingTo() == checkCell_,
+                           solid ? 1.0f : copy.opacity, 1.0f, kInvalidCell, true);
+          if (!solid) {
+            into[sh].back().panelSignal[3] = copy.scan;
+            if (!discInto[sh].empty()) discInto[sh].back().panelSignal[3] = 0.0f;
+          }
+          const std::size_t before =
+              byShapeShadow[static_cast<std::size_t>(Archetype::Disc)].size();
+          emitSurfaceShadow(seat->centre, seat->normal, seat->quat, fit);
+          auto& shadows = byShapeShadow[static_cast<std::size_t>(Archetype::Disc)];
+          if (shadows.size() > before) shadows.back().color[3] *= copy.opacity;
+        }
       }
     }
 
     // M18.1: the same capture flourish as the flat board, on its own square of the
     // surface - the captured piece shrinking and fading, and a blood flash at its foot.
-    std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
-    std::vector<std::vector<Instance>> byShapeFlourishDisc(kShapeSlots);
     // The slab the board stands on fades out while the flat sheet starts to curl, instead
     // of vanishing at the cut from the ordinary board (M21). It is the ordinary board's
     // own plinth, laid under the sheet as it lies flat; a table, not part of the board,
@@ -1233,7 +1334,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
                            seat.centre, seat.normal, seat.quat, fit, false, fade,
                            0.35f + 0.65f * fade);
         }
-        if (flash > 0.0f) {
+        if (flash > 0.0f && !ledCells) {  // LED: a per-emitter colour pulse instead
           Instance ring{};
           ring.center[0] = seat.centre.x + seat.normal.x * kHalf;
           ring.center[1] = seat.centre.y + seat.normal.y * kHalf;
@@ -1422,6 +1523,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
   };
 
+  std::uint32_t panelCellCount = 0;
   for (const view::Placement& pl : placements) {
     const Coord c = v.dims.toCoord(pl.cell);
     // Square colour comes from the drawn spatial axes only: a sub-board on another turn
@@ -1459,15 +1561,31 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     }
     fill = withHover(fill, p, pl.cell);
     toFloat4(fill, cell.color);
+    bool pulseCell = false;
+    if (ledCells && moving && anim->captures() && pl.cell == anim->captureCell()) {
+      const view::CapturePulse pulse =
+          view::capturePulse(anim->progress(), anim->duration());
+      if (pulse.active) {
+        pulseCell = true;
+        const view::Rgba from = pulse.held ? fill : theme_.blood;
+        if (pulse.held) toFloat4(theme_.blood, cell.color);
+        cell.panelPrev[0] = from.r;
+        cell.panelPrev[1] = from.g;
+        cell.panelPrev[2] = from.b;
+        cell.panelPrev[3] = pulse.age;
+      }
+    }
     cell.material =
         shaderMaterial(theme_.materials.cells, Cut::Plank,
                        0.5f * static_cast<float>(parity & 1) + 0.49f * hash01(pl.cell));
     if (theme_.materials.cells == view::Material::Led) {
       cell.panelSignal[0] = panelSeed(pl.cell);
-      cell.panelSignal[2] = 1;
+      cell.panelSignal[2] = isCue(pl.cell) ? -1.0f : 1.0f;
+      cell.panelSignal[3] = heatFor(pl.cell);
+      ++panelCellCount;
     }
 
-    if (collectPanels) {
+    if (collectPanels && !pulseCell) {
       panelTargets->push_back(
           {pl.cell, fill, PanelDestination::Instance,
            static_cast<std::uint32_t>(
@@ -1787,16 +1905,51 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     }
   }
 
+  // Capture flourish groups are declared ahead of the mover: the projector handoff's
+  // partial copies are blended with them (M23.9 D).
+  std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
   // The travelling piece and any portal it is passing through. Drawn last so they sit
   // above the board they are crossing.
   if (anim != nullptr && anim->active()) {
-    const view::MoveAnimation::Sample at = anim->sample();
-    const Piece moving = p.at(anim->travellingTo());
-    if (at.moving && !moving.empty()) {
-      emitPiece(moving, at.x, at.y, at.z + at.lift, false, kInvalidCell, true);
-      // The shadow stays on the board under a piece that is lifting or leaping over a
-      // seam; following it up would turn the contact into a lie (M18.2).
-      if (!options_.flat) emitShadow(at.x, at.y, at.z);
+    // The piece is handed from panel to panel: one crossfaded copy per cell on the route,
+    // dim and scan-dominated in between, solid only at the destination. The continuous
+    // glide (`anim->sample()`) is still what the camera follows.
+    const Piece mover = p.at(anim->travellingTo());
+    if (!mover.empty() && !options_.flat) {
+      std::unordered_map<CellId, const view::Placement*> at;
+      for (const view::HandoffCopy& copy : handoff.copies) {
+        if (at.count(copy.cell) != 0) continue;
+        for (const view::Placement& pl : placements)
+          if (pl.cell == copy.cell) {
+            at[copy.cell] = &pl;
+            break;
+          }
+      }
+      const std::size_t sh = static_cast<std::size_t>(shape[mover.type]);
+      for (const view::HandoffCopy& copy : handoff.copies) {
+        const auto found = at.find(copy.cell);
+        if (found == at.end()) continue;
+        const view::Placement& pl = *found->second;
+        auto& group = byShape[sh];
+        const std::size_t before = group.size();
+        emitPiece(mover, pl.x, pl.y, pl.z, false, kInvalidCell, true);
+        if (group.size() > before) {
+          Instance inst = group.back();
+          group.pop_back();
+          inst.panelSignal[3] = copy.scan;
+          if (copy.opacity >= 0.999f && copy.scan <= 0.001f) {
+            group.push_back(inst);
+          } else {
+            inst.color[3] = copy.opacity;
+            byShapeFlourish[sh].push_back(inst);
+          }
+        }
+        // The contact shadow follows each copy and fades with it (M18.2).
+        auto& shadows = byShapeShadow[static_cast<std::size_t>(Archetype::Disc)];
+        const std::size_t shadowsBefore = shadows.size();
+        emitShadow(pl.x, pl.y, pl.z);
+        if (shadows.size() > shadowsBefore) shadows.back().color[3] *= copy.opacity;
+      }
     }
     for (const view::MoveAnimation::Portal& portal : anim->openPortals()) {
       // A doorway standing across the seam the piece crossed: thin on the axis the
@@ -1838,7 +1991,6 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
   // and fades out as a pure function of `t`, so a clip stays reproducible, and a blood
   // flash marks the square at the moment the pieces meet. Both are drawn blended further
   // down, which is why their alpha is the fade rather than a number nothing reads.
-  std::vector<std::vector<Instance>> byShapeFlourish(kShapeSlots);
   if (anim != nullptr && anim->active() && anim->captures() && !options_.flat) {
     const float t = anim->progress();
     const float fade = view::captureFade(t);
@@ -1869,7 +2021,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
         body.material = pieceMaterial(theme_, taken);
         byShapeFlourish[static_cast<std::size_t>(shape[taken.type])].push_back(body);
       }
-      if (flash > 0.0f) {
+      if (flash > 0.0f && !ledCells) {  // LED: a per-emitter colour pulse instead
         // The flash is the flat cell slab, scaled larger as it fades so it reads as a
         // pulse rather than a square that blinks out. It sits just above the cell so it
         // never z-fights the board underneath it.
@@ -1889,6 +2041,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
   }
 
   InstanceSet out;
+  out.panelCells = panelCellCount;
   std::size_t total = 0;
   for (const auto& group : byShape) total += group.size();
   out.instances.reserve(total);
@@ -2023,6 +2176,35 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   push.material[1] = theme_.ember.g;
   push.material[2] = theme_.ember.b;
   push.visual[0] = static_cast<float>(std::fmod(visualTime_, 120.0));
+  // The one shared presentation intensity (M23.9 F) and the glitch schedule's modulus.
+  push.visual[1] = std::clamp(options_.presentationIntensity, 0.0f, 1.0f);
+  push.visual[2] = glitchModulus(set.panelCells);
+
+  // The light the board spills into the room (M23.9 B): centred on where the board
+  // actually lands on screen. Only the LED theme has an emitting board; other themes keep
+  // their plain clear colour.
+  const bool emits = theme_.materials.cells == view::Material::Led;
+  BoardGlow glow;
+  if (emits) {
+    std::vector<std::array<float, 3>> points;
+    constexpr std::size_t kMaxPoints = 4096;
+    const auto& cells = set.batches[static_cast<std::size_t>(Archetype::Cell)];
+    const std::size_t stride = std::max<std::size_t>(1, cells.count / kMaxPoints + 1);
+    for (std::size_t i = 0; i < cells.count; i += stride) {
+      const Instance& in = set.instances[cells.first + i];
+      if (static_cast<int>(in.material) == 7)
+        points.push_back({in.center[0], in.center[1], in.center[2]});
+    }
+    const std::size_t vstride =
+        std::max<std::size_t>(1, set.surfaceVertices.size() / kMaxPoints + 1);
+    for (std::size_t i = 0; i < set.surfaceVertices.size(); i += vstride) {
+      const auto& pos = set.surfaceVertices[i].pos;
+      points.push_back({pos[0], pos[1], pos[2]});
+    }
+    glow = projectBoardGlow(
+        points, push.viewProj, {board.x, board.y, board.width, board.height},
+        static_cast<float>(target.width()), static_cast<float>(target.height()));
+  }
 
   {
     const auto barrier = [&](VkImage image, VkImageAspectFlags aspectMask,
@@ -2107,6 +2289,48 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     const VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
 
     vkCmdBeginRendering(cmd, &ri);
+    if (glow.valid && backdropPipeline_ != VK_NULL_HANDLE) {
+      vkCmdSetViewport(cmd, 0, 1, &full);
+      vkCmdSetScissor(cmd, 0, 1, &fullScissor);
+      BackdropPush bp{};
+      const view::Rgba lit = theme_.boardLight;
+      // The emission colour: the board's own light, lifted off the room's black.
+      bp.inner[0] = theme_.ink.r + lit.r * 0.80f + theme_.ember.r * 0.035f;
+      bp.inner[1] = theme_.ink.g + lit.g * 0.80f + theme_.ember.g * 0.035f;
+      bp.inner[2] = theme_.ink.b + lit.b * 0.80f + theme_.ember.b * 0.035f;
+      toFloat4(theme_.ink, bp.outer);
+      bp.params[0] = glow.cx;
+      bp.params[1] = glow.cy;
+      bp.params[2] = camera.orthographic ? 0.0f : 1.0f;
+      bp.board[0] = glow.hx;
+      bp.board[1] = glow.hy;
+      bp.board[2] = 0.45f;
+      bp.board[3] = push.visual[1];
+      view::Vec3 f, r, u;
+      camera.basis(f, r, u);
+      bp.right[0] = r.x;
+      bp.right[1] = r.y;
+      bp.right[2] = r.z;
+      bp.right[3] = std::tan(camera.fovY * 0.5f);
+      bp.up[0] = u.x;
+      bp.up[1] = u.y;
+      bp.up[2] = u.z;
+      bp.up[3] = board.width / board.height;
+      bp.fwd[0] = f.x;
+      bp.fwd[1] = f.y;
+      bp.fwd[2] = f.z;
+      bp.fwd[3] = push.visual[0];
+      const float tw = static_cast<float>(target.width());
+      const float th = static_cast<float>(target.height());
+      bp.map[0] = 2.0f * tw / board.width;
+      bp.map[1] = -2.0f * board.x / board.width - 1.0f;
+      bp.map[2] = 2.0f * th / board.height;
+      bp.map[3] = -2.0f * board.y / board.height - 1.0f;
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, backdropPipeline_);
+      vkCmdPushConstants(cmd, backdropLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                         sizeof(BackdropPush), &bp);
+      vkCmdDraw(cmd, 3, 1, 0, 0);
+    }
     // Whatever is already out there is painted before the board, not over it. The ambient
     // field lands in the same pass, ahead of the board's own viewport and draws, so the
     // board's opaque geometry simply covers it where the board actually sits.
