@@ -22,13 +22,23 @@ struct Rgba {
 };
 
 /// Surface shading chosen by the theme; shader ids remain private to the renderer.
-enum class Material : std::uint8_t { Matte = 0, Metal = 1, Wood = 2, Glass = 3, Crystal = 4, Glow = 5 };
+enum class Material : std::uint8_t {
+  Matte = 0,
+  Metal = 1,
+  Wood = 2,
+  Glass = 3,
+  Crystal = 4,
+  Glow = 5
+};
 
 struct Materials {
   Material cells{Material::Matte};
   Material pieces{Material::Matte};
   Material plinth{Material::Matte};
 };
+
+/// Ambient decoration, shared by shell screens and the room behind the board.
+enum class Backdrop : std::uint8_t { Confetti, Grid };
 
 /// The game's palette, as data.
 ///
@@ -45,6 +55,7 @@ struct Materials {
 /// package, can carry its own without anyone touching the renderer.
 struct Theme {
   Materials materials{Material::Wood, Material::Wood, Material::Wood};
+  Backdrop backdrop{Backdrop::Confetti};
   // Ground and structure. Brown-biased near-black, never a neutral grey: the scene
   // should read as candlelight on worn wood rather than as a developer tool.
   Rgba ink{Rgba::hex(0x0D0B0A)};
@@ -146,6 +157,7 @@ struct Theme {
   [[nodiscard]] static Theme manifold() {
     Theme t;
     t.materials = Materials{Material::Glass, Material::Crystal, Material::Glass};
+    t.backdrop = Backdrop::Grid;
     t.ink = Rgba::hex(0x05070F);
     t.soot = Rgba::hex(0x0A0E1A);
     t.panel = Rgba::hex(0x10192A);

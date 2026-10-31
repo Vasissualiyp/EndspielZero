@@ -105,7 +105,8 @@ class DepthField {
   /// move into a deeper screen looks like: the field rushes past as you go in.
   void push(float amount) noexcept { velocity_ += amount; }
 
-  /// Draw it into `dl`, filling the given rectangle.
+  /// Draw it into `dl`, filling the given rectangle. The theme selects the drifting
+  /// bodies or a clock-driven perspective floor; `withShapes` gates the floor.
   ///
   /// `iconStyle` is the flat-piece set, because the drifting pieces are the same shapes
   /// the board uses - the background is made of the game, not of decoration. `opacity`

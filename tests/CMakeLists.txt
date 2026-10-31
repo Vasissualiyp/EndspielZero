@@ -60,6 +60,16 @@ if(TARGET endspielzero_gui)
     set_tests_properties(gui-${screen} PROPERTIES LABELS "render;gui" TIMEOUT 120
       ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   endforeach()
+  # The grid floor takes both paths: the shell's background list and the board's
+  # early list. Exercise the actual alternate-theme pipelines with validation on.
+  foreach(screen board newgame)
+    add_test(NAME gui-manifold-${screen}
+      COMMAND endspielzero_gui standard --theme manifold --screen ${screen}
+              --shot ${CMAKE_BINARY_DIR}/render-captures/gui-manifold-${screen}.ppm
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(gui-manifold-${screen} PROPERTIES LABELS "render;gui"
+      TIMEOUT 120 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  endforeach()
   # The play board as its own shape (M17): a glued variant drawn on its surface, still
   # validation-clean and still a picture. `standard --geometry` is a no-op, checked in the
   # scene tests rather than here because it is about geometry, not about the window.

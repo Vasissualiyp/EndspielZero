@@ -696,9 +696,76 @@ void DepthField::advance(float dt) {
   }
 }
 
+namespace {
+
+/// A floor in perspective, evaluated directly from elapsed seconds. In particular it
+/// reads none of the confetti bodies' integrated positions or transition impulses.
+void drawGridFloor(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
+                   float seconds, float opacity) {
+  const float width = max.x - min.x;
+  const float height = max.y - min.y;
+  if (width <= 0.0f || height <= 0.0f || opacity <= 0.0f) return;
+  const float horizon = min.y + height * 0.44f;
+  const float floorHeight = height * 0.56f;
+  const float centre = min.x + width * 0.5f;
+  const float lineWidth = std::clamp(height / 720.0f, 0.65f, 2.0f);
+  const auto tint = [&](float violet) {
+    const auto mix = [violet](float cyan, float purple) {
+      return cyan + (purple - cyan) * violet;
+    };
+    // Keep the ornament's colour as well as its opacity subdued. The bright seam
+    // rails and real pieces must remain the strongest lights in the room.
+    return view::Rgba{theme.soot.r * 0.74f + mix(theme.rift.r, theme.emberDeep.r) * 0.26f,
+                      theme.soot.g * 0.74f + mix(theme.rift.g, theme.emberDeep.g) * 0.26f,
+                      theme.soot.b * 0.74f + mix(theme.rift.b, theme.emberDeep.b) * 0.26f,
+                      1.0f};
+  };
+  const auto point = [&](float x, float inverseDepth) {
+    return ImVec2(centre + x * width * 0.105f * inverseDepth,
+                  horizon + floorHeight * inverseDepth);
+  };
+  dl->PushClipRect(min, max, true);
+  // Segment the receding lines so their light dies towards the vanishing point.
+  for (int column = -10; column <= 10; ++column) {
+    for (int segment = 0; segment < 12; ++segment) {
+      const float near = static_cast<float>(segment + 1) / 12.0f;
+      const float far = static_cast<float>(segment) / 12.0f;
+      dl->AddLine(point(static_cast<float>(column), far),
+                  point(static_cast<float>(column), near),
+                  u32(tint(0.25f), opacity * near * 0.60f), lineWidth);
+    }
+  }
+  const float phase = seconds * 0.16f - std::floor(seconds * 0.16f);
+  for (int row = 1; row <= 28; ++row) {
+    const float q = 1.0f / (1.0f + static_cast<float>(row) - phase);
+    dl->AddLine(ImVec2(min.x, horizon + floorHeight * q),
+                ImVec2(max.x, horizon + floorHeight * q),
+                u32(tint(0.45f), opacity * q * 0.65f), lineWidth);
+  }
+  // A few short light streaks slide along the floor, never across the subject's sky.
+  // Sines avoid a respawn boundary and make capture/reverse evaluation deterministic.
+  for (int streak = 0; streak < 3; ++streak) {
+    const float seed = static_cast<float>(streak);
+    const float q = 0.25f + seed * 0.22f;
+    const float x = std::sin(seconds * 0.12f + seed * 2.1f) * 7.0f;
+    const ImVec2 a = point(x - 0.7f, q);
+    const ImVec2 b = point(x + 0.7f, q);
+    const view::Rgba colour = tint(seed * 0.5f);
+    dl->AddLine(a, b, u32(colour, opacity * 0.12f), lineWidth * 4.0f);
+    dl->AddLine(a, b, u32(colour, opacity * 0.85f), lineWidth);
+  }
+  dl->PopClipRect();
+}
+
+}  // namespace
+
 void DepthField::draw(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
                       IconStyle iconStyle, bool withPieces, bool withShapes,
                       float opacity) const {
+  if (theme.backdrop == view::Backdrop::Grid) {
+    if (withShapes) drawGridFloor(dl, min, max, theme, clock_, opacity);
+    return;
+  }
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
   const float rx = (max.x - min.x) * 0.46f;
   const float ry = (max.y - min.y) * 0.52f;

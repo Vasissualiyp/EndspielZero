@@ -40,6 +40,11 @@ TEST_CASE("themes choose their surface materials", "[unit][view]") {
   CHECK(matte.plinth == Material::Matte);
 }
 
+TEST_CASE("themes select independent ambient backgrounds", "[unit][view]") {
+  CHECK(Theme::console().backdrop == Backdrop::Confetti);
+  CHECK(Theme::manifold().backdrop == Backdrop::Grid);
+}
+
 TEST_CASE("manifold is a dark, legible glass alternative", "[unit][view]") {
   const Theme t = Theme::manifold();
   CHECK_FALSE(t.light);
@@ -49,10 +54,12 @@ TEST_CASE("manifold is a dark, legible glass alternative", "[unit][view]") {
   CHECK(t.materials.plinth == Material::Glass);
 }
 
-TEST_CASE("the peek colour is not confusable with the other board marks", "[unit][view]") {
+TEST_CASE("the peek colour is not confusable with the other board marks",
+          "[unit][view]") {
   for (const Theme& t : {Theme::manifold(), Theme::console()}) {
     const auto far = [&](const Rgba& o) {
-      return std::abs(t.peek.r - o.r) + std::abs(t.peek.g - o.g) + std::abs(t.peek.b - o.b) >
+      return std::abs(t.peek.r - o.r) + std::abs(t.peek.g - o.g) +
+                 std::abs(t.peek.b - o.b) >
              0.4f;
     };
     CHECK(far(t.moss));
@@ -120,7 +127,7 @@ TEST_CASE("body text is legible on the ground it is drawn on", "[unit][view]") {
 }
 
 TEST_CASE("the manifold board has distinct square tones and a darker rim",
-           "[unit][view]") {
+          "[unit][view]") {
   const Theme t = Theme::manifold();
   CHECK_FALSE(t.light);
   CHECK(luminance(t.boardDark) < luminance(t.boardLight));

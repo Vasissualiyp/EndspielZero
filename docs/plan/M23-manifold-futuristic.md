@@ -104,6 +104,32 @@ GUI, so use the `fps` readout and record numbers in the status section).
   (it is already a ghost option, `geometryGhost`); under manifold the default ghost is lower and
   the seam rails glow, which also fixes the muddy overlap seen in the 3-D torus trailer beat.
 
+### M23.3 background integration (2026-10-30)
+
+The live background is `DepthField::draw` in `src/render/deco.cpp`, called by
+`Ui::drawShellFrame` for menus and `Ui::buildGameHud` for the board's early draw
+list. `backdrop.frag` and `BoardRenderer::buildBackdropPipeline` currently have
+no draw/build caller. Extend the live draw-list pattern rather than reviving a
+second background pipeline. The shell's main decorative object stays: only the
+ambient field changes.
+
+Add `view::Backdrop { Confetti, Grid }` and `Theme::backdrop`, default Confetti;
+manifold selects Grid. Dispatch at the start of `DepthField::draw`. Grid draws
+a perspective floor below a horizon, with depth-faded cyan/violet lines and a
+few drifting highlights. Its geometry depends only on the rectangle, theme,
+opacity and accumulated `clock_`; body respawns, dolly impulses, icon style and
+frame partitioning do not affect it. `withShapes == false` and zero opacity
+emit nothing. Keep the existing Confetti branch unchanged, including console's
+menu transitions. Use the existing behind-board draw list, so the floor cannot
+cover opaque cells or pieces. No new shader, pass, dependency or rendering
+architecture is needed.
+
+Tests must distinguish floor geometry from the old wireframe field, pin clock
+partition independence, animation, theme selection, opacity and tiny rectangles.
+Verify console captures byte-for-byte against the pre-change binary, plus
+manifold library/menu, standard/flat and torus/Klein captures at 720p and 1080p.
+The interface restyle and optional bloom remain separate slices.
+
 ## M23.4 Tests
 
 1. `tests/unit/view/test_theme.cpp`: manifold is a dark theme (`light == false`, ink luminance
@@ -148,5 +174,23 @@ reordering ordinary cell and piece passes to blend it would be a new rendering
 architecture; shape view uses the existing ghost blend pass instead. The proposed
 deep-indigo black piece failed the standing contrast constraint on the near-black
 glass squares; a lighter indigo crystal (`0x657CC5`) clears all four combinations.
-M23.3's grid-floor backdrop/interface restyle and M23.2's optional bloom are **not
-yet built**. They remain the next visual polish, with hardware-GPU FPS validation.
+M23.3's grid-floor backdrop is built through `Theme::backdrop` and the existing
+`DepthField` draw-list path. It replaces manifold's ambient wireframes with a
+depth-faded perspective floor and three slowly drifting cyan/violet streaks;
+the principal menu object is retained. Geometry is a function of elapsed time,
+independent of the confetti simulation or menu dolly impulses. Console's library
+capture is byte-identical to its pre-change baseline.
+
+Verified on llvmpipe (Mesa 26.2.3), with Vulkan validation enabled: manifold's
+library, menu, solid and flat boards, torus/Klein shape views and paused screen
+at 1280×720 and 1920×1080; a 960×540 library capture at 3× also exits cleanly
+(this does not claim that the oversized interface fits that window). The floor
+stays behind the real board and leaves text readable. New tests pin theme
+selection, floor placement, clock partition independence, opacity and tiny
+rectangles; the existing Vulkan early-background test covers board occlusion.
+Two GUI gates exercise manifold's shell and board paths explicitly. Local review
+captures are in `out/m23/`, including a before/after library comparison.
+All 241 view/render tests, all 40 GUI gates and `tools/precommit.sh` pass.
+
+M23.3's interface restyle and M23.2's optional bloom remain open, with
+hardware-GPU FPS validation. No bloom or hardware timing is claimed by this slice.

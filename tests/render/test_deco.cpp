@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -85,6 +86,59 @@ TEST_CASE("the main menu wears the quintic manifold object", "[render]") {
         app::Screen::PieceMoves, app::Screen::QuitConfirm,
         app::Screen::PauseQuitConfirm}) {
     CHECK(decoForScreen(static_cast<int>(s)) == decoForScreen(static_cast<int>(s), true));
+  }
+}
+
+TEST_CASE("manifold's ambient field is a perspective floor", "[render]") {
+  DepthField field;
+  field.advance(1.0f);
+  DecoFrame f;
+  field.draw(&f.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+             IconStyle::Faceted, true, true);
+  REQUIRE(f.dl.VtxBuffer.Size > 0);
+  for (const auto& v : f.dl.VtxBuffer) {
+    // The old field scatters solids across the frame, including above the horizon.
+    CHECK(v.pos.y >= 0.40f * 360.0f);
+    CHECK(std::isfinite(v.pos.x));
+    CHECK(std::isfinite(v.pos.y));
+  }
+}
+
+TEST_CASE("the grid floor follows elapsed time rather than body simulation", "[render]") {
+  const auto picture = [](const DepthField& field, float opacity = 1.0f,
+                          bool shapes = true) {
+    DecoFrame f;
+    field.draw(&f.dl, ImVec2(0, 0), ImVec2(640, 360), view::Theme::manifold(),
+               IconStyle::Faceted, true, shapes, opacity);
+    std::vector<std::tuple<float, float, ImU32>> out;
+    for (const auto& v : f.dl.VtxBuffer) out.emplace_back(v.pos.x, v.pos.y, v.col);
+    return out;
+  };
+  DepthField a;
+  a.advance(1.0f);
+  DepthField b;
+  b.push(-3.1f);
+  for (int i = 0; i < 4; ++i) b.advance(0.25f);
+  CHECK(picture(a) == picture(b));
+  CHECK(picture(a, 0.0f).empty());
+  CHECK(picture(a, 1.0f, false).empty());
+  CHECK(picture(a, 0.5f) != picture(a));
+  const auto before = picture(a);
+  a.advance(2.0f);
+  CHECK(picture(a) != before);
+}
+
+TEST_CASE("the grid floor handles tiny and empty rectangles", "[render]") {
+  DepthField field;
+  for (const ImVec2 size : {ImVec2(1, 1), ImVec2(0, 0), ImVec2(-1, -1)}) {
+    DecoFrame f;
+    field.draw(&f.dl, ImVec2(0, 0), size, view::Theme::manifold(), IconStyle::Faceted,
+               true, true);
+    if (size.x <= 0.0f) CHECK(f.dl.VtxBuffer.Size == 0);
+    for (const auto& v : f.dl.VtxBuffer) {
+      CHECK(std::isfinite(v.pos.x));
+      CHECK(std::isfinite(v.pos.y));
+    }
   }
 }
 
