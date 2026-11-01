@@ -33,6 +33,7 @@
 #include "io/moveset_library.hpp"
 #include "io/variant_toml.hpp"
 #include "render/board_fx.hpp"
+#include "view/game_end_fx.hpp"
 #include "render/board_renderer.hpp"
 #include "render/image_io.hpp"
 #include "render/panel_response.hpp"
@@ -98,7 +99,7 @@ void applyHudFx(render::Ui& ui, std::optional<float> bootAge, std::optional<floa
     draw = std::clamp(*bootAge / 0.4f, 0.0f, 1.0f);
     content = smooth((*bootAge - 0.4f) / 0.4f);
   }
-  if (endAge) level = 1.0f - 0.3f * smooth(*endAge / 1.0f);
+  if (endAge) level = 1.0f - 0.3f * smooth((*endAge - view::kEndDelaySeconds) / 1.5f);
   ui.setHudFx(draw, content, level);
 }
 

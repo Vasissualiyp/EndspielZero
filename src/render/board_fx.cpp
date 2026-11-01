@@ -81,8 +81,9 @@ void applyBoardFx(InstanceSet& set, const app::Session& session, const BoardFxSt
       const Piece piece = pos.at(c);
       if (piece.empty()) continue;
       const float arrival =
-          decisive ? static_cast<float>(std::max(dist[c], 0)) / view::kPowerDownCellsPerSecond
-                   : 0.0f;
+          view::kEndDelaySeconds +
+          (decisive ? static_cast<float>(std::max(dist[c], 0)) / view::kPowerDownCellsPerSecond
+                    : 0.0f);
       const view::HologramEnd h =
           view::hologramEnd(sideOf(piece), *state.endAge - arrival, cellSeed(c), fxIntensity);
       fx.opacity = h.opacity;

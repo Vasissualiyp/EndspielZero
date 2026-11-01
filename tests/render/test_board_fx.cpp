@@ -194,7 +194,7 @@ TEST_CASE("end fx: the wave, the hold and the sides of a finished game", "[rende
   InstanceSet set;
   BoardFxState st;
   st.end = *s->endEvent();
-  st.endAge = 3.0f;
+  st.endAge = 9.0f;
   applyBoardFx(set, *s, st);
   const CellId king = at(*s, 4, 0);
   CHECK(set.cellFx[king + 1].power == 1.0f);                              // the mated king
@@ -204,14 +204,26 @@ TEST_CASE("end fx: the wave, the hold and the sides of a finished game", "[rende
   CHECK(set.cellFx[at(*s, 0, 0) + 1].opacity == Catch::Approx(view::kLoserOpacity).margin(0.05));
   CHECK(set.cellFx[at(*s, 0, 7) + 1].opacity == 1.0f);
   CHECK(set.cellFx[at(*s, 0, 7) + 1].gain == Catch::Approx(view::kWinnerGain));
-  // At the start of the wave only the origin has been reached.
-  st.endAge = 0.05f;
+  // Inside the delay the board is untouched, losers included (age counts from the decision).
+  for (float age : {0.0f, 1.0f, 2.9f}) {
+    st.endAge = age;
+    applyBoardFx(set, *s, st);
+    for (CellId c = 0; c < s->snapshot().cellCount(); ++c) {
+      CHECK(set.cellFx[c + 1].power == 1.0f);
+      CHECK(set.cellFx[c + 1].glitch == 0.0f);
+      CHECK(set.cellFx[c + 1].opacity == 1.0f);
+    }
+  }
+  // Then the wave: just after the delay only the origin has been reached, and the mated
+  // king keeps its light throughout.
+  st.endAge = view::kEndDelaySeconds + 0.1f;
   applyBoardFx(set, *s, st);
-  CHECK(set.cellFx[at(*s, 4, 1) + 1].power == 1.0f);   // one step, arrives after 0.11 s
-  CHECK(set.cellFx[at(*s, 4, 0) + 1].power == 1.0f);   // the mated king keeps its light
+  CHECK(set.cellFx[at(*s, 4, 0) + 1].power == 1.0f);
+  CHECK(set.cellFx[at(*s, 4, 4) + 1].power == 1.0f);   // four steps: 1.3 s later
+  CHECK(set.cellFx[at(*s, 4, 1) + 1].power < 1.0f + 1e-6f);
   // A draw dims every cell alike and leaves both armies at 0.85.
   st.end.kind = view::EndKind::Draw;
-  st.endAge = 3.0f;
+  st.endAge = 9.0f;
   applyBoardFx(set, *s, st);
   CHECK(set.cellFx[at(*s, 0, 4) + 1].power == view::kDrawHold);
   CHECK(set.cellFx[at(*s, 0, 0) + 1].opacity == Catch::Approx(view::kDrawOpacity));
@@ -287,7 +299,7 @@ TEST_CASE("ripple and end frames: the wave reaches a near cell, not a far one; t
 
   BoardFxState end;
   end.end = *s->endEvent();
-  end.endAge = 3.0f;
+  end.endAge = 9.0f;
   const auto held = shot(end);
   const CellId king = at(*s, 4, 0), far = at(*s, 0, 4);
   // The mated king's own cell (beside the piece) keeps its light; a far cell is at ~30 %.

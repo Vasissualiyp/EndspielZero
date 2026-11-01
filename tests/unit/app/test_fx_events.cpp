@@ -176,3 +176,27 @@ TEST_CASE("the session caches distances for an event's origin", "[app][fx]") {
   CHECK(d[cellOf(*s, 4, 7)] == 7);
   CHECK(&s->distancesFrom(e1) == &d);  // the second ask is the cached flood
 }
+
+TEST_CASE("an undo or reset inside the end delay cancels with no power-up", "[app][fx][endfx]") {
+  auto s = open();
+  FxTimeline t;
+  t.observe(s.get(), 0.0, true, false);
+  t.skipBoot();
+  for (const char* m : {"f2f3", "e7e5", "g2g4", "d8h4"}) play(*s, m);
+  t.observe(s.get(), 10.0, true, false);
+  REQUIRE(t.end(10.5).has_value());
+  act(*s, ActionKind::Undo);
+  t.observe(s.get(), 11.0, true, false);  // 1 s after the decision, inside the 3 s delay
+  CHECK_FALSE(t.end(11.0).has_value());
+  CHECK_FALSE(t.powerUp(11.1).has_value());
+  // Past the delay the board did go down, so the same undo powers it up.
+  auto s2 = open();
+  FxTimeline t2;
+  t2.observe(s2.get(), 0.0, true, false);
+  t2.skipBoot();
+  for (const char* m : {"f2f3", "e7e5", "g2g4", "d8h4"}) play(*s2, m);
+  t2.observe(s2.get(), 10.0, true, false);
+  act(*s2, ActionKind::Undo);
+  t2.observe(s2.get(), 10.0 + static_cast<double>(view::kEndDelaySeconds) + 0.5, true, false);
+  CHECK(t2.powerUp(10.0 + static_cast<double>(view::kEndDelaySeconds) + 0.6).has_value());
+}

@@ -14,7 +14,7 @@ using Catch::Approx;
 TEST_CASE("powerDown: full light until the front arrives, the hold level after",
           "[unit][view][endfx]") {
   for (int dist : {0, 1, 4, 9}) {
-    const float arrival = static_cast<float>(dist) / kPowerDownCellsPerSecond;
+    const float arrival = kEndDelaySeconds + static_cast<float>(dist) / kPowerDownCellsPerSecond;
     CHECK(powerDown(EndKind::Decisive, dist, arrival - 0.05f, 1.0f).power == 1.0f);
     CHECK(powerDown(EndKind::Decisive, dist, -1.0f, 1.0f).power == 1.0f);
     const float settle = arrival + kPowerDownFallSeconds + 0.001f;
@@ -25,7 +25,7 @@ TEST_CASE("powerDown: full light until the front arrives, the hold level after",
     }
   }
   for (int dist : {0, 5}) {
-    for (float age : {kDrawDimSeconds, kDrawDimSeconds + 4.0f}) {
+    for (float age : {kEndDelaySeconds + kDrawDimSeconds, kEndDelaySeconds + kDrawDimSeconds + 4.0f}) {
       CHECK(powerDown(EndKind::Draw, dist, age, 1.0f).power == Approx(kDrawHold));
     }
   }
@@ -34,7 +34,7 @@ TEST_CASE("powerDown: full light until the front arrives, the hold level after",
 TEST_CASE("powerDown: the glitch is only near arrival, never below the hold, calm has none",
           "[unit][view][endfx]") {
   const int dist = 4;
-  const float arrival = static_cast<float>(dist) / kPowerDownCellsPerSecond;
+  const float arrival = kEndDelaySeconds + static_cast<float>(dist) / kPowerDownCellsPerSecond;
   CHECK(powerDown(EndKind::Decisive, dist, arrival - 0.01f, 1.0f).glitch == 0.0f);
   CHECK(powerDown(EndKind::Decisive, dist, arrival + 0.01f, 1.0f).glitch > 0.8f);
   CHECK(powerDown(EndKind::Decisive, dist, arrival + kPowerDownGlitchSeconds + 0.01f, 1.0f)
@@ -42,7 +42,7 @@ TEST_CASE("powerDown: the glitch is only near arrival, never below the hold, cal
   for (EndKind kind : {EndKind::Decisive, EndKind::Draw}) {
     for (float intensity : {0.0f, 1.0f}) {
       float lowest = 1.0f;
-      for (float age = 0.0f; age < 6.0f; age += 0.01f)
+      for (float age = 0.0f; age < 12.0f; age += 0.02f)
         for (int d : {0, 3, 8}) {
           const PowerCell p = powerDown(kind, d, age, intensity);
           lowest = std::min(lowest, p.power);
@@ -53,7 +53,8 @@ TEST_CASE("powerDown: the glitch is only near arrival, never below the hold, cal
       CHECK(lowest == Approx(holdLevel(kind)));
     }
   }
-  CHECK(powerDown(EndKind::Decisive, 0, 0.6f, 0.0f).power == Approx(kDecisiveHold));
+  CHECK(powerDown(EndKind::Decisive, 0, kEndDelaySeconds + kCalmFadeSeconds, 0.0f).power ==
+        Approx(kDecisiveHold));
 }
 
 TEST_CASE("powerUp: from the hold, one overshoot, then normal", "[unit][view][endfx]") {
@@ -76,26 +77,26 @@ TEST_CASE("hologramEnd: loser destabilises to 0.65, winner is solid and brighter
           "[unit][view][endfx]") {
   for (std::uint32_t seed : {1u, 2u, 77u}) {
     // Settled, the loser shimmers about 0.65 within a few per cent.
-    for (float age = 1.5f; age < 6.0f; age += 0.1f) {
+    for (float age = 4.0f; age < 12.0f; age += 0.1f) {
       const HologramEnd l = hologramEnd(HologramSide::Loser, age, seed, 1.0f);
       CHECK(l.opacity == Approx(kLoserOpacity).margin(0.05f));
     }
     // One or two dropouts to 0.3 within the first second, each short.
     int dropped = 0;
     bool in = false;
-    for (float age = 0.0f; age < 1.0f; age += 0.002f) {
+    for (float age = 0.0f; age < kLoserSeconds; age += 0.002f) {
       const bool low = hologramEnd(HologramSide::Loser, age, seed, 1.0f).opacity <= 0.3f + 1e-4f;
       if (low && !in) ++dropped;
       in = low;
     }
     CHECK(dropped >= 1);
     CHECK(dropped <= 2);
-    CHECK(hologramEnd(HologramSide::Loser, 0.4f, seed, 1.0f).scanJitter > 0.0f);
+    CHECK(hologramEnd(HologramSide::Loser, 1.0f, seed, 1.0f).scanJitter > 0.0f);
     // The winner stays solid.
-    const HologramEnd w = hologramEnd(HologramSide::Winner, 3.0f, seed, 1.0f);
+    const HologramEnd w = hologramEnd(HologramSide::Winner, 6.0f, seed, 1.0f);
     CHECK(w.opacity == 1.0f);
     CHECK(w.gain == Approx(kWinnerGain));
-    const HologramEnd d = hologramEnd(HologramSide::Draw, 3.0f, seed, 1.0f);
+    const HologramEnd d = hologramEnd(HologramSide::Draw, 6.0f, seed, 1.0f);
     CHECK(d.opacity == Approx(kDrawOpacity));
     CHECK(d.gain == 1.0f);
   }
@@ -107,16 +108,42 @@ TEST_CASE("hologramEnd: loser destabilises to 0.65, winner is solid and brighter
 
 TEST_CASE("hologramEnd: calm fades to the same levels with no jitter or dropout",
           "[unit][view][endfx]") {
-  for (float age = 0.0f; age < 3.0f; age += 0.01f) {
+  for (float age = 0.0f; age < 5.0f; age += 0.01f) {
     const HologramEnd l = hologramEnd(HologramSide::Loser, age, 5u, 0.0f);
     CHECK(l.scanJitter == 0.0f);
     CHECK(l.opacity >= kLoserOpacity - 1e-6f);
   }
-  CHECK(hologramEnd(HologramSide::Loser, 3.0f, 5u, 0.0f).opacity == Approx(kLoserOpacity));
+  CHECK(hologramEnd(HologramSide::Loser, 5.0f, 5u, 0.0f).opacity == Approx(kLoserOpacity));
 }
 
 TEST_CASE("hologramRestore: back to solid in the power-up time", "[unit][view][endfx]") {
   CHECK(hologramRestore(HologramSide::Loser, 0.0f).opacity == Approx(kLoserOpacity));
   CHECK(hologramRestore(HologramSide::Loser, kPowerUpSeconds).opacity == Approx(1.0f));
   CHECK(hologramRestore(HologramSide::Winner, kPowerUpSeconds).gain == Approx(1.0f));
+}
+
+TEST_CASE("powerDown: the board is untouched for the whole delay, and settles slowly after it",
+          "[unit][view][endfx]") {
+  for (EndKind kind : {EndKind::Decisive, EndKind::Draw})
+    for (float intensity : {0.0f, 1.0f})
+      for (int dist : {0, 3, 9})
+        for (float age = 0.0f; age <= kEndDelaySeconds; age += 0.05f) {
+          const PowerCell p = powerDown(kind, dist, age, intensity);
+          CHECK(p.power == 1.0f);
+          CHECK(p.glitch == 0.0f);
+        }
+  // The hold arrives only after the delay, the wave to the cell, and its fall.
+  const int dist = 6;
+  const float reach = kEndDelaySeconds + static_cast<float>(dist) / kPowerDownCellsPerSecond;
+  CHECK(powerDown(EndKind::Decisive, dist, reach + 0.5f * kPowerDownFallSeconds, 1.0f).power >
+        kDecisiveHold + 0.05f);
+  CHECK(powerDown(EndKind::Decisive, dist, reach + kPowerDownFallSeconds + 0.001f, 1.0f).power ==
+        Approx(kDecisiveHold));
+  // A draw dims over 3 s and calm fades over 2 s, both after the delay.
+  CHECK(powerDown(EndKind::Draw, 0, kEndDelaySeconds + 0.5f * kDrawDimSeconds, 1.0f).power >
+        kDrawHold + 0.05f);
+  CHECK(powerDown(EndKind::Draw, 0, kEndDelaySeconds + kDrawDimSeconds + 0.01f, 1.0f).power ==
+        Approx(kDrawHold));
+  CHECK(powerDown(EndKind::Decisive, 0, kEndDelaySeconds + 0.5f * kCalmFadeSeconds, 0.0f)
+            .power > kDecisiveHold + 0.05f);
 }

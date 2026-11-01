@@ -46,6 +46,7 @@ float holdLevel(EndKind kind) noexcept {
 PowerCell powerDown(EndKind kind, int dist, float age, float intensity) {
   PowerCell p;
   const float hold = holdLevel(kind);
+  age -= kEndDelaySeconds;  // the final position is held first
   if (!(age > 0.0f)) return p;
   if (intensity < 0.5f) {
     p.power = 1.0f + (hold - 1.0f) * smooth(age / kCalmFadeSeconds);
@@ -54,7 +55,7 @@ PowerCell powerDown(EndKind kind, int dist, float age, float intensity) {
   if (kind == EndKind::Draw) {
     p.power = 1.0f + (hold - 1.0f) * smooth(age / kDrawDimSeconds);
     // One soft unison flicker on the way down; it is over well before the hold.
-    const float x = (age - 0.30f) / 0.12f;
+    const float x = (age - 1.0f) / 0.12f;  // about a third of the way in
     if (x > 0.0f && x < 1.0f) p.power *= 1.0f - 0.18f * std::sin(3.14159265f * x);
     p.power = std::max(p.power, hold);
     return p;
@@ -102,7 +103,7 @@ HologramEnd hologramEnd(HologramSide side, float age, std::uint32_t seed, float 
   }
   switch (side) {
     case HologramSide::Winner:
-      h.gain = 1.0f + (gain - 1.0f) * smooth(age / 0.5f);
+      h.gain = 1.0f + (gain - 1.0f) * smooth(age / 1.5f);
       return h;
     case HologramSide::Draw:
       h.opacity = 1.0f + (opacity - 1.0f) * smooth(age / kDrawDimSeconds);
@@ -112,17 +113,20 @@ HologramEnd hologramEnd(HologramSide side, float age, std::uint32_t seed, float 
   }
   h.opacity = 1.0f + (opacity - 1.0f) * smooth(age / kLoserSeconds);
   // The scan is irregular while it destabilises and only a little after.
-  h.scanJitter = smooth(age / 0.25f) * (1.0f - 0.8f * smooth((age - kLoserSeconds) / 0.4f));
+  h.scanJitter =
+      smooth(age / 0.75f) * (1.0f - 0.8f * smooth((age - kLoserSeconds) / 0.6f));
   // One or two short dropouts inside the destabilising second.
   const int drops = 1 + static_cast<int>(seed % 2u);
   for (int i = 0; i < drops; ++i) {
     const std::uint32_t s = seed * 2654435761u + static_cast<std::uint32_t>(i) * 0x9e3779b9u;
-    const float start = 0.15f + 0.65f * unit(s ^ 0x1234567u) * (i == 0 ? 0.5f : 1.0f);
+    // Spread across the destabilising window, the second always after the first half.
+    const float start =
+        0.45f + 1.0f * unit(s ^ 0x1234567u) + (i == 0 ? 0.0f : 0.9f);
     const float len = 0.05f + 0.03f * unit(s ^ 0x7654321u);
     if (age >= start && age < start + len) h.opacity = 0.3f;
   }
   // Settled: a slow shimmer, 0.3 Hz.
-  const float shimmer = smooth((age - 0.9f) / 0.3f);
+  const float shimmer = smooth((age - 0.9f * kLoserSeconds) / 0.9f);
   h.opacity += 0.04f * shimmer * std::sin(kTwoPi * 0.3f * age + kTwoPi * unit(seed ^ 0xabcdefu));
   return h;
 }

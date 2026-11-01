@@ -12,12 +12,15 @@ namespace cb::view {
 /// game back out of it. All pure in an event age in seconds.
 inline constexpr float kDecisiveHold = 0.30f;      ///< panel light after a decisive end
 inline constexpr float kDrawHold = 0.55f;          ///< ... and after a draw
-inline constexpr float kPowerDownCellsPerSecond = 9.0f;
-inline constexpr float kPowerDownGlitchSeconds = 0.25f;
-inline constexpr float kPowerDownFallSeconds = 0.25f;  ///< decisive: fall to the hold
-inline constexpr float kDrawDimSeconds = 0.8f;
-inline constexpr float kCalmFadeSeconds = 0.6f;
-inline constexpr float kLoserSeconds = 1.0f;       ///< the loser's holograms destabilise
+/// Timing revision (user, 2026-10-31): the final position is held, fully powered, for
+/// `kEndDelaySeconds` after the result is decided; then the power-down is slow.
+inline constexpr float kEndDelaySeconds = 3.0f;
+inline constexpr float kPowerDownCellsPerSecond = 3.0f;
+inline constexpr float kPowerDownGlitchSeconds = 0.6f;
+inline constexpr float kPowerDownFallSeconds = 1.5f;  ///< a cell's fall to the hold level
+inline constexpr float kDrawDimSeconds = 3.0f;
+inline constexpr float kCalmFadeSeconds = 2.0f;
+inline constexpr float kLoserSeconds = 3.0f;       ///< the loser's holograms destabilise
 inline constexpr float kLoserOpacity = 0.65f;
 inline constexpr float kDrawOpacity = 0.85f;
 inline constexpr float kWinnerGain = 1.15f;
@@ -47,8 +50,8 @@ struct PowerCell {
 [[nodiscard]] float holdLevel(EndKind kind) noexcept;
 
 /// `dist` is the cell's distance from the origin (< 0 treated as at the origin), `age`
-/// seconds since the end. Decisive: 1 until the front arrives at `dist / 9`, a glitch burst
-/// 1 -> 0 over 0.25 s, then a fall to the hold level, never below it. Draw: the whole
+/// seconds since the result was decided: nothing changes before `kEndDelaySeconds`. Decisive: 1 until the front arrives at `dist / 9`, a glitch burst
+/// 1 -> 0 over 0.6 s, then a fall to the hold level, never below it. Draw: the whole
 /// board dims to the hold over 0.8 s with one unison flicker, no glitch. Calm (intensity
 /// below one half): a 0.6 s fade to the hold, no glitch.
 [[nodiscard]] PowerCell powerDown(EndKind kind, int dist, float age, float intensity);
@@ -68,7 +71,8 @@ struct HologramEnd {
   float gain{1};
 };
 
-/// `age` is seconds since the front reached the piece. Loser: over 1.0 s the scan jitters,
+/// `age` is seconds since the power-down front reached the piece (the delay and the wave
+/// are the caller's). Loser: over 1.0 s the scan jitters,
 /// one or two dropouts (opacity 0.3 for 50..80 ms) and it settles at 0.65 with a slow
 /// 0.3 Hz shimmer. Winner: solid, +15 % emission. Draw: both armies settle at 0.85. Calm:
 /// a 0.6 s fade to the same levels with no jitter, dropouts or shimmer.

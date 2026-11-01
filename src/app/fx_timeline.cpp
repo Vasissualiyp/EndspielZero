@@ -55,7 +55,9 @@ void FxTimeline::observe(const Session* session, double now, bool eligible, bool
   }
   if (session->powerUpSerial() != powerUpSeen_) {
     powerUpSeen_ = session->powerUpSerial();
-    if (!swallow && endStart_ && endFx_) {
+    // An undo inside the delay never saw the board go down: nothing powers back up.
+    if (!swallow && endStart_ && endFx_ &&
+        now - *endStart_ >= static_cast<double>(view::kEndDelaySeconds)) {
       powerUpStart_ = now;
       powerUpFx_ = endFx_;
     }
