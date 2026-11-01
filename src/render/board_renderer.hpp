@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "render/image_io.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/piece_mesh.hpp"
+#include "render/post_process.hpp"
 #include "space/coord.hpp"
 #include "view/camera.hpp"
 #include "view/layout.hpp"
@@ -254,6 +258,29 @@ class BoardRenderer {
   void setBlur(float strength) noexcept { blur_ = strength; }
   [[nodiscard]] float blur() const noexcept { return blur_; }
 
+  /// Post-processing (ADR-0025): render the scene into float colour, bloom its emitters,
+  /// tone-map and grain it into the target. Off by default at this level so a bare
+  /// renderer is the legacy reference; the application passes `Settings`. `bloomScale`
+  /// multiplies the theme's `bloomStrength`.
+  void setPost(bool enabled, float bloomScale) noexcept {
+    postEnabled_ = enabled;
+    bloomScale_ = std::isfinite(bloomScale) ? std::clamp(bloomScale, 0.0f, 4.0f) : 1.0f;
+  }
+  /// Whether the next `record` draws through the HDR path: requested and supported. The
+  /// background callback reads this to pick the matching pipeline; it cannot change
+  /// between the start of `record` and the callback, which runs inside it.
+  [[nodiscard]] bool hdrScene() const noexcept { return postEnabled_ && post_.valid(); }
+  /// Whether the device can run post at all (float attachment, filter, blend, MSAA).
+  [[nodiscard]] bool postAvailable() const noexcept { return post_.valid(); }
+  /// Counters of the frame slot's last post pass, for tests.
+  [[nodiscard]] PostStats postStats(std::uint32_t frame) const {
+    return post_.valid() ? post_.stats(frame) : PostStats{};
+  }
+  /// Why post is unavailable, empty when it is available. Reported once by the caller.
+  [[nodiscard]] const std::string& postUnavailable() const noexcept {
+    return postUnavailable_;
+  }
+
   [[nodiscard]] const BoardOptions& options() const noexcept { return options_; }
   void setOptions(const BoardOptions& o) noexcept { options_ = o; }
 
@@ -332,6 +359,10 @@ class BoardRenderer {
   view::Theme theme_{view::Theme::manifold()};
   BoardOptions options_{};
   double visualTime_{0};
+  bool postEnabled_{false};
+  float bloomScale_{1.0f};
+  PostProcess post_;
+  std::string postUnavailable_;
   MeshLibrary meshes_;
   /// Which custom slot each piece type of the synced variant draws from (-1 for none),
   /// and the signature of the bodies that built them.
@@ -348,12 +379,17 @@ class BoardRenderer {
   /// The same shaders and vertex input as `pipeline_`, with alpha blending and no depth
   /// writes - the geometry view's ghost board (M17.10). The opaque path is unchanged.
   VkPipeline surfaceBlendPipeline_{VK_NULL_HANDLE};
+  /// The same two pipelines, built for the float scene attachment (ADR-0025). Null when
+  /// the device cannot run post.
+  VkPipeline hdrPipeline_{VK_NULL_HANDLE};
+  VkPipeline hdrBlendPipeline_{VK_NULL_HANDLE};
 
   // The lit ground the board stands on, drawn first across the whole frame.
   VkShaderModule backdropVert_{VK_NULL_HANDLE};
   VkShaderModule backdropFrag_{VK_NULL_HANDLE};
   VkPipelineLayout backdropLayout_{VK_NULL_HANDLE};
   VkPipeline backdropPipeline_{VK_NULL_HANDLE};
+  VkPipeline hdrBackdropPipeline_{VK_NULL_HANDLE};
 
   // The defocus pass. One pipeline, one sampler, and two descriptor sets that ping-pong
   // between the target's two colour images.

@@ -56,6 +56,8 @@ enum class PanelStyle : std::uint8_t { Plate, Brackets };
 /// Being a struct rather than constants means a variant, or eventually a Workshop
 /// package, can carry its own without anyone touching the renderer.
 struct Theme {
+  float bloomStrength{0.0f};
+  float grainAmount{0.6f};
   Materials materials{Material::Wood, Material::Wood, Material::Wood};
   Backdrop backdrop{Backdrop::Confetti};
   PanelStyle panelStyle{PanelStyle::Plate};
@@ -162,6 +164,8 @@ struct Theme {
   /// A dark, cool glass alternative to the default wooden set.
   [[nodiscard]] static Theme manifold() {
     Theme t;
+    t.bloomStrength = 0.06f;
+    t.grainAmount = 1.0f;
     t.materials = Materials{Material::Led, Material::Hologram, Material::Glass};
     t.backdrop = Backdrop::Grid;
     t.panelStyle = PanelStyle::Brackets;

@@ -8,7 +8,7 @@ foreach(style wood matte)
     set(flags)
   endif()
   execute_process(COMMAND "${GUI}" standard --width 640 --height 360
-                          --shot "${out}" ${flags}
+                          --shot "${out}" --post 0 ${flags}
                   WORKING_DIRECTORY "${WORKDIR}" RESULT_VARIABLE rc
                   OUTPUT_QUIET ERROR_VARIABLE err)
   if(NOT rc EQUAL 0)

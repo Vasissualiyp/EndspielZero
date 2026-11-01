@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <cmath>
 #include <string>
 
 #include "app/debug_console.hpp"
@@ -83,4 +84,28 @@ TEST_CASE("console position edits invalidate presentation on the same session",
   CHECK_FALSE(has(console.run(*shell, "remove a2"), "error"));
   CHECK(shell->session() == session);
   CHECK(session->presentationEpoch() != epoch);
+}
+
+TEST_CASE("post processing settings and aliases work before a game starts",
+          "[unit][app][post]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(shell->settings().postProcess);
+  CHECK(shell->settings().bloomScale == 1);
+  CHECK(c.run(*shell, "post off") == "post processing: off");
+  CHECK_FALSE(shell->settings().postProcess);
+  CHECK(c.run(*shell, "post") == "post processing: on");
+  CHECK(c.run(*shell, "post on") == "post processing: on");
+  CHECK(c.run(*shell, "get postProcess") == "post_process = true");
+  CHECK(c.run(*shell, "set bloomScale 0.5") == "bloomScale is now 0.5");
+  CHECK(shell->settings().bloomScale == .5f);
+  CHECK(c.run(*shell, "get bloomScale") == "bloom_scale = 0.5");
+  CHECK(c.run(*shell, "post yes") == "usage: post [on|off]");
+  CHECK(c.run(*shell, "post off extra") == "usage: post [on|off]");
+  CHECK(shell->settings().postProcess);
+  CHECK(c.run(*shell, "set bloom_scale -1") == "bloom_scale is now -1");
+  CHECK(shell->settings().bloomScale == 0);
+  CHECK(c.run(*shell, "set bloomScale nan") == "bloomScale is now nan");
+  CHECK(std::isfinite(shell->settings().bloomScale));
+  CHECK(has(DebugConsole::help(), "post [on|off]"));
 }

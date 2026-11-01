@@ -49,9 +49,24 @@ std::string gThemeOverride;
 bool gMatteCapture = false;
 bool gDevOverlay = false;
 float gUiScaleOverride = -1.0f;
+/// --post 0|1 and --bloom <scale>: this run only, never saved. Negative means "use the
+/// setting".
+int gPostOverride = -1;
+float gBloomOverride = -1.0f;
 
 float resolveUiScale(const app::Settings& settings) {
   return gUiScaleOverride > 0.0f ? gUiScaleOverride : settings.guiScale;
+}
+
+/// Hand the renderer the effective post settings, and say once if the device cannot run it.
+void applyPost(render::BoardRenderer& renderer, const app::Settings& settings) {
+  const bool want = gPostOverride >= 0 ? gPostOverride == 1 : settings.postProcess;
+  renderer.setPost(want, gBloomOverride >= 0.0f ? gBloomOverride : settings.bloomScale);
+  static bool reported = false;
+  if (want && !renderer.postAvailable() && !reported) {
+    reported = true;
+    std::fprintf(stderr, "%s; continuing without it\n", renderer.postUnavailable().c_str());
+  }
 }
 
 view::Theme resolveTheme(const app::Settings& settings) {
@@ -866,8 +881,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     // pass, so the board is drawn over it rather than under it (M18 correction). Every
     // other screen leaves the field list empty and this is a no-op.
     const std::function<void(VkCommandBuffer)> drawBackground = [&](VkCommandBuffer cmd) {
-      (*ui)->recordBackground(cmd);
+      (*ui)->recordBackground(cmd, renderer->hdrScene());
     };
+    applyPost(*renderer, shell->settings());
     // The interface pass is always recorded now: in cinema it holds only the grade and
     // vignette, and outside cinema it is exactly the frame it always was.
     if (auto ok =
@@ -1195,6 +1211,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
       shell->session()->snapshot(), shell->session()->viewConfig(),
       &shell->session()->seams(), &shell->session()->animation(),
       [&](CellId c) { return shell->session()->boardVisible(c); });
+  applyPost(*renderer, shell->settings());
   (void)renderer->render(*target, instances, shell->session()->camera());
   auto pixels = target->readPixels();
   if (!pixels.has_value()) {
@@ -1314,6 +1331,8 @@ int main(int argc, char** argv) {
           "picker.\n"
           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
           "--dev forces the developer overlay on for this run (not saved).\n"
+          "--post 0|1 forces post-processing off or on and --bloom 0..4 scales its bloom,\n"
+          "for this run only (not saved).\n"
           "--theme console|manifold overrides the theme for this run; --matte disables "
           "materials.\n"
           "--ui-scale 0.6..3.0 overrides interface size for this run (not saved).\n"
@@ -1364,6 +1383,22 @@ int main(int argc, char** argv) {
       visualTimeGiven = true;
     } else if (arg == "--dev")
       gDevOverlay = true;
+    else if (arg == "--post" && i + 1 < argc) {
+      const std::string v = argv[++i];
+      if (v != "0" && v != "1") {
+        std::fprintf(stderr, "--post requires 0 or 1\n");
+        return 1;
+      }
+      gPostOverride = v == "1" ? 1 : 0;
+    } else if (arg == "--bloom" && i + 1 < argc) {
+      char* end = nullptr;
+      gBloomOverride = std::strtof(argv[++i], &end);
+      if (*end != '\0' || !std::isfinite(gBloomOverride) || gBloomOverride < 0.0f ||
+          gBloomOverride > 4.0f) {
+        std::fprintf(stderr, "--bloom requires a scale from 0 to 4\n");
+        return 1;
+      }
+    }
     else if (arg == "--matte")
       gMatteCapture = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
@@ -2229,7 +2264,7 @@ int main(int argc, char** argv) {
     // covers it (M18 correction); empty on every other screen.
     const auto background = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI
-      (*ui)->recordBackground(cmd);
+      (*ui)->recordBackground(cmd, renderer->hdrScene());
 #else
       (void)cmd;
 #endif
@@ -2239,6 +2274,7 @@ int main(int argc, char** argv) {
     // no offscreen image, no blit. Two frames may be in flight, so the previous frame can
     // still be on the GPU while this one is recorded. A frame that comes back invalid had
     // the swapchain rebuilt under it; skipping one frame is cheap and correct.
+    applyPost(*renderer, shell->settings());
     auto frame = window->beginFrame();
     if (!frame.has_value()) {
       std::fprintf(stderr, "begin frame failed: %s\n", frame.error().format().c_str());

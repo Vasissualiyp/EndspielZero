@@ -78,6 +78,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.fullscreen = asBool(value);
     else if (key == "dev_overlay")
       s.devOverlay = asBool(value);
+    else if (key == "post_process")
+      s.postProcess = asBool(value);
+    else if (key == "bloom_scale")
+      s.bloomScale = asFloat(value, s.bloomScale);
     else if (key == "vsync")
       s.vsync = asBool(value);
     else if (key == "frame_cap")
@@ -213,6 +217,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "gui_scale = " << guiScale << '\n';
   out << "fullscreen = " << boolText(fullscreen) << '\n';
   out << "dev_overlay = " << boolText(devOverlay) << '\n';
+  out << "post_process = " << boolText(postProcess) << '\n';
+  out << "bloom_scale = " << bloomScale << '\n';
   out << "vsync = " << boolText(vsync) << '\n';
   out << "frame_cap = " << frameCap << '\n';
   out << "show_legal_moves = " << boolText(showLegalMoves) << '\n';
@@ -277,6 +283,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
 }
 
 void Settings::sanitize() {
+  bloomScale = std::isfinite(bloomScale) ? std::clamp(bloomScale, 0.0f, 4.0f) : 1.0f;
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
   frameCap = std::clamp(frameCap, 0, 360);
   computerLevel = std::clamp(computerLevel, 1, 5);

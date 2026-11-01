@@ -24,6 +24,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `goto <screen>` | Switch to `menu`, `game`, `paused`, `settings`, `editor`, `newgame` or `welcome` |
 | `get [<setting>]` | Print all settings, or one |
 | `set <setting> <value>` | Change one setting. The value goes through the settings-file parser, so it accepts the same syntax as the file |
+| `post [on\|off]` | Turn post-processing (HDR scene, emissive bloom, tone map, grain/dither; ADR-0025) on or off; no argument toggles it. Default on; works without a loaded game. Also `get`/`set postProcess` or `post_process`, and `bloomScale` or `bloom_scale` (finite, clamped to 0..4, multiplies the theme's bloom; 0 skips the bloom passes) |
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
 | `fen` / `setfen <fen>` | Show or replace the position |
@@ -88,6 +89,9 @@ groups:
 - **Camera:** `--cinema`, `--follow <mode>` and `--shape-follow chase|turntable`.
 - **Look:**
   - `--dev` forces developer presentation on for this run without saving it.
+  - `--post 0|1` forces post-processing off or on and `--bloom <0..4>` scales its bloom, for
+    this run only. Use `--post 0` for A/B captures and as the recovery path if the device
+    cannot run post (it is reported once on stderr and the legacy path is used).
   - `--theme <name>` picks the palette.
   - `--matte` turns materials off.
   - `--ui-scale N` sets the interface scale.

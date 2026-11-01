@@ -125,6 +125,8 @@ float panelInterference(vec2 uv, uint seed, float seconds) {
 const float kBreathBound = 0.05;     // per-cell emission breathing, +-
 const float kSweepBound = 0.06;      // refresh sweep, +
 const float kGlitchSlot = 1.5;       // 120 / 1.5 is whole: no event straddles the wrap
+const float kEmitterHdrGain = 1.30;  // HDR emitter centre vs the LDR one
+const float kEmitterHdrCap = 2.00;   // ... and the most any channel may reach there
 const float kRowShiftMax = 0.30;     // emitter pitches
 const float kChannelShiftMax = 0.35; // emitter pitches
 const float kDropoutFloor = 0.15;    // brightness during a dropout
@@ -306,7 +308,15 @@ void main() {
         float radial = 1.0 - smoothstep(0.0, 0.42, length(fract(pitch) - vec2(0.5)));
         radial = mix(radial, 0.45, undersampled);
         float gapLevel = mix(0.82, 0.16, emitAmt);
-        float emitterLevel = mix(1.04, 1.00 + 4.60 * radial, emitAmt);
+        // HDR scene (push.visual.w): the centre's gain is raised, but capped so the
+        // brightest channel peaks near kEmitterHdrCap whatever the cell colour; only
+        // the emitter dots then exceed the bloom threshold, never a whole square.
+        float peak = 4.60;
+        if (push.visual.w > 0.5) {
+            float brightest = max(max(cellCol.r, cellCol.g), max(cellCol.b, 0.05));
+            peak = min(4.60 * kEmitterHdrGain, max(kEmitterHdrCap / brightest - 1.0, 0.0));
+        }
+        float emitterLevel = mix(1.04, 1.00 + peak * radial, emitAmt);
         vec3 level = mix(vec3(gapLevel), vec3(emitterLevel), mask);
         // The restrained glow: emitters lift their own face a little, falling off to the
         // border. An in-shader approximation; no extra pass and no screen-wide bloom.

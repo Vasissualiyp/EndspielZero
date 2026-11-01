@@ -229,6 +229,15 @@ Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx,
   r.ctx_ = &ctx;
   r.colorFormat_ = colorFormat;
   r.meshes_ = MeshLibrary::build();
+  if (PostProcess::supported(ctx)) {
+    auto post = PostProcess::create(ctx, colorFormat);
+    if (!post.has_value()) return fail(post.error().code, post.error().message);
+    r.post_ = std::move(*post);
+  } else {
+    r.postUnavailable_ =
+        "post-processing unavailable: the device cannot filter, blend and multisample "
+        "16-bit float colour";
+  }
   if (auto ok = r.buildPipeline(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
   if (auto ok = r.buildBlurPipeline(); !ok.has_value())
@@ -398,6 +407,22 @@ Result<void> BoardRenderer::buildPipeline() {
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal,
                 "cannot create the ghost board pipeline: " + describe(r));
+  }
+  if (!post_.valid()) return {};
+  // The float scene attachment's variants (ADR-0025): identical state, other format.
+  const VkFormat hdrFormat = PostProcess::kSceneFormat;
+  rendering.pColorAttachmentFormats = &hdrFormat;
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
+                                                   nullptr, &hdrPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal,
+                "cannot create the HDR graphics pipeline: " + describe(r));
+  }
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpiOn,
+                                                   nullptr, &hdrBlendPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal,
+                "cannot create the HDR ghost board pipeline: " + describe(r));
   }
   return {};
 }
@@ -674,6 +699,15 @@ Result<void> BoardRenderer::buildBackdropPipeline() {
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal,
                 "cannot create the backdrop pipeline: " + describe(r));
+  }
+  if (!post_.valid()) return {};
+  const VkFormat hdrFormat = PostProcess::kSceneFormat;
+  rendering.pColorAttachmentFormats = &hdrFormat;
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
+                                                   nullptr, &hdrBackdropPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal,
+                "cannot create the HDR backdrop pipeline: " + describe(r));
   }
   return {};
 }
@@ -2161,6 +2195,19 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
 
   if (auto r = bindBlurTarget(target, frame); !r.has_value()) return r;
 
+  // The effective scene format for this whole recording (ADR-0025): requested and
+  // supported. The background callback reads the same answer through `hdrScene()`.
+  const bool hdr = hdrScene();
+  const float bloomStrength = hdr ? theme_.bloomStrength * bloomScale_ : 0.0f;
+  if (hdr) {
+    if (auto r = post_.prepare(target.width(), target.height(), frame, bloomStrength > 0);
+        !r.has_value())
+      return r;
+  }
+  const VkPipeline scenePipeline = hdr ? hdrPipeline_ : pipeline_;
+  const VkPipeline blendPipeline = hdr ? hdrBlendPipeline_ : surfaceBlendPipeline_;
+  const VkPipeline backdropPipeline = hdr ? hdrBackdropPipeline_ : backdropPipeline_;
+
   const BoardRect board = boardRect.valid()
                               ? boardRect
                               : BoardRect{0, 0, static_cast<float>(target.width()),
@@ -2179,6 +2226,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   // The one shared presentation intensity (M23.9 F) and the glitch schedule's modulus.
   push.visual[1] = std::clamp(options_.presentationIntensity, 0.0f, 1.0f);
   push.visual[2] = glitchModulus(set.panelCells);
+  // Selects the HDR emission gain in board.frag; the legacy path keeps its own look.
+  push.visual[3] = hdr ? 1.0f : 0.0f;
 
   // The light the board spills into the room (M23.9 B): centred on where the board
   // actually lands on screen. Only the LED theme has an emitting board; other themes keep
@@ -2230,12 +2279,16 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
 
     // The resolved colour is an attachment too - the multisample resolve writes it - so
     // it needs the layout transition whether or not MSAA is on.
-    barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+    // With post the scene resolves into the float image instead; the target's own colour
+    // image is first written by the composite pass.
+    const VkImage resolveImage = hdr ? post_.sceneImage(frame) : target.colorImage();
+    const VkImage msaaImage = hdr ? post_.msaaImage(frame) : target.msaaColorImage();
+    barrier(resolveImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
             0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     if (OffscreenTarget::msaaEnabled()) {
-      barrier(target.msaaColorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+      barrier(msaaImage, VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
               VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -2248,7 +2301,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
 
     VkRenderingAttachmentInfo color{};
     color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    color.imageView = target.msaaColorView();
+    color.imageView = hdr ? post_.msaaView(frame) : target.msaaColorView();
     color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -2257,7 +2310,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       // Resolve the multisampled attachment into the one-sample image the blur and
       // readPixels expect, at the end of this pass.
       color.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
-      color.resolveImageView = target.colorView();
+      color.resolveImageView = hdr ? post_.sceneView(frame) : target.colorView();
       color.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
@@ -2289,7 +2342,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     const VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
 
     vkCmdBeginRendering(cmd, &ri);
-    if (glow.valid && backdropPipeline_ != VK_NULL_HANDLE) {
+    if (glow.valid && backdropPipeline != VK_NULL_HANDLE) {
       vkCmdSetViewport(cmd, 0, 1, &full);
       vkCmdSetScissor(cmd, 0, 1, &fullScissor);
       BackdropPush bp{};
@@ -2306,6 +2359,9 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       bp.board[1] = glow.hy;
       bp.board[2] = 0.45f;
       bp.board[3] = push.visual[1];
+      // The corner falloff moves into the composite when post is on, so it is applied once
+      // and reaches the board's geometry too.
+      if (hdr) bp.params[3] = 0.0f;
       view::Vec3 f, r, u;
       camera.basis(f, r, u);
       bp.right[0] = r.x;
@@ -2326,7 +2382,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       bp.map[1] = -2.0f * board.x / board.width - 1.0f;
       bp.map[2] = 2.0f * th / board.height;
       bp.map[3] = -2.0f * board.y / board.height - 1.0f;
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, backdropPipeline_);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, backdropPipeline);
       vkCmdPushConstants(cmd, backdropLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                          sizeof(BackdropPush), &bp);
       vkCmdDraw(cmd, 3, 1, 0, 0);
@@ -2355,7 +2411,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     const bool cylinderPieces = options_.shapePieceCylinders && options_.surface &&
                                 !options_.flat && !set.surfaceIndices.empty();
     if (!set.instances.empty()) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, scenePipeline);
       vkCmdPushConstants(cmd, layout_,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                          sizeof(PushConstants), &push);
@@ -2397,7 +2453,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       if (!set.surfaceIndices.empty()) {
         vkCmdBindPipeline(
             cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            surfaceOpacity(theme_, options_) < 0.99f ? surfaceBlendPipeline_ : pipeline_);
+            surfaceOpacity(theme_, options_) < 0.99f ? blendPipeline : scenePipeline);
         vkCmdBindVertexBuffers(cmd, 0, 1, &surfaceVertexBuffer_[frame], &zero);
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
@@ -2408,7 +2464,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // against the board but writing no depth, so an edge behind the patches is hidden and
     // one in front lays over them. Drawn before the shadows, which belong under pieces.
     if (!set.scaffold.empty()) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, surfaceBlendPipeline_);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blendPipeline);
       vkCmdPushConstants(cmd, layout_,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                          sizeof(PushConstants), &push);
@@ -2429,7 +2485,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // occupied cell. Depth writes are off but the test stays on, so a piece in front of a
     // shadow still hides it. Drawn before the flourish, which belongs on top.
     if (!set.shadows.empty()) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, surfaceBlendPipeline_);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blendPipeline);
       vkCmdPushConstants(cmd, layout_,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                          sizeof(PushConstants), &push);
@@ -2450,7 +2506,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // ride the opaque per-shape batches above. Depth writes are off but the test stays
     // on, so a fading piece is still hidden by whatever is in front of it.
     if (!set.flourish.empty()) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, surfaceBlendPipeline_);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blendPipeline);
       vkCmdPushConstants(cmd, layout_,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                          sizeof(PushConstants), &push);
@@ -2485,6 +2541,12 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       }
     }
     vkCmdEndRendering(cmd);
+
+    // Bloom, tone map, vignette and grain: the float scene becomes the target's colour,
+    // left as an attachment exactly as the legacy resolve leaves it.
+    if (hdr) {
+      post_.record(cmd, target, theme_, bloomStrength, push.visual[1], visualTime_, frame);
+    }
 
     // Defocus, in two separable passes that ping-pong between the target's two colour
     // images and therefore leave the result back in the first one. Skipped entirely when
@@ -2618,6 +2680,13 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(layout_, o.layout_);
   std::swap(pipeline_, o.pipeline_);
   std::swap(surfaceBlendPipeline_, o.surfaceBlendPipeline_);
+  std::swap(hdrPipeline_, o.hdrPipeline_);
+  std::swap(hdrBlendPipeline_, o.hdrBlendPipeline_);
+  std::swap(hdrBackdropPipeline_, o.hdrBackdropPipeline_);
+  std::swap(postEnabled_, o.postEnabled_);
+  std::swap(bloomScale_, o.bloomScale_);
+  std::swap(post_, o.post_);
+  std::swap(postUnavailable_, o.postUnavailable_);
   std::swap(blurVert_, o.blurVert_);
   std::swap(blurFrag_, o.blurFrag_);
   std::swap(blurLayout_, o.blurLayout_);
@@ -2655,6 +2724,8 @@ BoardRenderer::~BoardRenderer() {
   if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(d, pipeline_, nullptr);
   if (surfaceBlendPipeline_ != VK_NULL_HANDLE)
     vkDestroyPipeline(d, surfaceBlendPipeline_, nullptr);
+  for (VkPipeline hp : {hdrPipeline_, hdrBlendPipeline_, hdrBackdropPipeline_})
+    if (hp != VK_NULL_HANDLE) vkDestroyPipeline(d, hp, nullptr);
   if (layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, layout_, nullptr);
   if (backdropPipeline_ != VK_NULL_HANDLE)
     vkDestroyPipeline(d, backdropPipeline_, nullptr);

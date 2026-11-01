@@ -98,12 +98,13 @@ std::string execute(Shell& shell, const std::string& line) {
 
   if (cmd == "help" || cmd == "?") return DebugConsole::help();
 
-  if (cmd == "dev") {
+  if (cmd == "dev" || cmd == "post") {
     if (w.size() > 2 || (w.size() == 2 && w[1] != "on" && w[1] != "off"))
-      return "usage: dev [on|off]";
-    shell.settings().devOverlay =
-        w.size() == 1 ? !shell.settings().devOverlay : w[1] == "on";
-    return shell.settings().devOverlay ? "dev overlay: on" : "dev overlay: off";
+      return "usage: " + cmd + " [on|off]";
+    bool& enabled = cmd == "dev" ? shell.settings().devOverlay : shell.settings().postProcess;
+    enabled = w.size() == 1 ? !enabled : w[1] == "on";
+    const std::string label = cmd == "dev" ? "dev overlay: " : "post processing: ";
+    return label + (enabled ? "on" : "off");
   }
 
   if (cmd == "load") {
@@ -128,9 +129,10 @@ std::string execute(Shell& shell, const std::string& line) {
   }
   if (cmd == "get" || cmd == "set") {
     const std::string text = settingsText(shell.settings());
-    const std::string key = w.size() > 1 && w[1] == "devOverlay" ? "dev_overlay"
-                            : w.size() > 1                       ? w[1]
-                                                                 : std::string{};
+    std::string key = w.size() > 1 ? w[1] : std::string{};
+    if (key == "devOverlay") key = "dev_overlay";
+    if (key == "postProcess") key = "post_process";
+    if (key == "bloomScale") key = "bloom_scale";
     if (cmd == "get") {
       if (w.size() < 2) return text;
       std::istringstream in(text);
@@ -332,6 +334,7 @@ std::string DebugConsole::help() {
          "goto <screen>            menu game paused settings editor newgame welcome\n"
          "get [<setting>]          show settings; set <setting> <value> changes one\n"
          "dev [on|off]             developer overlay; no argument toggles it\n"
+         "post [on|off]            post processing; no argument toggles it\n"
          "info                     variant summary: pieces, moves, marks, compounds\n"
          "fen | setfen <fen>       show or replace the position\n"
          "place <cell> <symbol>    put a piece (Q white, q black); remove <cell>; side "

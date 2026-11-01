@@ -195,7 +195,11 @@ class Ui {
   /// board's draws, so it is painted behind the board rather than over it (M18
   /// correction). A no-op when the current screen has no field - every screen but the
   /// board.
-  void recordBackground(VkCommandBuffer cmd);
+  ///
+  /// `hdr` selects the field pipeline matching the scene attachment: the float one when
+  /// the board draws through post-processing (`BoardRenderer::hdrScene`), else the
+  /// target's own format. Binding the wrong one inside the pass is a validation error.
+  void recordBackground(VkCommandBuffer cmd, bool hdr = false);
 
  private:
   Ui() = default;
@@ -216,7 +220,7 @@ class Ui {
   void resetBoardFieldList();
   /// Wrap a standalone draw list in a minimal ImDrawData and submit it with the field's
   /// multisample-matched pipeline.
-  void recordDrawList(VkCommandBuffer cmd, ImDrawList* list);
+  void recordDrawList(VkCommandBuffer cmd, ImDrawList* list, VkPipeline pipeline);
 
   /// The debug window (F12 or backtick): scrollback and a command line, nothing pretty.
   void drawDebugConsole(app::Shell& shell);
@@ -490,6 +494,8 @@ class Ui {
   VkDescriptorSetLayout boardFieldSetLayout_{VK_NULL_HANDLE};
   VkPipelineLayout boardFieldLayout_{VK_NULL_HANDLE};
   VkPipeline boardFieldPipeline_{VK_NULL_HANDLE};
+  /// The same pipeline for the float scene attachment; null when post is unsupported.
+  VkPipeline boardFieldHdrPipeline_{VK_NULL_HANDLE};
   /// Which variant the new-game screen is showing details for.
   std::string pickedVariant_;
   /// That variant's own one-line description, and the name it was read for, so the file

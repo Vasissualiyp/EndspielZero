@@ -19,6 +19,7 @@ endif()
 # compiled at runtime and nothing has to be found on disk next to the binary.
 set(CB_SPV_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders.hpp)
 set(CB_SHADERS board.vert board.frag backdrop.vert backdrop.frag blur.vert blur.frag
+               post_down.frag post_up.frag post_composite.frag
                imgui_field.vert imgui_field.frag)
 set(CB_SPV_FILES "")
 foreach(shader IN LISTS CB_SHADERS)
@@ -44,6 +45,7 @@ add_custom_command(OUTPUT ${CB_SPV_HEADER}
 set(CB_RENDER_SOURCES
   vulkan_context.cpp offscreen_target.cpp board_renderer.cpp image_io.cpp
   piece_mesh.cpp piece_icon.cpp panel_response.cpp panel_alive.cpp board_glow.cpp
+  post_params.cpp post_process.cpp
   ${CB_SPV_HEADER})
 
 # SDL3 supplies the window and the surface; Dear ImGui supplies the panels. Without

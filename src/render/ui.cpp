@@ -19,6 +19,7 @@
 #include "pieces/atom.hpp"
 #include "render/deco.hpp"
 #include "render/offscreen_target.hpp"
+#include "render/post_process.hpp"
 #include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
@@ -508,6 +509,15 @@ Result<void> Ui::buildBoardFieldPipeline(VkFormat colorFormat) {
                                                    &gpi, nullptr, &boardFieldPipeline_);
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal, "cannot create the field pipeline: " + describe(r));
+  }
+  if (!PostProcess::supported(*ctx_)) return {};
+  const VkFormat hdrFormat = PostProcess::kSceneFormat;
+  rendering.pColorAttachmentFormats = &hdrFormat;
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
+                                                   nullptr, &boardFieldHdrPipeline_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal,
+                "cannot create the HDR field pipeline: " + describe(r));
   }
   return {};
 }
@@ -2378,7 +2388,7 @@ void Ui::resetBoardFieldList() {
   boardFieldList_->PushTextureID(ImGui::GetIO().Fonts->TexID);
 }
 
-void Ui::recordDrawList(VkCommandBuffer cmd, ImDrawList* list) {
+void Ui::recordDrawList(VkCommandBuffer cmd, ImDrawList* list, VkPipeline pipeline) {
   if (list == nullptr || list->VtxBuffer.Size == 0) return;
   // A minimal ImDrawData around the one list. The projection comes from the frame that
   // was just rendered, so the field's screen coordinates match the interface's.
@@ -2396,11 +2406,13 @@ void Ui::recordDrawList(VkCommandBuffer cmd, ImDrawList* list) {
     data.FramebufferScale = io.DisplayFramebufferScale;
   }
   data.AddDrawList(list);
-  ImGui_ImplVulkan_RenderDrawData(&data, cmd, boardFieldPipeline_);
+  ImGui_ImplVulkan_RenderDrawData(&data, cmd, pipeline);
 }
 
-void Ui::recordBackground(VkCommandBuffer cmd) {
-  recordDrawList(cmd, boardFieldList_.get());
+void Ui::recordBackground(VkCommandBuffer cmd, bool hdr) {
+  recordDrawList(cmd, boardFieldList_.get(),
+                 hdr && boardFieldHdrPipeline_ != VK_NULL_HANDLE ? boardFieldHdrPipeline_
+                                                                 : boardFieldPipeline_);
 }
 
 Ui::~Ui() {
@@ -2414,6 +2426,8 @@ Ui::~Ui() {
   if (device != VK_NULL_HANDLE) {
     if (boardFieldPipeline_ != VK_NULL_HANDLE)
       vkDestroyPipeline(device, boardFieldPipeline_, nullptr);
+    if (boardFieldHdrPipeline_ != VK_NULL_HANDLE)
+      vkDestroyPipeline(device, boardFieldHdrPipeline_, nullptr);
     if (boardFieldLayout_ != VK_NULL_HANDLE)
       vkDestroyPipelineLayout(device, boardFieldLayout_, nullptr);
     if (boardFieldSetLayout_ != VK_NULL_HANDLE)
