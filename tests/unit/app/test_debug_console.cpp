@@ -125,3 +125,32 @@ TEST_CASE("the console replays the board boot and help lists it", "[unit][app][b
   console.run(*shell, "reset");
   CHECK(shell->session()->bootSerial() == before + 2);
 }
+
+TEST_CASE("the console previews the check ripple and the end effect without moving",
+          "[unit][app][fx]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  CHECK(has(DebugConsole::help(), "ripple"));
+  CHECK(has(DebugConsole::help(), "endfx"));
+  CHECK(console.run(*shell, "load standard") == "started standard");
+  Session& s = *shell->session();
+  const std::uint64_t checks = s.checkSerial();
+  CHECK(has(console.run(*shell, "ripple"), "rippling from e1"));
+  CHECK(s.checkSerial() == checks + 1);
+  CHECK(*s.checkEvent() == s.game().position().findRoyal(Color::White));
+  CHECK(has(console.run(*shell, "ripple d4"), "d4"));
+  CHECK(s.checkSerial() == checks + 2);
+  CHECK(has(console.run(*shell, "ripple zz9"), "zz9"));
+  CHECK(s.checkSerial() == checks + 2);
+  CHECK(s.game().plyCount() == 0);
+  CHECK(has(console.run(*shell, "endfx win black"), "black"));
+  REQUIRE(s.endEvent().has_value());
+  CHECK(s.endEvent()->loser == Color::Black);
+  CHECK(s.endEvent()->origin == s.game().position().findRoyal(Color::Black));
+  CHECK(has(console.run(*shell, "endfx draw"), "draw"));
+  CHECK(s.endEvent()->kind == view::EndKind::Draw);
+  CHECK(has(console.run(*shell, "endfx off"), "cleared"));
+  CHECK_FALSE(s.endEvent().has_value());
+  CHECK(has(console.run(*shell, "endfx sideways"), "usage"));
+  CHECK(s.game().plyCount() == 0);
+}

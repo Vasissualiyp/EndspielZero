@@ -164,6 +164,9 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
                                  # run-only; console `post [on|off]` and `set bloomScale 0..4` persist
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --boot-t 0.7 --shot boot.ppm
                                  # the board mid power-on (0..1.8 s); console `boot` replays it live
+./build/dev/src/gui/endspielzero_gui standard --theme manifold --script "$MATE" --end-t 0.7 --shot e.ppm
+                                 # the game-end power-down 0.7 s in (console `endfx win|draw|off`);
+                                 # --check-t <s> likewise for the check ripple (console `ripple`)
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --visual-time 0.75 --shot holo.ppm
                                  # explicit presentation seconds for hologram capture
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --matte          # material-free A/B capture

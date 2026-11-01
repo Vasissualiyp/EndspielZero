@@ -58,6 +58,10 @@ float gBloomOverride = -1.0f;
 /// --boot-t <s>: render the board as if the boot sequence were `s` seconds old. Negative
 /// means no override. Captures only; they never run a clock of their own.
 float gBootT = -1.0f;
+/// --check-t / --end-t <s>: render the check ripple, or the game-end power-down, at that
+/// age for the session's current check / ended game. Negative means no override.
+float gCheckT = -1.0f;
+float gEndT = -1.0f;
 
 float resolveUiScale(const app::Settings& settings) {
   return gUiScaleOverride > 0.0f ? gUiScaleOverride : settings.guiScale;
@@ -74,15 +78,35 @@ void applyPost(render::BoardRenderer& renderer, const app::Settings& settings) {
   }
 }
 
+void setFxTint(render::BoardFxState& fx, const render::BoardRenderer& renderer) {
+  const view::Rgba blood = renderer.theme().blood;
+  fx.tint[0] = blood.r;
+  fx.tint[1] = blood.g;
+  fx.tint[2] = blood.b;
+}
+
 /// The effects a capture asks for through --boot-t, in the renderer's own terms.
 render::BoardFxState captureFx(const render::BoardRenderer& renderer,
                                const app::Shell& shell) {
   render::BoardFxState fx;
   if (gBootT >= 0.0f) fx.bootAge = gBootT;
+  const app::Session& session = *shell.session();
+  if (gCheckT >= 0.0f) {
+    // The ripple of the last check; a position that never gave one ripples from the
+    // royal of the side to move, so any board can be reviewed.
+    fx.rippleAge = gCheckT;
+    fx.rippleOrigin = session.checkEvent().value_or(
+        session.game().position().findRoyal(session.game().position().sideToMove()));
+  }
+  if (gEndT >= 0.0f && session.endEvent()) {
+    fx.endAge = gEndT;
+    fx.end = *session.endEvent();
+  }
   // The trailer's first board powers on on the trailer's own clock.
   if (shell.attracting()) fx.bootAge = shell.trailerBootAge();
   fx.intensity = renderer.options().presentationIntensity;
   fx.ledCells = renderer.theme().materials.cells == view::Material::Led;
+  setFxTint(fx, renderer);
   return fx;
 }
 
@@ -1425,6 +1449,14 @@ int main(int argc, char** argv) {
         return 1;
       }
     } else if (arg == "--matte")
+    } else if ((arg == "--check-t" || arg == "--end-t") && i + 1 < argc) {
+      char* end = nullptr;
+      float& target = arg == "--check-t" ? gCheckT : gEndT;
+      target = std::strtof(argv[++i], &end);
+      if (*end != '\0' || !std::isfinite(target) || target < 0.0f) {
+        std::fprintf(stderr, "%s requires seconds >= 0\n", arg.c_str());
+        return 1;
+      }
       gMatteCapture = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
       gUiScaleOverride = std::strtof(argv[++i], nullptr);
@@ -2295,6 +2327,19 @@ int main(int argc, char** argv) {
       fx.intensity = renderer->options().presentationIntensity;
       fx.ledCells = renderer->theme().materials.cells == view::Material::Led;
       render::applyBoardFx(instances, *shell->session(), fx);
+      setFxTint(fx, *renderer);
+      if (const auto r = fxTimeline.ripple(visualSeconds)) {
+        fx.rippleAge = r->age;
+        fx.rippleOrigin = r->origin;
+      }
+      if (const auto over = fxTimeline.end(visualSeconds)) {
+        fx.endAge = over->age;
+        fx.end = over->fx;
+      }
+      if (const auto u = fxTimeline.powerUp(visualSeconds)) {
+        fx.powerUpAge = u->age;
+        fx.end = u->fx;
+      }
       camera = boardCamera(*shell, shapeSeq);
     }
 

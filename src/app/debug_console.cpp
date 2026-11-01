@@ -213,6 +213,36 @@ std::string execute(Shell& shell, const std::string& line) {
     return "booting the board";
   }
   if (cmd == "undo" || cmd == "reset") {
+  if (cmd == "ripple") {
+    // The check ripple from a cell (default: the side to move's royal), game untouched.
+    CellId from = pos.findRoyal(pos.sideToMove());
+    if (w.size() > 1) {
+      const auto cell = parseCell(v.dims, w[1]);
+      if (!cell.has_value()) return cell.error().format();
+      from = *cell;
+    }
+    if (from == kInvalidCell) return "no royal piece to ripple from; give a cell";
+    session->requestRipple(from);
+    return "rippling from " + cellText(v, from);
+  }
+  if (cmd == "endfx") {
+    // Preview the game-end power-down (or clear it) without changing the game.
+    if (w.size() < 2) return "usage: endfx win|draw|off [white|black]";
+    if (w[1] == "off") {
+      session->requestEndFx(std::nullopt);
+      return "end effect cleared";
+    }
+    if (w[1] != "win" && w[1] != "draw") return "usage: endfx win|draw|off [white|black]";
+    view::EndFx fx;
+    fx.kind = w[1] == "draw" ? view::EndKind::Draw : view::EndKind::Decisive;
+    fx.loser = w.size() > 2 && (w[2] == "black" || w[2] == "b") ? Color::Black : Color::White;
+    fx.origin = pos.findRoyal(fx.loser);
+    if (fx.origin == kInvalidCell) fx.origin = 0;
+    fx.mated = fx.kind == view::EndKind::Decisive && pos.findRoyal(fx.loser) != kInvalidCell;
+    session->requestEndFx(fx);
+    return std::string("previewing ") + (w[1] == "draw" ? "a draw" : "a win over ") +
+           (w[1] == "draw" ? "" : (fx.loser == Color::White ? "white" : "black"));
+  }
     Action a;
     a.kind = cmd == "undo" ? ActionKind::Undo : ActionKind::Reset;
     const auto ok = session->apply(a);
@@ -341,6 +371,8 @@ std::string DebugConsole::help() {
          "post [on|off]            post processing; no argument toggles it\n"
          "boot                     replay the board's power-on sequence\n"
          "info                     variant summary: pieces, moves, marks, compounds\n"
+         "ripple [<cell>]          play the check ripple from a cell (default: the royal)\n"
+         "endfx win|draw|off [<side>]  preview the game-end power-down; off clears it\n"
          "fen | setfen <fen>       show or replace the position\n"
          "place <cell> <symbol>    put a piece (Q white, q black); remove <cell>; side "
          "w|b\n"

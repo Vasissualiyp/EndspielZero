@@ -12,6 +12,7 @@
 #include "io/game_file.hpp"
 #include "io/notation.hpp"
 #include "view/board_boot.hpp"
+#include "view/cell_distances.hpp"
 
 namespace cb::app {
 namespace {
@@ -515,6 +516,74 @@ void Session::refreshSnapshot() {
   }
   snapshot_.setHighlighted(std::move(targets));
   refreshHints();
+  trackEvents();
+}
+
+void Session::trackEvents() {
+  if (!eventsPrimed_) endDecided_ = false;  // a (re)load is a baseline, not an event
+  const std::size_t ply = game_->plyCount();
+  const bool moved = eventsPrimed_ && ply > lastPly_;
+  const bool changed = !eventsPrimed_ || ply != lastPly_ || endEventDirty_;
+  lastPly_ = ply;
+  if (!changed) return;
+  endEventDirty_ = false;
+  // A move that gives check; undo, a load and a stay-in-check never do.
+  if (moved && game_->inCheck()) {
+    const CellId king = game_->position().findRoyal(game_->position().sideToMove());
+    if (king != kInvalidCell) {
+      checkEvent_ = king;
+      ++checkSerial_;
+    }
+  }
+  const GameResult r = game_->result();
+  const bool decided = r != GameResult::InProgress;
+  if (decided && !endDecided_ && eventsPrimed_) {
+    view::EndFx fx;
+    if (r == GameResult::Draw) {
+      fx.kind = view::EndKind::Draw;
+      fx.origin = game_->position().findRoyal(game_->position().sideToMove());
+      fx.loser = game_->position().sideToMove();
+    } else {
+      fx.loser = r == GameResult::WhiteWins ? Color::Black : Color::White;
+      fx.origin = game_->position().findRoyal(fx.loser);
+      fx.mated = game_->endReason() == EndReason::Checkmate && fx.origin != kInvalidCell;
+      if (fx.origin == kInvalidCell) {
+        // No royal: the loser's last-moved piece that still stands.
+        const auto& moves = game_->moveHistory();
+        for (auto it = moves.rbegin(); it != moves.rend() && fx.origin == kInvalidCell; ++it) {
+          const Piece p = snapshot_.at(it->to);
+          if (!p.empty() && p.colorOf() == fx.loser) fx.origin = it->to;
+        }
+        if (fx.origin == kInvalidCell) {
+          for (CellId c = 0; c < snapshot_.cellCount(); ++c) {
+            const Piece p = snapshot_.at(c);
+            if (!p.empty() && p.colorOf() == fx.loser) {
+              fx.origin = c;
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (fx.origin == kInvalidCell && snapshot_.cellCount() > 0) fx.origin = 0;
+    endEvent_ = fx;
+    ++endSerial_;
+  } else if (!decided && endDecided_) {
+    endEvent_.reset();
+    ++powerUpSerial_;
+  }
+  endDecided_ = decided;
+  eventsPrimed_ = true;
+}
+
+const std::vector<int>& Session::distancesFrom(CellId origin) const {
+  for (const auto& e : distanceCache_) {
+    if (e.first == origin) return e.second;
+  }
+  if (distanceCache_.size() >= 4) distanceCache_.erase(distanceCache_.begin());
+  const CellId src[] = {origin};
+  distanceCache_.emplace_back(origin, view::cellDistances(*variant_, src));
+  return distanceCache_.back().second;
 }
 
 bool Session::cancelSelection() {
@@ -709,6 +778,7 @@ Result<void> Session::apply(const Action& a) {
 
     case ActionKind::Resign:
       game_->resign(game_->position().sideToMove());
+      endEventDirty_ = true;
       selected_ = kInvalidCell;
       message_ = "resigned";
       refreshSnapshot();
@@ -716,6 +786,7 @@ Result<void> Session::apply(const Action& a) {
 
     case ActionKind::AgreeDraw:
       game_->agreeDraw();
+      endEventDirty_ = true;
       selected_ = kInvalidCell;
       message_ = "a draw was agreed";
       refreshSnapshot();
@@ -763,6 +834,9 @@ Result<void> Session::apply(const Action& a) {
       game_->reset();
       ++presentationEpoch_;
       ++bootSerial_;
+      // The board boots instead of powering up: the end is forgotten without an event.
+      endDecided_ = false;
+      endEvent_.reset();
       pending_ = PendingPromotion{};
       pendingMove_ = PendingMove{};
       selected_ = kInvalidCell;
@@ -847,6 +921,11 @@ Result<void> Session::loadFen(std::string_view fen) {
   game_->position() = std::move(*p);
   ++presentationEpoch_;
   selected_ = kInvalidCell;
+  eventsPrimed_ = false;  // the new position is the baseline for the next events
+  if (endEvent_) {
+    endEvent_.reset();
+    ++endSerial_;
+  }
   // A position entry replaces the game, so no move can still be in flight: a stale
   // animation would otherwise let the move camera keep shooting the old route.
   anim_.clear();

@@ -192,6 +192,14 @@ float emitterMask(vec2 pitch, vec2 footprint, float undersampled) {
     return mix(e.x * e.y, 0.72 * 0.72, undersampled);
 }
 
+// A 4x4 ordered-dither threshold in [0, 1), for the hologram's dissolve (M23.10 section 5).
+float bayer4(vec2 p) {
+    const float m[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,
+                                  3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+    ivec2 q = ivec2(p) & 3;
+    return (m[q.y * 4 + q.x] + 0.5) / 16.0;
+}
+
 void main() {
     int matId = int(fragMaterial);
     uint fxIndex = uint(fragFx.x);
@@ -244,6 +252,22 @@ void main() {
 
     if (matId == 4) {
         float height = clamp(fragHeight, 0.0, 1.0);
+        // After the game ends (M23.10 section 5) a hologram loses opacity: the opaque pass
+        // has no alpha, so its raster lines drop out instead - the way a failing
+        // projection fails - and what is left is dimmer. The scan jitters while it
+        // destabilises. The handoff ghost below is the same kind of partial projection.
+        const float opacity = isPiece ? fx.c.x : 1.0;
+        const float jitter = isPiece ? fx.c.y : 0.0;
+        float jitterStep = 0.0;
+        if (jitter > 0.0) {
+            jitterStep = panelUnit(panelHash(uint(floor(push.visual.x * 24.0)) ^ 0x51ed270bu)) - 0.5;
+            height = clamp(height + jitter * 0.03 * jitterStep, 0.0, 1.0);
+        }
+        if (opacity < 0.999) {
+            float raw = 0.5 + 0.5 * cos(height * 28.0 * 6.2831853);
+            float k = mix(raw, bayer4(gl_FragCoord.xy), smoothstep(0.25, 1.0, fwidth(height * 28.0)));
+            if (k < (1.0 - opacity) * 0.9) discard;
+        }
         vec3 viewDir = normalize(push.eyePos.xyz - fragWorld);
         vec3 coolKey = normalize(vec3(0.35, 0.6, 0.72));
         float face = max(dot(n, coolKey), 0.0);
@@ -252,7 +276,7 @@ void main() {
         float footprint = fwidth(lineCoord);
         float lines = 0.5 + 0.5 * cos(lineCoord * 6.2831853);
         lines = mix(lines, 0.5, smoothstep(0.25, 1.0, footprint));
-        float centre = 1.08 - 1.16 * fract(push.visual.x / 4.0);
+        float centre = 1.08 - 1.16 * fract(push.visual.x / 4.0) + jitter * 0.25 * jitterStep;
         float scan = 1.0 - smoothstep(0.0, 0.055, abs(height - centre));
         vec3 emission = mix(fragColor.rgb, push.material.rgb, 0.20);
         float luminance = dot(fragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -266,6 +290,7 @@ void main() {
         vec3 scanOnly = emission * (0.10 + 0.50 * lines * lines + 0.90 * scan) +
                         base * 0.10 * (0.5 + 0.5 * face);
         rgb = mix(rgb, scanOnly, ghost);
+        if (isPiece) rgb *= fx.c.z * mix(0.65, 1.0, opacity);
     }
 
     if (matId == 7) {
@@ -289,10 +314,27 @@ void main() {
         Glitch glitch = Glitch(false, 0.0, 0u, 0u);
         if (alive && intensity >= 0.5 && !cue && !quiet && undersampled < 0.5)
             glitch = panelGlitch(seed16, seconds, push.visual.z);
+        // A forced burst (the power-down's wave front, the power-up's sparkle) and the check
+        // ripple are driven by the effect record rather than the random schedule; the
+        // gameplay cues are exempt from both.
+        const float forced = (!isPiece && !cue && alive && undersampled < 0.5) ? fx.b.w : 0.0;
+        const float ripple = (!isPiece && !cue) ? fx.b.x : 0.0;
+        if (forced > 0.0) {
+            glitch.on = true;
+            glitch.u = 0.5;
+            glitch.kind = panelHash(seed16 ^ 0x2545f491u) % 3u;
+            glitch.lane = panelHash(seed16 ^ 0x6a09e667u);
+        }
         float rowIndex = floor(panelPitch.y);
         float glitchRow = float(glitch.lane % 22u) + 1.0;
-        float glitchWave = sin(3.14159265 * glitch.u);
+        float glitchWave = forced > 0.0 ? forced : sin(3.14159265 * glitch.u);
         float shift = 0.0;
+        if (ripple > 0.0) {
+            // The wavefront sweeps the emitter rows across the cell, three at a time.
+            float band = floor((fx.b.y * 0.5 + 0.5) * 20.0) + 1.0;
+            if (rowIndex >= band && rowIndex < band + 3.0)
+                shift += ((seed16 >> 3) % 2u == 0u ? 1.0 : -1.0) * kRowShiftMax * ripple;
+        }
         if (glitch.on && glitch.kind == 0u &&
             rowIndex >= glitchRow && rowIndex < glitchRow + 3.0)
             shift = ((glitch.lane >> 8) % 2u == 0u ? 1.0 : -1.0) * kRowShiftMax * glitchWave;
@@ -353,6 +395,15 @@ void main() {
         if (!lit) rgb = fragColor.rgb * 0.55;
         // Boot / power-down light level, on the cell only (the piece on it has its own).
         if (!isPiece) rgb *= fx.a.x * fx.a.y;
+        if (ripple > 0.0 || fx.b.z > 0.0) {
+            // The check ripple (M23.10 section 4): the light dips as the front arrives and
+            // recovers behind it, and the cell leans toward the check colour.
+            if (!cue) {
+                rgb *= 1.0 + 0.25 * fx.b.x * sin(3.14159265 * fx.b.y);
+                vec3 lean = fxBuf.g1.rgb * (0.35 + 1.6 * dot(rgb, vec3(0.3333)));
+                rgb = mix(rgb, lean, fx.b.z);
+            }
+        }
 
         if (alive) {
             // Breathing: a slow per-cell variation. Periods are 120 / k seconds, so the

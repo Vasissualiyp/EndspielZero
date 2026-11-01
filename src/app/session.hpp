@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ai/search.hpp"
@@ -16,6 +17,7 @@
 #include "game/game.hpp"
 #include "io/game_file.hpp"
 #include "view/camera.hpp"
+#include "view/game_end_fx.hpp"
 #include "view/layout.hpp"
 #include "view/move_anim.hpp"
 #include "view/move_camera.hpp"
@@ -91,6 +93,32 @@ class Session {
   void requestBoot() noexcept { ++bootSerial_; }
   /// Normalised boot order of every cell (`view::bootCellOrder`), built on first use.
   [[nodiscard]] const std::vector<float>& bootOrder() const;
+  /// Bumped by every move that leaves the side to move in check (the player's, the
+  /// engine's and a replay's), never by undo, selection or a position that merely stays in
+  /// check. `checkEvent()` is where the ripple starts.
+  [[nodiscard]] std::uint64_t checkSerial() const noexcept { return checkSerial_; }
+  [[nodiscard]] std::optional<CellId> checkEvent() const noexcept { return checkEvent_; }
+  /// Console `ripple`: fire the ripple from `cell` without touching the game.
+  void requestRipple(CellId cell) noexcept {
+    checkEvent_ = cell;
+    ++checkSerial_;
+  }
+  /// Bumped when the result changes from undecided to decided; `endEvent()` is then set.
+  /// `powerUpSerial()` is bumped when it changes back (an undo), which clears the event.
+  /// Reset clears both quietly and boots instead.
+  [[nodiscard]] std::uint64_t endSerial() const noexcept { return endSerial_; }
+  [[nodiscard]] std::uint64_t powerUpSerial() const noexcept { return powerUpSerial_; }
+  [[nodiscard]] const std::optional<view::EndFx>& endEvent() const noexcept {
+    return endEvent_;
+  }
+  /// Console `endfx`: preview an end (or clear it) without changing the game.
+  void requestEndFx(std::optional<view::EndFx> fx) noexcept {
+    endEvent_ = fx;
+    ++endSerial_;
+  }
+  /// King-step distances from `origin` to every cell, cached for the last few origins so
+  /// an event's flood is computed once rather than per frame.
+  [[nodiscard]] const std::vector<int>& distancesFrom(CellId origin) const;
   [[nodiscard]] const view::PositionView& snapshot() const noexcept { return snapshot_; }
   [[nodiscard]] const view::ViewConfig& viewConfig() const noexcept { return viewCfg_; }
   /// The camera to draw and to pick with.
@@ -383,6 +411,18 @@ class Session {
   std::uint64_t id_{0};
   std::uint64_t bootSerial_{1};
   mutable std::vector<float> bootOrder_;
+  /// Presentation event bookkeeping (see `trackEvents`).
+  void trackEvents();
+  bool eventsPrimed_{false};
+  std::size_t lastPly_{0};
+  bool endDecided_{false};
+  bool endEventDirty_{false};
+  std::uint64_t checkSerial_{0};
+  std::optional<CellId> checkEvent_;
+  std::uint64_t endSerial_{0};
+  std::uint64_t powerUpSerial_{0};
+  std::optional<view::EndFx> endEvent_;
+  mutable std::vector<std::pair<CellId, std::vector<int>>> distanceCache_;
   view::PositionView snapshot_;
   /// What the player asked for; `viewCfg_` is this with the flat-mode adjustment applied.
   view::ViewConfig chosenCfg_;
