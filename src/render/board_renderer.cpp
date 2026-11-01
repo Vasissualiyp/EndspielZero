@@ -2341,7 +2341,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   // The light the board spills into the room (M23.9 B): centred on where the board
   // actually lands on screen. Only the LED theme has an emitting board; other themes keep
   // their plain clear colour.
-  const bool emits = theme_.materials.cells == view::Material::Led;
+  const bool emits = view::gameScreenHasStars(theme_);
   BoardGlow glow;
   if (emits) {
     std::vector<std::array<float, 3>> points;

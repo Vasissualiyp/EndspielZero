@@ -188,6 +188,11 @@ class Ui {
   void setVisualTime(double seconds) noexcept;
   /// Run-only presentation override (`--dev`); never changes the saved preference.
   void forceDevOverlay(bool enabled) noexcept { forceDevOverlay_ = enabled; }
+  /// Vertices queued for the ambient field behind the board this frame; zero where the
+  /// game screen shows the stars instead (M23.10 section 6).
+  [[nodiscard]] int boardFieldVertexCount() const noexcept {
+    return boardFieldList_ ? boardFieldList_->VtxBuffer.Size : 0;
+  }
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);

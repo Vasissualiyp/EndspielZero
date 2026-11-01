@@ -2315,6 +2315,45 @@ TEST_CASE("the fps window is submitted only when developer presentation is enabl
   CHECK(gpu().ctx.takeValidationMessages().empty());
 }
 
+TEST_CASE("the game screen draws the star room, not the wireframe field, on an emitting board",
+          "[render][gpu][stars]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("stars", 1280, 720, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  auto shell = app::Shell::create({"standard"},
+                                  std::filesystem::path(CB_BINARY_DIR) / "stars.conf");
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    return test::loadVariant(name);
+  });
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK(view::gameScreenHasStars(view::Theme::manifold()));
+  CHECK_FALSE(view::gameScreenHasStars(view::Theme::console()));
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    auto ui = Ui::create(gpu().ctx, window, theme);
+    REQUIRE(ui.has_value());
+    for (int i = 0; i < 3; ++i) {  // the field advances over frames; it stays absent or present
+      (*ui)->tick(0.1f);
+      (*ui)->newFrame();
+      (void)(*ui)->build(*shell, 60);
+      if (view::gameScreenHasStars(theme))
+        CHECK((*ui)->boardFieldVertexCount() == 0);
+      else
+        CHECK((*ui)->boardFieldVertexCount() > 0);
+      (*ui)->endFrame();
+    }
+  }
+  CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
 TEST_CASE("the first HUD frame measures current turn and recent rows",
           "[render][gpu][capture-hud]") {
   if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
@@ -2932,7 +2971,8 @@ TEST_CASE("the board screen's real ambient field is submitted behind the board",
   });
   REQUIRE(shell->startGame("standard").has_value());
 
-  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  // The wood theme: the manifold game screen shows stars instead of this field (M23.10 6).
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::console());
   REQUIRE(ui.has_value());
   Ui& u = **ui;
 

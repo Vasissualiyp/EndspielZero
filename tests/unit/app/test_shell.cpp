@@ -323,6 +323,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     shell->settings().devOverlay = true;
     shell->settings().postProcess = false;
     shell->settings().bloomScale = .5f;
+    shell->settings().presentationIntensity = .25f;
     shell->settings().showSeams = false;
     shell->settings().invertOrbitY = true;
     shell->settings().autoPromoteTo = "knight";
@@ -355,6 +356,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
     REQUIRE(shell->settings().devOverlay);
     REQUIRE_FALSE(shell->settings().postProcess);
     REQUIRE(shell->settings().bloomScale == .5f);
+    CHECK(shell->settings().presentationIntensity == .25f);
     REQUIRE_FALSE(shell->settings().showSeams);
     REQUIRE(shell->settings().invertOrbitY);
     REQUIRE(shell->settings().autoPromoteTo == "knight");

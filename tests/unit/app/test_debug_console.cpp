@@ -110,6 +110,22 @@ TEST_CASE("post processing settings and aliases work before a game starts",
   CHECK(has(DebugConsole::help(), "post [on|off]"));
 }
 
+TEST_CASE("presentation intensity is a setting the console reaches and clamps",
+          "[unit][app][fx]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(shell->settings().presentationIntensity == 1.0f);
+  CHECK(c.run(*shell, "set presentationIntensity 0.25") ==
+        "presentationIntensity is now 0.25");
+  CHECK(shell->settings().presentationIntensity == 0.25f);
+  CHECK(c.run(*shell, "get presentationIntensity") == "presentation_intensity = 0.25");
+  CHECK(c.run(*shell, "set presentation_intensity 7") == "presentation_intensity is now 7");
+  CHECK(shell->settings().presentationIntensity == 1.0f);
+  CHECK(c.run(*shell, "set presentationIntensity nan") ==
+        "presentationIntensity is now nan");
+  CHECK(std::isfinite(shell->settings().presentationIntensity));
+}
+
 TEST_CASE("the console replays the board boot and help lists it", "[unit][app][boot]") {
   auto shell = makeShell();
   DebugConsole console;

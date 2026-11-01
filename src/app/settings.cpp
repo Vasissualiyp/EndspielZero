@@ -82,6 +82,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.postProcess = asBool(value);
     else if (key == "bloom_scale")
       s.bloomScale = asFloat(value, s.bloomScale);
+    else if (key == "presentation_intensity")
+      s.presentationIntensity = asFloat(value, s.presentationIntensity);
     else if (key == "vsync")
       s.vsync = asBool(value);
     else if (key == "frame_cap")
@@ -219,6 +221,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "dev_overlay = " << boolText(devOverlay) << '\n';
   out << "post_process = " << boolText(postProcess) << '\n';
   out << "bloom_scale = " << bloomScale << '\n';
+  out << "presentation_intensity = " << presentationIntensity << '\n';
   out << "vsync = " << boolText(vsync) << '\n';
   out << "frame_cap = " << frameCap << '\n';
   out << "show_legal_moves = " << boolText(showLegalMoves) << '\n';
@@ -284,6 +287,9 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
 
 void Settings::sanitize() {
   bloomScale = std::isfinite(bloomScale) ? std::clamp(bloomScale, 0.0f, 4.0f) : 1.0f;
+  presentationIntensity =
+      std::isfinite(presentationIntensity) ? std::clamp(presentationIntensity, 0.0f, 1.0f)
+                                           : 1.0f;
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
   frameCap = std::clamp(frameCap, 0, 360);
   computerLevel = std::clamp(computerLevel, 1, 5);

@@ -339,6 +339,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.surfaceFormed = s.geometryFormed;
   o.surfaceShellSpread = s.geometryShellSpread;
   o.shapePieceCylinders = s.shapePieceCylinders;
+  o.presentationIntensity = s.presentationIntensity;
   return o;
 }
 
@@ -1448,7 +1449,6 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--boot-t requires seconds >= 0\n");
         return 1;
       }
-    } else if (arg == "--matte")
     } else if ((arg == "--check-t" || arg == "--end-t") && i + 1 < argc) {
       char* end = nullptr;
       float& target = arg == "--check-t" ? gCheckT : gEndT;
@@ -1457,6 +1457,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s requires seconds >= 0\n", arg.c_str());
         return 1;
       }
+    } else if (arg == "--matte")
       gMatteCapture = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
       gUiScaleOverride = std::strtof(argv[++i], nullptr);
@@ -2326,7 +2327,6 @@ int main(int argc, char** argv) {
                                        : fxTimeline.bootAge(visualSeconds);
       fx.intensity = renderer->options().presentationIntensity;
       fx.ledCells = renderer->theme().materials.cells == view::Material::Led;
-      render::applyBoardFx(instances, *shell->session(), fx);
       setFxTint(fx, *renderer);
       if (const auto r = fxTimeline.ripple(visualSeconds)) {
         fx.rippleAge = r->age;
@@ -2340,6 +2340,7 @@ int main(int argc, char** argv) {
         fx.powerUpAge = u->age;
         fx.end = u->fx;
       }
+      render::applyBoardFx(instances, *shell->session(), fx);
       camera = boardCamera(*shell, shapeSeq);
     }
 

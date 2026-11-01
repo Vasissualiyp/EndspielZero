@@ -214,6 +214,14 @@ struct Theme {
 
 /// The palette a settings file names. An unknown name is the shipped one, because a
 /// settings file from a newer build - or a typo - must never stop the game starting.
+/// Whether the game screen draws the far-star pass behind the board instead of the
+/// wireframe ambient field (M23.10 section 6): a theme whose board emits light has a room
+/// of stars around it, any other keeps the field so it is never left with an empty
+/// background. The renderer's star gating and the interface both ask this one question.
+[[nodiscard]] inline bool gameScreenHasStars(const Theme& t) noexcept {
+  return t.materials.cells == Material::Led;
+}
+
 [[nodiscard]] inline Theme themeFromName(std::string_view name) {
   if (name == "manifold") return Theme::manifold();
   return Theme::console();

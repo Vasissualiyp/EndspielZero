@@ -25,11 +25,12 @@ walk the command history. `help` (or `?`) prints the command list from
 | `get [<setting>]` | Print all settings, or one |
 | `set <setting> <value>` | Change one setting. The value goes through the settings-file parser, so it accepts the same syntax as the file |
 | `post [on\|off]` | Turn post-processing (HDR scene, emissive bloom, tone map, grain/dither; ADR-0025) on or off; no argument toggles it. Default on; works without a loaded game. Also `get`/`set postProcess` or `post_process`, and `bloomScale` or `bloom_scale` (finite, clamped to 0..4, multiplies the theme's bloom; 0 skips the bloom passes) |
+| `get`/`set presentationIntensity` | The board's presentation intensity (`presentation_intensity`, persisted, clamped to 0..1, default 1): the glitches, the boot sweep, the check ripple and the end power-down. Below one half every effect takes its calm form |
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
-| `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
 | `ripple [<cell>]` | Play the check ripple (M23.10 section 4) from `<cell>` (default: the royal of the side to move) without touching the game. It wraps through glued seams. Calm intensity and non-LED themes have none |
 | `endfx win\|draw\|off [white\|black]` | Preview the game-end power-down (section 5): `win` is a decisive end with `<side>` (default white) as the loser, `draw` a draw, `off` clears it. The game itself is untouched; a real end plays by itself, and an undo out of one powers the board back up |
+| `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
 | `fen` / `setfen <fen>` | Show or replace the position |
 | `place <cell> <symbol>` | Put a piece on a cell (`Q` white, `q` black) |
 | `remove <cell>` | Clear a cell |
@@ -97,11 +98,11 @@ groups:
     cannot run post (it is reported once on stderr and the legacy path is used).
   - `--boot-t <s>` renders the board as if its boot sequence were `s` seconds old (0 to 1.8;
     later is settled), for captures. Run-only.
-  - `--theme <name>` picks the palette.
   - `--check-t <s>` renders the check ripple at age `s` (0 to 0.9) from the last check the
     `--script` gave (or from the side to move's royal when it never gave one); `--end-t <s>`
     renders the game-end power-down at age `s` for the script's finished game (the hold is
     reached by about 3). Example: `--theme manifold --script "..." --end-t 0.7`.
+  - `--theme <name>` picks the palette.
   - `--matte` turns materials off.
   - `--ui-scale N` sets the interface scale.
   - `--user-settings` uses the player's saved settings instead of defaults.

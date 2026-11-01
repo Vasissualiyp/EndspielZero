@@ -29,6 +29,10 @@ struct Settings {
   bool postProcess{true};
   /// Multiplies theme bloom. Zero skips bloom; clamped to the finite range [0,4].
   float bloomScale{1.0f};
+  /// How much the board's presentation moves (M23.9, M23.10): the glitches, the boot
+  /// sweep, the check ripple, the end power-down. 1 is the full show; below one half every
+  /// effect takes its calm form. Clamped to [0,1].
+  float presentationIntensity{1.0f};
   /// Frame pacing. The game redraws on input, so this only bounds the idle loop.
   bool vsync{true};
   /// Cap the redraw rate, in frames per second. 0 means "as fast as vsync allows". A cap

@@ -133,6 +133,7 @@ std::string execute(Shell& shell, const std::string& line) {
     if (key == "devOverlay") key = "dev_overlay";
     if (key == "postProcess") key = "post_process";
     if (key == "bloomScale") key = "bloom_scale";
+    if (key == "presentationIntensity") key = "presentation_intensity";
     if (cmd == "get") {
       if (w.size() < 2) return text;
       std::istringstream in(text);
@@ -212,7 +213,6 @@ std::string execute(Shell& shell, const std::string& line) {
     session->requestBoot();  // the front end stamps it on its next frame
     return "booting the board";
   }
-  if (cmd == "undo" || cmd == "reset") {
   if (cmd == "ripple") {
     // The check ripple from a cell (default: the side to move's royal), game untouched.
     CellId from = pos.findRoyal(pos.sideToMove());
@@ -243,6 +243,7 @@ std::string execute(Shell& shell, const std::string& line) {
     return std::string("previewing ") + (w[1] == "draw" ? "a draw" : "a win over ") +
            (w[1] == "draw" ? "" : (fx.loser == Color::White ? "white" : "black"));
   }
+  if (cmd == "undo" || cmd == "reset") {
     Action a;
     a.kind = cmd == "undo" ? ActionKind::Undo : ActionKind::Reset;
     const auto ok = session->apply(a);
@@ -370,9 +371,9 @@ std::string DebugConsole::help() {
          "dev [on|off]             developer overlay; no argument toggles it\n"
          "post [on|off]            post processing; no argument toggles it\n"
          "boot                     replay the board's power-on sequence\n"
-         "info                     variant summary: pieces, moves, marks, compounds\n"
          "ripple [<cell>]          play the check ripple from a cell (default: the royal)\n"
          "endfx win|draw|off [<side>]  preview the game-end power-down; off clears it\n"
+         "info                     variant summary: pieces, moves, marks, compounds\n"
          "fen | setfen <fen>       show or replace the position\n"
          "place <cell> <symbol>    put a piece (Q white, q black); remove <cell>; side "
          "w|b\n"

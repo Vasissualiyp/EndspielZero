@@ -1700,8 +1700,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // to its own list, not ImGui's shared background list, so `recordBackground` can submit
   // it early - inside the board's pass, behind the board (M18 correction). The
   // coordinate labels further down stay on the shared list and the late overlay path.
-  boardField_.draw(boardFieldList_.get(), ImVec2(0.0f, 0.0f),
-                   ImVec2(vp->Size.x, vp->Size.y), t, iconStyle_, false, true, 0.80f);
+  // Where the renderer draws the stars instead (an emitting board), the field is left out:
+  // the game screen's room is the stars alone (M23.10 section 6).
+  if (!view::gameScreenHasStars(theme_)) {
+    boardField_.draw(boardFieldList_.get(), ImVec2(0.0f, 0.0f),
+                     ImVec2(vp->Size.x, vp->Size.y), t, iconStyle_, false, true, 0.80f);
+  }
 
   // File and rank labels. On the flat board they sit on the near edges rather than on its
   // cells: a label *inside* the edge cell is covered by whatever stands there and reads
