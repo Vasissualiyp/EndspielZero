@@ -95,6 +95,16 @@ struct ViewModeButton {
 [[nodiscard]] ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
                                             bool surfaceAvailable) noexcept;
 
+/// The ordered, filtered main menu. Indices number only the entries being shown.
+struct MainMenuEntry {
+  const char* label;
+  int index;
+  bool enabled;
+  app::Screen screen;
+  bool startsTrailer{false};
+};
+[[nodiscard]] std::vector<MainMenuEntry> mainMenuEntries(bool devOverlay);
+
 /// The game's interface: rails, ledger, status, promotion, library.
 ///
 /// Drawn with Dear ImGui, restyled until it stops looking like Dear ImGui - the
@@ -176,6 +186,8 @@ class Ui {
   void setTheme(const view::Theme& t) noexcept;
   /// Presentation seconds for live controls, independent of transitions/background.
   void setVisualTime(double seconds) noexcept;
+  /// Run-only presentation override (`--dev`); never changes the saved preference.
+  void forceDevOverlay(bool enabled) noexcept { forceDevOverlay_ = enabled; }
   /// Finish the frame and record its draw commands into the board's render pass.
   void endFrame();
   void record(VkCommandBuffer cmd);
@@ -187,6 +199,10 @@ class Ui {
 
  private:
   Ui() = default;
+  bool forceDevOverlay_{false};
+  [[nodiscard]] bool devOverlay(const app::Shell& shell) const noexcept {
+    return forceDevOverlay_ || shell.settings().devOverlay;
+  }
   void applyStyle();
   Result<void> loadFonts();
   /// The interface's own multisample-matched pipeline for a standalone draw list. Dear

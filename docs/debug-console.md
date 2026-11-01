@@ -24,6 +24,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `goto <screen>` | Switch to `menu`, `game`, `paused`, `settings`, `editor`, `newgame` or `welcome` |
 | `get [<setting>]` | Print all settings, or one |
 | `set <setting> <value>` | Change one setting. The value goes through the settings-file parser, so it accepts the same syntax as the file |
+| `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
 | `fen` / `setfen <fen>` | Show or replace the position |
 | `place <cell> <symbol>` | Put a piece on a cell (`Q` white, `q` black) |
@@ -42,7 +43,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `expr <s-expression>` | Evaluate a rule expression against the position |
 | `clear` | Empty the scrollback |
 
-Every command except `help`, `load`, `goto`, `get`, `set` and `clear` needs a running
+Every command except `help`, `load`, `goto`, `get`, `set`, `dev` and `clear` needs a running
 game, and says so if there is none.
 
 ### Adding a command
@@ -86,6 +87,7 @@ groups:
     `--piece-cylinders` and `--dims`.
 - **Camera:** `--cinema`, `--follow <mode>` and `--shape-follow chase|turntable`.
 - **Look:**
+  - `--dev` forces developer presentation on for this run without saving it.
   - `--theme <name>` picks the palette.
   - `--matte` turns materials off.
   - `--ui-scale N` sets the interface scale.

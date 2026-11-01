@@ -19,6 +19,27 @@
 using namespace cb;
 using namespace cb::render;
 
+TEST_CASE("the public menu omits unfinished entries and renumbers the remaining rows",
+          "[render][dev-overlay]") {
+  for (bool dev : {false, true}) {
+    const auto entries = mainMenuEntries(dev);
+    const std::vector<std::string> expected =
+        dev ? std::vector<std::string>{"New game", "Watch a game", "Watch trailer",
+                                       "Continue", "Multiplayer",  "Tutorial",
+                                       "Editor",   "Settings",     "Quit"}
+            : std::vector<std::string>{"New game", "Watch a game", "Watch trailer",
+                                       "Tutorial", "Editor",       "Settings",
+                                       "Quit"};
+    REQUIRE(entries.size() == expected.size());
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+      CHECK(entries[i].label == expected[i]);
+      CHECK(entries[i].index == static_cast<int>(i + 1));
+      CHECK(entries[i].enabled ==
+            (expected[i] != "Continue" && expected[i] != "Multiplayer"));
+    }
+  }
+}
+
 TEST_CASE("coordinate labels are drawn only in the flat 2-D view", "[render]") {
   app::Settings settings;
   auto session = app::Session::create(test::loadVariant("standard"));

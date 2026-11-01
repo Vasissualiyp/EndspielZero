@@ -739,8 +739,7 @@ bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* l
     width = std::max(1.0f, std::min(320 * scale, room - gutter));
   }
   const std::string id = "##" + std::string(label);
-  // What is coming stays in the list and says so, in two words at the far end of the
-  // row. It does not need a paragraph underneath it every time the pointer goes past.
+  // Developer mode can expose unfinished rows; mark them at the far end of the row.
   return rowControl(id.c_str(), label, theme, labelFont, width, 42.0f * scale, scale,
                     enabled, false, false, index, enabled ? ">" : "NOT BUILT");
 }

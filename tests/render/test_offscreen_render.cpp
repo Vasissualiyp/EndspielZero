@@ -255,7 +255,8 @@ TEST_CASE("wood is confined to board and pieces and never moves with a piece",
     // The mover is handed from panel to panel (M23.9 D): partial copies are blended,
     // one per cell on the route, so look for its material among them and the opaque set.
     (void)at;
-    // 31 standing livePieces plus at least the head's copy; the mover keeps its own material.
+    // 31 standing livePieces plus at least the head's copy; the mover keeps its own
+    // material.
     int livePieces = 0;
     bool moverMaterial = false;
     for (const auto* group : {&moving.instances, &moving.flourish})
@@ -2261,6 +2262,57 @@ TEST_CASE("the tesseract scaffold is drawn only for hyper4 and only with seams o
   CHECK(scaffoldCells("hyper4", true) == 32u);
   CHECK(scaffoldCells("hyper4", false) == 0u);
   CHECK(scaffoldCells("torus3d", true) == 0u);
+}
+
+TEST_CASE("the fps window is submitted only when developer presentation is enabled",
+          "[render][gpu][dev-overlay]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("dev-overlay", 1920, 1080, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  auto shell = app::Shell::create(
+      {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "dev-overlay.conf");
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    return test::loadVariant(name);
+  });
+  REQUIRE(shell->startGame("standard").has_value());
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    auto ui = Ui::create(gpu().ctx, window, theme);
+    REQUIRE(ui.has_value());
+    const auto frame = [&](bool enabled) {
+      (*ui)->tick(1);
+      (*ui)->newFrame();
+      (void)(*ui)->build(*shell, 60);
+      const auto* fps = ImGui::FindWindowByName("##fps");
+      if (enabled) {
+        REQUIRE(fps != nullptr);
+        CHECK(fps->Active);
+        CHECK(fps->LastFrameActive == ImGui::GetFrameCount());
+      } else if (fps != nullptr) {
+        CHECK_FALSE(fps->Active);
+        CHECK(fps->LastFrameActive < ImGui::GetFrameCount());
+      }
+      (*ui)->endFrame();
+    };
+    for (bool enabled : {false, true, false}) {
+      shell->settings().devOverlay = enabled;
+      frame(enabled);
+    }
+    (*ui)->forceDevOverlay(true);
+    frame(true);
+    CHECK_FALSE(shell->settings().devOverlay);
+    (*ui)->forceDevOverlay(false);
+    frame(false);
+  }
+  CHECK(gpu().ctx.takeValidationMessages().empty());
 }
 
 TEST_CASE("the first HUD frame measures current turn and recent rows",

@@ -47,6 +47,7 @@ namespace {
 
 std::string gThemeOverride;
 bool gMatteCapture = false;
+bool gDevOverlay = false;
 float gUiScaleOverride = -1.0f;
 
 float resolveUiScale(const app::Settings& settings) {
@@ -753,6 +754,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   }
   // The capture has to show the interface at the scale the player set, or it is not a
   // picture of what they would see.
+  (*ui)->forceDevOverlay(gDevOverlay);
   (void)(*ui)->setScale(resolveUiScale(shell->settings()));
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   // Cinema dresses the frame with a grade and a vignette, not an interface (M18.3).
@@ -1311,6 +1313,7 @@ int main(int argc, char** argv) {
           "the reviewable screens include it; --screen watch is the bundled-game "
           "picker.\n"
           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
+          "--dev forces the developer overlay on for this run (not saved).\n"
           "--theme console|manifold overrides the theme for this run; --matte disables "
           "materials.\n"
           "--ui-scale 0.6..3.0 overrides interface size for this run (not saved).\n"
@@ -1359,7 +1362,9 @@ int main(int argc, char** argv) {
         return 1;
       }
       visualTimeGiven = true;
-    } else if (arg == "--matte")
+    } else if (arg == "--dev")
+      gDevOverlay = true;
+    else if (arg == "--matte")
       gMatteCapture = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
       gUiScaleOverride = std::strtof(argv[++i], nullptr);
@@ -1492,6 +1497,7 @@ int main(int argc, char** argv) {
                  ui.error().format().c_str());
     return 1;
   }
+  (*ui)->forceDevOverlay(gDevOverlay);
   (void)(*ui)->setScale(resolveUiScale(shell->settings()));
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   {

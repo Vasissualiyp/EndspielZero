@@ -28,6 +28,29 @@ bool has(const std::string& s, const char* t) {
 }
 }  // namespace
 
+TEST_CASE("developer presentation is opt-in and reachable without a game",
+          "[unit][app][dev-overlay]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  CHECK_FALSE(shell->settings().devOverlay);
+  CHECK(console.run(*shell, "get devOverlay") == "dev_overlay = false");
+  CHECK(console.run(*shell, "dev on") == "dev overlay: on");
+  CHECK(shell->settings().devOverlay);
+  CHECK(console.run(*shell, "get dev_overlay") == "dev_overlay = true");
+  CHECK(console.run(*shell, "dev off") == "dev overlay: off");
+  CHECK_FALSE(shell->settings().devOverlay);
+  CHECK(console.run(*shell, "dev") == "dev overlay: on");
+  CHECK(console.run(*shell, "dev") == "dev overlay: off");
+  CHECK(console.run(*shell, "set devOverlay true") == "devOverlay is now true");
+  CHECK(shell->settings().devOverlay);
+  CHECK(console.run(*shell, "dev maybe") == "usage: dev [on|off]");
+  CHECK(console.run(*shell, "dev on extra") == "usage: dev [on|off]");
+  CHECK(shell->settings().devOverlay);
+  CHECK(console.run(*shell, "set dev_overlay false") == "dev_overlay is now false");
+  CHECK_FALSE(shell->settings().devOverlay);
+  CHECK(has(DebugConsole::help(), "dev [on|off]"));
+}
+
 TEST_CASE("the debug console reaches what the interface does not", "[unit][app][debug]") {
   auto shell = makeShell();
   DebugConsole c;

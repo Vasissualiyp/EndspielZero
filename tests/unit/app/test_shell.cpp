@@ -320,6 +320,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
   {
     auto shell = makeShell(path);
     shell->settings().guiScale = 1.6f;
+    shell->settings().devOverlay = true;
     shell->settings().showSeams = false;
     shell->settings().invertOrbitY = true;
     shell->settings().autoPromoteTo = "knight";
@@ -349,6 +350,7 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
   {
     auto shell = makeShell(path);
     REQUIRE(shell->settings().guiScale == 1.6f);
+    REQUIRE(shell->settings().devOverlay);
     REQUIRE_FALSE(shell->settings().showSeams);
     REQUIRE(shell->settings().invertOrbitY);
     REQUIRE(shell->settings().autoPromoteTo == "knight");

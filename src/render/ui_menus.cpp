@@ -155,6 +155,28 @@ void drawMoveDiagram(const VariantSpec& v, const PieceTypeDef& piece,
 
 }  // namespace
 
+std::vector<MainMenuEntry> mainMenuEntries(bool devOverlay) {
+  using app::Screen;
+  static constexpr MainMenuEntry kEntries[]{
+      {"New game", 0, true, Screen::NewGame},
+      {"Watch a game", 0, true, Screen::Watch},
+      {"Watch trailer", 0, true, Screen::Game, true},
+      {"Continue", 0, false, Screen::Game},
+      {"Multiplayer", 0, false, Screen::MainMenu},
+      {"Tutorial", 0, true, Screen::Welcome},
+      {"Editor", 0, true, Screen::Editor},
+      {"Settings", 0, true, Screen::Settings},
+      {"Quit", 0, true, Screen::QuitConfirm}};
+  std::vector<MainMenuEntry> entries;
+  entries.reserve(std::size(kEntries));
+  for (auto entry : kEntries) {
+    if (!entry.enabled && !devOverlay) continue;
+    entry.index = static_cast<int>(entries.size()) + 1;
+    entries.push_back(entry);
+  }
+  return entries;
+}
+
 UiRequest Ui::buildMainMenu(app::Shell& shell) {
   UiRequest request;
   const view::Theme& t = theme_;
@@ -169,42 +191,14 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(14)));
 
   const float width = ImGui::GetContentRegionAvail().x;
-  if (menuEntry("New game", 1, t, actionFont(), width, true, scale_)) {
-    shell.go(app::Screen::NewGame);
-  }
-  // The demo action: watch a bundled game play itself, through the ordinary board and
-  // move camera (M12.8). It opens a short picker rather than a fixed file, because two
-  // games ship.
-  if (menuEntry("Watch a game", 2, t, actionFont(), width, true, scale_)) {
-    shell.go(app::Screen::Watch);
-  }
-  // The trailer: a fixed, looping tour of the shapes, played on the game screen (M13.9).
-  // Unlike "Watch a game" there is nothing to choose, so the row starts it in place
-  // instead of opening a picker.
-  if (menuEntry("Watch trailer", 3, t, actionFont(), width, true, scale_)) {
-    request.startAttract = true;
-  }
-  // Disabled rows stay in the list, marked and nothing more. A menu that hides what is
-  // coming is dishonest; one that explains itself every time the pointer crosses it is
-  // just noisy.
-  if (menuEntry("Continue", 4, t, actionFont(), width, false, scale_)) {
-    // unreachable while disabled, but kept so enabling it is a one-word change
-  }
-  if (menuEntry("Multiplayer", 5, t, actionFont(), width, false, scale_)) {
-  }
-  // The curated "start here" path, summoned when the player asks for it rather than
-  // opened on first launch (M14.1, revised).
-  if (menuEntry("Tutorial", 6, t, actionFont(), width, true, scale_)) {
-    shell.go(app::Screen::Welcome);
-  }
-  if (menuEntry("Editor", 7, t, actionFont(), width, true, scale_)) {
-    shell.go(app::Screen::Editor);
-  }
-  if (menuEntry("Settings", 8, t, actionFont(), width, true, scale_)) {
-    shell.go(app::Screen::Settings);
-  }
-  if (menuEntry("Quit", 9, t, actionFont(), width, true, scale_)) {
-    shell.go(app::Screen::QuitConfirm);
+  for (const auto& entry : mainMenuEntries(devOverlay(shell))) {
+    if (menuEntry(entry.label, entry.index, t, actionFont(), width, entry.enabled,
+                  scale_)) {
+      if (entry.startsTrailer)
+        request.startAttract = true;
+      else
+        shell.go(entry.screen);
+    }
   }
 
   endPane();

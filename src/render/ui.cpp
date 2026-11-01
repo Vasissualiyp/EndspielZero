@@ -2178,18 +2178,20 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   ImGui::PopStyleVar();
 
   // --------------------------------------------------------------------- frame rate
-  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin,
-                                 vp->WorkPos.y + vp->WorkSize.y * 0.5f),
-                          ImGuiCond_Always, ImVec2(1.0f, 0.5f));
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::Begin("##fps", nullptr, overlayFlags);
-  ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint, 0.55f));
-  ImGui::Text("%3.0f fps", static_cast<double>(fps));
-  ImGui::PopStyleColor();
-  ImGui::PopFont();
-  ImGui::End();
-  ImGui::PopStyleVar();
+  if (devOverlay(shell)) {
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin,
+                                   vp->WorkPos.y + vp->WorkSize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(1.0f, 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##fps", nullptr, overlayFlags);
+    ImGui::PushFont(small);
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint, 0.55f));
+    ImGui::Text("%3.0f fps", static_cast<double>(fps));
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::End();
+    ImGui::PopStyleVar();
+  }
 
   // ------------------------------------------------------------------ promotion
   const auto& pending = session.pendingPromotion();

@@ -157,6 +157,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
                                  # --dwell S, --fps N, --play-at S, --width W --height H
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --theme manifold # dark glass alternative
+./build/dev/src/gui/endspielzero_gui standard --dev --shot dev.ppm # fps + unfinished menu rows
+                                 # run-only; console `dev [on|off]` changes the saved preference
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --visual-time 0.75 --shot holo.ppm
                                  # explicit presentation seconds for hologram capture
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --matte          # material-free A/B capture

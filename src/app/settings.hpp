@@ -24,6 +24,8 @@ struct Settings {
   /// stays crisp - which is the whole point of the option on a high-density display.
   float guiScale{1.0f};
   bool fullscreen{false};
+  /// Developer-only presentation: fps and unfinished menu entries. Console access only.
+  bool devOverlay{false};
   /// Frame pacing. The game redraws on input, so this only bounds the idle loop.
   bool vsync{true};
   /// Cap the redraw rate, in frames per second. 0 means "as fast as vsync allows". A cap
@@ -33,7 +35,8 @@ struct Settings {
 
   // ---- board --------------------------------------------------------------
   bool showLegalMoves{true};
-  /// Holding Ctrl over a piece shows its moves (either side; the opponent's ignore check).
+  /// Holding Ctrl over a piece shows its moves (either side; the opponent's ignore
+  /// check).
   bool peekMovesOnCtrl{true};
   /// Holding Ctrl over an empty square, or a highlighted destination, shows what attacks
   /// and defends it.
@@ -43,12 +46,13 @@ struct Settings {
   /// Draw cyan edges where the board is glued to itself. Off only for a player who
   /// already knows the geometry by heart.
   bool showSeams{true};
-  /// Nothing closer to the camera than this many cells is drawn: stops polygons flickering
-  /// across the lens when the camera is inside a shape.
+  /// Nothing closer to the camera than this many cells is drawn: stops polygons
+  /// flickering across the lens when the camera is inside a shape.
   float nearClip{0.5f};
   /// The near clip while the trailer plays (the larger of this and `nearClip`). The 3-D
-  /// torus beat puts the camera inside its nested shells, a few cells from the target, where
-  /// half a cell clears nothing; 2 keeps the geometry hugging the lens out of frame.
+  /// torus beat puts the camera inside its nested shells, a few cells from the target,
+  /// where half a cell clears nothing; 2 keeps the geometry hugging the lens out of
+  /// frame.
   float trailerNearClip{2.0f};
   /// Draw the corner legend that names what the cyan seam colours mean (M14.4).
   bool showSeamLegend{true};

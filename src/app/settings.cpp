@@ -76,6 +76,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.guiScale = asFloat(value, s.guiScale);
     else if (key == "fullscreen")
       s.fullscreen = asBool(value);
+    else if (key == "dev_overlay")
+      s.devOverlay = asBool(value);
     else if (key == "vsync")
       s.vsync = asBool(value);
     else if (key == "frame_cap")
@@ -210,6 +212,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "# EndspielZero settings. Edited by the game; safe to edit by hand.\n";
   out << "gui_scale = " << guiScale << '\n';
   out << "fullscreen = " << boolText(fullscreen) << '\n';
+  out << "dev_overlay = " << boolText(devOverlay) << '\n';
   out << "vsync = " << boolText(vsync) << '\n';
   out << "frame_cap = " << frameCap << '\n';
   out << "show_legal_moves = " << boolText(showLegalMoves) << '\n';

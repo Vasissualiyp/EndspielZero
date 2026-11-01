@@ -29,7 +29,8 @@ std::vector<std::string> words(std::string_view line) {
   return out;
 }
 
-/// Everything after the first word, trimmed: the argument of a command that takes free text.
+/// Everything after the first word, trimmed: the argument of a command that takes free
+/// text.
 std::string rest(std::string_view line) {
   const auto start = line.find_first_not_of(" \t");
   if (start == std::string_view::npos) return {};
@@ -52,7 +53,8 @@ std::string cellText(const VariantSpec& v, CellId c) {
 
 /// The settings as the file spells them, one `key = value` per line.
 std::string settingsText(const Settings& s) {
-  const auto path = std::filesystem::temp_directory_path() / "chessbox-debug-settings.conf";
+  const auto path =
+      std::filesystem::temp_directory_path() / "chessbox-debug-settings.conf";
   if (!s.save(path).has_value()) return {};
   std::ifstream in(path);
   std::ostringstream ss;
@@ -60,7 +62,8 @@ std::string settingsText(const Settings& s) {
   return ss.str();
 }
 
-std::string perftLines(const VariantSpec& v, const Position& start, int depth, bool divide) {
+std::string perftLines(const VariantSpec& v, const Position& start, int depth,
+                       bool divide) {
   Position p = start;
   const MoveGen gen(v);
   std::ostringstream out;
@@ -89,10 +92,19 @@ std::string execute(Shell& shell, const std::string& line) {
   const std::string& cmd = w[0];
   Session* session = shell.session();
   const auto needGame = [&]() -> std::string {
-    return session == nullptr ? "no game is running: use 'load <variant>'" : std::string{};
+    return session == nullptr ? "no game is running: use 'load <variant>'"
+                              : std::string{};
   };
 
   if (cmd == "help" || cmd == "?") return DebugConsole::help();
+
+  if (cmd == "dev") {
+    if (w.size() > 2 || (w.size() == 2 && w[1] != "on" && w[1] != "off"))
+      return "usage: dev [on|off]";
+    shell.settings().devOverlay =
+        w.size() == 1 ? !shell.settings().devOverlay : w[1] == "on";
+    return shell.settings().devOverlay ? "dev overlay: on" : "dev overlay: off";
+  }
 
   if (cmd == "load") {
     if (w.size() < 2) return "usage: load <variant>";
@@ -102,8 +114,9 @@ std::string execute(Shell& shell, const std::string& line) {
   if (cmd == "goto") {
     if (w.size() < 2) return "usage: goto menu|game|paused|settings|editor|newgame";
     static const std::pair<const char*, Screen> kScreens[]{
-        {"menu", Screen::MainMenu}, {"game", Screen::Game},       {"paused", Screen::Paused},
-        {"settings", Screen::Settings}, {"editor", Screen::Editor}, {"newgame", Screen::NewGame},
+        {"menu", Screen::MainMenu},  {"game", Screen::Game},
+        {"paused", Screen::Paused},  {"settings", Screen::Settings},
+        {"editor", Screen::Editor},  {"newgame", Screen::NewGame},
         {"welcome", Screen::Welcome}};
     for (const auto& [name, screen] : kScreens) {
       if (w[1] == name) {
@@ -115,22 +128,25 @@ std::string execute(Shell& shell, const std::string& line) {
   }
   if (cmd == "get" || cmd == "set") {
     const std::string text = settingsText(shell.settings());
+    const std::string key = w.size() > 1 && w[1] == "devOverlay" ? "dev_overlay"
+                            : w.size() > 1                       ? w[1]
+                                                                 : std::string{};
     if (cmd == "get") {
       if (w.size() < 2) return text;
       std::istringstream in(text);
       std::string l;
       while (std::getline(in, l)) {
-        if (l.rfind(w[1] + " =", 0) == 0) return l;
+        if (l.rfind(key + " =", 0) == 0) return l;
       }
       return "no setting called " + w[1];
     }
     if (w.size() < 3) return "usage: set <setting> <value>";
-    // Change it the way the file would: the old text, the new line after it (later lines win),
-    // read back through the settings loader.
+    // Change it the way the file would: the old text, the new line after it (later lines
+    // win), read back through the settings loader.
     const auto path = std::filesystem::temp_directory_path() / "chessbox-debug-set.conf";
     {
       std::ofstream out(path, std::ios::trunc);
-      out << text << '\n' << w[1] << " = " << rest(rest(line)) << '\n';
+      out << text << '\n' << key << " = " << rest(rest(line)) << '\n';
     }
     shell.settings() = Settings::load(path);
     return w[1] + " is now " + rest(rest(line));
@@ -143,16 +159,19 @@ std::string execute(Shell& shell, const std::string& line) {
 
   if (cmd == "info") {
     std::ostringstream out;
-    out << v.name << ": " << static_cast<int>(v.dims.dims()) << " axes, " << v.dims.cellCount()
-        << " cells, " << v.pieces.size() - 1 << " pieces, id " << v.variantId() << "\n";
+    out << v.name << ": " << static_cast<int>(v.dims.dims()) << " axes, "
+        << v.dims.cellCount() << " cells, " << v.pieces.size() - 1 << " pieces, id "
+        << v.variantId() << "\n";
     out << "mark tags:";
     for (const auto& t : v.markTags) out << ' ' << t.name << (t.blocks ? "(blocks)" : "");
-    out << "\ncompound moves: " << v.compounds.size() << ", castle templates: " << v.castles.size()
+    out << "\ncompound moves: " << v.compounds.size()
+        << ", castle templates: " << v.castles.size()
         << ", directions: " << v.dirTable.size() << "\n";
     for (std::size_t i = 1; i < v.pieces.size(); ++i) {
       const PieceTypeDef& p = v.pieces[i];
       out << "  " << p.symbol << ' ' << p.name << (p.royal ? " (royal)" : "")
-          << (p.tracksMoved ? " [tracks moved]" : "") << ": " << p.atoms.size() << " moves\n";
+          << (p.tracksMoved ? " [tracks moved]" : "") << ": " << p.atoms.size()
+          << " moves\n";
       for (const MoveAtom& a : p.atoms) out << "      " << a.toString() << '\n';
     }
     return out.str();
@@ -220,11 +239,12 @@ std::string execute(Shell& shell, const std::string& line) {
     for (CellId c = 0; c < v.dims.cellCount(); ++c) {
       const Piece p = pos.at(c);
       if (p.empty() || !v.pieces[p.type].tracksMoved) continue;
-      out << cellText(v, c) << ' ' << v.pieces[p.type].name << (p.hasMoved() ? " moved" : " unmoved")
-          << '\n';
+      out << cellText(v, c) << ' ' << v.pieces[p.type].name
+          << (p.hasMoved() ? " moved" : " unmoved") << '\n';
       ++n;
     }
-    return n == 0 ? std::string("no piece type here tracks whether it has moved") : out.str();
+    return n == 0 ? std::string("no piece type here tracks whether it has moved")
+                  : out.str();
   }
   if (cmd == "attacked") {
     if (w.size() < 2) return "usage: attacked <cell>";
@@ -232,7 +252,9 @@ std::string execute(Shell& shell, const std::string& line) {
     if (!cell.has_value()) return cell.error().format();
     const MoveGen gen(v);
     const Color other = opponent(pos.sideToMove());
-    return std::string(w[1]) + (gen.isAttacked(pos, *cell, other) ? " is attacked by " : " is not attacked by ") +
+    return std::string(w[1]) +
+           (gen.isAttacked(pos, *cell, other) ? " is attacked by "
+                                              : " is not attacked by ") +
            (other == Color::White ? "white" : "black");
   }
   if (cmd == "place" || cmd == "remove" || cmd == "side") {
@@ -241,16 +263,20 @@ std::string execute(Shell& shell, const std::string& line) {
       if (w.size() < 2 || (w[1] != "w" && w[1] != "b")) return "usage: side w|b";
       p.setSideToMove(w[1] == "w" ? Color::White : Color::Black);
     } else {
-      if (w.size() < (cmd == "place" ? 3u : 2u)) return "usage: place <cell> <symbol> | remove <cell>";
+      if (w.size() < (cmd == "place" ? 3u : 2u))
+        return "usage: place <cell> <symbol> | remove <cell>";
       const auto cell = parseCell(v.dims, w[1]);
       if (!cell.has_value()) return cell.error().format();
       if (cmd == "remove") {
         p.removeAt(*cell);
       } else {
         const char sym = w[2][0];
-        const PieceTypeId type = v.findPieceBySymbol(static_cast<char>(std::toupper(sym)));
+        const PieceTypeId type =
+            v.findPieceBySymbol(static_cast<char>(std::toupper(sym)));
         if (type == kNoPiece) return "no piece has the symbol " + w[2];
-        p.place(*cell, type, std::isupper(static_cast<unsigned char>(sym)) != 0 ? Color::White : Color::Black);
+        p.place(*cell, type,
+                std::isupper(static_cast<unsigned char>(sym)) != 0 ? Color::White
+                                                                   : Color::Black);
       }
     }
     const auto ok = session->loadFen(toFen(p));
@@ -258,14 +284,16 @@ std::string execute(Shell& shell, const std::string& line) {
   }
   if (cmd == "moveset") {
     const std::string text = rest(line);
-    if (text.empty()) return "usage: moveset <text>, e.g. moveset U r in 1..D : [1 x r]^k";
+    if (text.empty())
+      return "usage: moveset <text>, e.g. moveset U r in 1..D : [1 x r]^k";
     std::vector<std::string> axes;
     for (std::size_t i = 0; i < v.dims.dims(); ++i) axes.push_back(v.dims.name(i));
     MovesetContext ctx;
     ctx.dims = v.dims.dims();
     ctx.axisNames = axes;
     ctx.orientAxis = v.orientationAxis;
-    for (std::size_t i = 1; i < v.markTags.size(); ++i) ctx.markTags.push_back(v.markTags[i].name);
+    for (std::size_t i = 1; i < v.markTags.size(); ++i)
+      ctx.markTags.push_back(v.markTags[i].name);
     ctx.lookup = [](std::string_view n) { return libraryMoveset(n); };
     const auto atoms = evalMoveset(text, ctx);
     if (!atoms.has_value()) return atoms.error().format();
@@ -303,9 +331,11 @@ std::string DebugConsole::help() {
   return "load <variant>            start a variant\n"
          "goto <screen>            menu game paused settings editor newgame welcome\n"
          "get [<setting>]          show settings; set <setting> <value> changes one\n"
+         "dev [on|off]             developer overlay; no argument toggles it\n"
          "info                     variant summary: pieces, moves, marks, compounds\n"
          "fen | setfen <fen>       show or replace the position\n"
-         "place <cell> <symbol>    put a piece (Q white, q black); remove <cell>; side w|b\n"
+         "place <cell> <symbol>    put a piece (Q white, q black); remove <cell>; side "
+         "w|b\n"
          "moves | play <move>      list legal moves; play one (e2e4)\n"
          "undo | reset | script <t>  take back, restart, or run click scripts\n"
          "perft <n> | divide <n>   count nodes\n"

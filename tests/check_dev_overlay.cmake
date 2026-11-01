@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The run-only flag must reach both menu and game, and never affect a later capture.
+set(dir "${OUT_DIR}/dev-overlay")
+file(MAKE_DIRECTORY "${dir}")
+foreach(screen board menu)
+  foreach(mode public dev public-again)
+    set(flags)
+    if(mode STREQUAL "dev")
+      set(flags --dev)
+    endif()
+    set(out "${dir}/${screen}-${mode}.ppm")
+    execute_process(COMMAND "${GUI}" standard --screen ${screen} --theme manifold
+                    --width 640 --height 400 --visual-time 0.75 --shot "${out}" ${flags}
+                    WORKING_DIRECTORY "${WORKDIR}" RESULT_VARIABLE rc
+                    OUTPUT_QUIET ERROR_VARIABLE err)
+    if(NOT rc EQUAL 0)
+      message(FATAL_ERROR "developer-overlay capture failed: ${err}")
+    endif()
+    file(SHA256 "${out}" hash)
+    if(mode STREQUAL "public")
+      set(publicHash "${hash}")
+    elseif(mode STREQUAL "dev")
+      if(hash STREQUAL publicHash)
+        message(FATAL_ERROR "--dev did not change ${screen}")
+      endif()
+    elseif(NOT hash STREQUAL publicHash)
+      message(FATAL_ERROR "--dev changed a later default ${screen} capture")
+    endif()
+  endforeach()
+endforeach()
