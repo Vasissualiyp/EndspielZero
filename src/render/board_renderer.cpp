@@ -66,6 +66,11 @@ constexpr float kHintPathTint = 0.18f;
 // The square under the pointer is always a little brighter.
 constexpr float kHoverBrighten = 0.14f;
 
+/// The `Instance::fxCell` of a cell, or of the piece standing on it.
+float fxIndex(CellId cell, bool piece) {
+  return 2.0f * (static_cast<float>(cell) + 1.0f) + (piece ? 1.0f : 0.0f);
+}
+
 bool cellIn(std::span<const CellId> s, CellId c) {
   return std::find(s.begin(), s.end(), c) != s.end();
 }
@@ -257,11 +262,14 @@ Result<void> BoardRenderer::buildPipeline() {
   if (!fs.has_value()) return fail(fs.error().code, fs.error().message);
   frag_ = *fs;
 
+  if (auto ok = buildFxDescriptors(); !ok.has_value()) return ok;
   VkPushConstantRange push{};
   push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   push.size = sizeof(PushConstants);
   VkPipelineLayoutCreateInfo plci{};
   plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plci.setLayoutCount = 1;
+  plci.pSetLayouts = &fxSetLayout_;
   plci.pushConstantRangeCount = 1;
   plci.pPushConstantRanges = &push;
   if (const VkResult r = vkCreatePipelineLayout(ctx_->device(), &plci, nullptr, &layout_);
@@ -272,9 +280,10 @@ Result<void> BoardRenderer::buildPipeline() {
   const VkVertexInputBindingDescription bindings[2]{
       {0, sizeof(MeshVertex), VK_VERTEX_INPUT_RATE_VERTEX},
       {1, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE}};
-  // Sixteen locations, the Vulkan-guaranteed minimum: the edge mask and roll are adjacent
-  // floats in `Instance` and share one vec2 attribute.
+  // Sixteen locations, the Vulkan-guaranteed minimum: the edge mask, roll and fx cell are
+  // adjacent floats in `Instance` and share one vec3 attribute.
   static_assert(offsetof(Instance, roll) == offsetof(Instance, edgeMask) + sizeof(float));
+  static_assert(offsetof(Instance, fxCell) == offsetof(Instance, roll) + sizeof(float));
   const VkVertexInputAttributeDescription attrs[16]{
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, pos)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(MeshVertex, normal)},
@@ -287,7 +296,7 @@ Result<void> BoardRenderer::buildPipeline() {
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, scale)},
       {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, color)},
       {6, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, edge)},
-      {7, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(Instance, edgeMask)},
+      {7, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Instance, edgeMask)},
       {8, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, panelPrev)},
       {9, 1, VK_FORMAT_R32_SFLOAT, offsetof(Instance, material)},
       {10, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, quat)},
@@ -761,6 +770,96 @@ Result<void> BoardRenderer::ensureInstanceCapacity(std::uint32_t frame,
   return {};
 }
 
+Result<void> BoardRenderer::buildFxDescriptors() {
+  VkDescriptorSetLayoutBinding binding{};
+  binding.binding = 0;
+  binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  binding.descriptorCount = 1;
+  binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  VkDescriptorSetLayoutCreateInfo lci{};
+  lci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  lci.bindingCount = 1;
+  lci.pBindings = &binding;
+  if (const VkResult r = vkCreateDescriptorSetLayout(ctx_->device(), &lci, nullptr,
+                                                     &fxSetLayout_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the effect set layout: " + describe(r));
+  }
+  const VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight};
+  VkDescriptorPoolCreateInfo pci{};
+  pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pci.maxSets = kFramesInFlight;
+  pci.poolSizeCount = 1;
+  pci.pPoolSizes = &size;
+  if (const VkResult r = vkCreateDescriptorPool(ctx_->device(), &pci, nullptr, &fxPool_);
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot create the effect pool: " + describe(r));
+  }
+  std::array<VkDescriptorSetLayout, kFramesInFlight> layouts;
+  layouts.fill(fxSetLayout_);
+  VkDescriptorSetAllocateInfo ai{};
+  ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  ai.descriptorPool = fxPool_;
+  ai.descriptorSetCount = kFramesInFlight;
+  ai.pSetLayouts = layouts.data();
+  if (const VkResult r = vkAllocateDescriptorSets(ctx_->device(), &ai, fxSets_.data());
+      r != VK_SUCCESS) {
+    return fail(ErrorCode::Internal, "cannot allocate the effect sets: " + describe(r));
+  }
+  return {};
+}
+
+Result<void> BoardRenderer::uploadFx(std::uint32_t frame, const InstanceSet& set) {
+  // The header is two vec4s (view::FxGlobals, with the record count in the last lane -
+  // the buffer is larger than what a frame writes), then one 48-byte record per cell + 1.
+  constexpr std::size_t kHeader = 32;
+  static const view::CellFx kNeutral{};
+  const std::size_t records = std::max<std::size_t>(set.cellFx.size(), 1);
+  if (records > fxCapacity_[frame]) {
+    if (fxBuffer_[frame] != VK_NULL_HANDLE) {
+      vkDeviceWaitIdle(ctx_->device());
+      vkDestroyBuffer(ctx_->device(), fxBuffer_[frame], nullptr);
+      vkFreeMemory(ctx_->device(), fxMem_[frame], nullptr);
+      fxBuffer_[frame] = VK_NULL_HANDLE;
+      fxMem_[frame] = VK_NULL_HANDLE;
+    }
+    const std::size_t capacity = std::max<std::size_t>(records * 2, 1024);
+    if (auto r = makeBuffer(
+            *ctx_, kHeader + capacity * sizeof(view::CellFx),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            fxBuffer_[frame], fxMem_[frame]);
+        !r.has_value()) {
+      return r;
+    }
+    fxCapacity_[frame] = capacity;
+    VkDescriptorBufferInfo info{fxBuffer_[frame], 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = fxSets_[frame];
+    write.dstBinding = 0;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.pBufferInfo = &info;
+    vkUpdateDescriptorSets(ctx_->device(), 1, &write, 0, nullptr);
+  }
+  void* mapped = nullptr;
+  vkMapMemory(ctx_->device(), fxMem_[frame], 0, kHeader + records * sizeof(view::CellFx), 0,
+              &mapped);
+  const view::FxGlobals& g = set.fxGlobals;
+  const float header[8] = {g.bezel,   g.backdrop, g.hudDraw, g.hudLevel,
+                           g.tint[0], g.tint[1],  g.tint[2], static_cast<float>(records)};
+  std::memcpy(mapped, header, kHeader);
+  char* out = static_cast<char*>(mapped) + kHeader;
+  if (set.cellFx.empty()) {
+    std::memcpy(out, &kNeutral, sizeof(view::CellFx));
+  } else {
+    std::memcpy(out, set.cellFx.data(), set.cellFx.size() * sizeof(view::CellFx));
+  }
+  vkUnmapMemory(ctx_->device(), fxMem_[frame]);
+  return {};
+}
+
 Result<void> BoardRenderer::ensureSurfaceCapacity(std::uint32_t frame,
                                                   std::size_t vertices,
                                                   std::size_t indices) {
@@ -997,6 +1096,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     constexpr float kHalf = PlaySurface::kThickness * 0.5f;
     std::array<float, 4> prevNow{0.0f, 0.0f, 0.0f,
                                  -1.0f};  // per patch, see the capture pulse
+    std::uint32_t fxCellPlus = 0;  // the patch being pushed, for its fx record
     const auto push = [&](const view::Vec3& at, const view::Vec3& n, float h,
                           const float rgba[4], float u, float panelV, float tag,
                           float seed = 0, float effectWeight = 0, float heat = 0) {
@@ -1010,7 +1110,11 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       mv.height = h;
       mv.panelCoord[0] = u;
       mv.panelCoord[1] = panelV;
-      mv.panelCoord[2] = tag;
+      // The cell's fx record rides in the tag's magnitude (+-1 plus two per cell + 1), so
+      // the board mesh needs no vertex input of its own.
+      mv.panelCoord[2] = tag == 0.0f ? 0.0f
+                                     : (tag > 0.0f ? 1.0f : -1.0f) *
+                                           (1.0f + 2.0f * static_cast<float>(fxCellPlus));
       mv.panelSignal[0] = seed;
       mv.panelSignal[2] = effectWeight;
       mv.panelSignal[3] = heat;
@@ -1025,6 +1129,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     };
 
     for (const SurfacePatch& patch : surf.patches()) {
+      fxCellPlus = patch.cell + 1;
       const view::Rgba fill = fillFor(patch.cell);
       // An LED capture: the captured cell's own emitters switch to the capture colour and
       // settle back through the per-emitter transition (no slab drawn over the board).
@@ -1202,6 +1307,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
           pc = view::tintedPiece(pc, p, tintCell, travelling, theme_);
           Instance body{};
+          if (tintCell != kInvalidCell) body.fxCell = fxIndex(tintCell, true);
           // Standing on the square, not in it: the piece's foot is its own local z = 0.
           // The icon-faced puck (M17.25) is the exception - it is centred *on* the
           // surface so it protrudes on both sides, which is what lets a flipped seat show
@@ -1542,6 +1648,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     }
 
     Instance body{};
+    if (tintCell != kInvalidCell) body.fxCell = fxIndex(tintCell, true);
     body.center[0] = x;
     body.center[1] = y;
     body.center[2] = z + half.z;
@@ -1569,6 +1676,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     const int parity = squareParity(c, drawn, drawnCount, options_.swapLayerColors);
 
     Instance cell{};
+    cell.fxCell = fxIndex(pl.cell, false);
     cell.center[0] = pl.x;
     cell.center[1] = pl.y;
     cell.center[2] = pl.z;
@@ -2176,6 +2284,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
+  if (auto r = uploadFx(frame, set); !r.has_value()) return r;
   if (auto r = ensureSurfaceCapacity(frame, set.surfaceVertices.size(),
                                      set.surfaceIndices.size());
       !r.has_value()) {
@@ -2357,7 +2466,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       bp.params[2] = camera.orthographic ? 0.0f : 1.0f;
       bp.board[0] = glow.hx;
       bp.board[1] = glow.hy;
-      bp.board[2] = 0.45f;
+      // Boot ramps the room's glow up with the board (M23.10 section 3).
+      const float ramp = std::clamp(set.fxGlobals.backdrop, 0.0f, 1.0f);
+      for (int c = 0; c < 3; ++c) bp.inner[c] = bp.outer[c] + (bp.inner[c] - bp.outer[c]) * ramp;
+      bp.board[2] = 0.45f * ramp;
       bp.board[3] = push.visual[1];
       // The corner falloff moves into the composite when post is on, so it is applied once
       // and reaches the board's geometry too.
@@ -2404,6 +2516,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
          static_cast<std::uint32_t>(board.height)}};
     vkCmdSetViewport(cmd, 0, 1, &boardViewport);
     vkCmdSetScissor(cmd, 0, 1, &boardScissor);
+    // The effect records: bound after the background callback, which may have bound
+    // layouts of its own.
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1,
+                            &fxSets_[frame], 0, nullptr);
 
     // The shape view's icon-faced pucks (M17.25): one option for the whole frame, because
     // every surface piece switches together. Scoped to the surface path - the flat board
@@ -2706,6 +2822,12 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(vertexMem_, o.vertexMem_);
   std::swap(indexBuffer_, o.indexBuffer_);
   std::swap(indexMem_, o.indexMem_);
+  std::swap(fxSetLayout_, o.fxSetLayout_);
+  std::swap(fxPool_, o.fxPool_);
+  std::swap(fxSets_, o.fxSets_);
+  std::swap(fxBuffer_, o.fxBuffer_);
+  std::swap(fxMem_, o.fxMem_);
+  std::swap(fxCapacity_, o.fxCapacity_);
   std::swap(instanceBuffer_, o.instanceBuffer_);
   std::swap(instanceMem_, o.instanceMem_);
   std::swap(instanceCapacity_, o.instanceCapacity_);
@@ -2727,6 +2849,8 @@ BoardRenderer::~BoardRenderer() {
   for (VkPipeline hp : {hdrPipeline_, hdrBlendPipeline_, hdrBackdropPipeline_})
     if (hp != VK_NULL_HANDLE) vkDestroyPipeline(d, hp, nullptr);
   if (layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, layout_, nullptr);
+  if (fxPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, fxPool_, nullptr);
+  if (fxSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(d, fxSetLayout_, nullptr);
   if (backdropPipeline_ != VK_NULL_HANDLE)
     vkDestroyPipeline(d, backdropPipeline_, nullptr);
   if (backdropLayout_ != VK_NULL_HANDLE)
@@ -2751,6 +2875,7 @@ BoardRenderer::~BoardRenderer() {
   destroyBuffer(indexBuffer_, indexMem_);
   for (std::uint32_t f = 0; f < kFramesInFlight; ++f) {
     destroyBuffer(instanceBuffer_[f], instanceMem_[f]);
+    destroyBuffer(fxBuffer_[f], fxMem_[f]);
     destroyBuffer(surfaceVertexBuffer_[f], surfaceVertexMem_[f]);
     destroyBuffer(surfaceIndexBuffer_[f], surfaceIndexMem_[f]);
   }

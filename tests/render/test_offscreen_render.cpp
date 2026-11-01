@@ -521,14 +521,14 @@ TEST_CASE("LED patch coordinates stay attached through slide and inversion",
                                     static_cast<std::size_t>(i * side + j)];
           CHECK(top.panelCoord[0] == static_cast<float>(j) / PlaySurface::kSubdiv);
           CHECK(top.panelCoord[1] == static_cast<float>(i) / PlaySurface::kSubdiv);
-          CHECK(top.panelCoord[2] == 1);
+          CHECK(top.panelCoord[2] >= 1);  // +1, plus two per cell for its fx record
           CHECK(std::equal(std::begin(top.panelCoord), std::end(top.panelCoord),
                            bottom.panelCoord));
         }
       }
       for (std::size_t k = 2 * faceVertices; k < perPatch; ++k) {
         const auto& vert = first.surfaceVertices[base + k];
-        CHECK(vert.panelCoord[2] == -1);
+        CHECK(vert.panelCoord[2] <= -1);
         CHECK(vert.panelCoord[0] >= 0);
         CHECK(vert.panelCoord[0] <= 1);
         CHECK(vert.panelCoord[1] >= 0);
@@ -566,8 +566,8 @@ TEST_CASE("LED panel signal has a dedicated zero-default GPU payload",
           "[render][led][led-ambient]") {
   CHECK(sizeof(MeshVertex) == 88);
   CHECK(offsetof(MeshVertex, panelSignal) == 56);
-  CHECK(sizeof(Instance) == 116);
-  CHECK(offsetof(Instance, panelSignal) == 84);
+  CHECK(sizeof(Instance) == 120);
+  CHECK(offsetof(Instance, panelSignal) == 88);
   const Instance instance;
   CHECK(std::all_of(std::begin(instance.panelSignal), std::end(instance.panelSignal),
                     [](float f) { return f == 0; }));

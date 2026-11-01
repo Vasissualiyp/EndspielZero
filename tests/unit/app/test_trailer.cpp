@@ -57,6 +57,7 @@ TEST_CASE("the trailer never follows a piece, even on a flat board with route se
   shell->settings().cameraMode = "route";
   shell->settings().followStrength = 1.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   REQUIRE(shell->attracting());
   REQUIRE(shell->currentVariant() == "standard");
   CHECK_FALSE(shell->session()->followsMove());
@@ -70,6 +71,7 @@ TEST_CASE("the trailer never follows a piece, even on a flat board with route se
 TEST_CASE("the Follow camera mode restores the chase", "[unit][app][trailer]") {
   auto shell = makeShell("trailer-follow2.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Follow);
   CHECK(shell->session()->followsMove());
   shell->setTrailerCamera(TrailerCamera::Auto);
@@ -80,6 +82,7 @@ TEST_CASE("the Auto camera sways a few degrees and Authored holds still",
           "[unit][app][trailer]") {
   auto shell = makeShell("trailer-sway.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Auto);  // the default is the authored camera
   run(*shell, 10.0f);
   const view::OrbitCamera base = shell->session()->camera();
@@ -108,6 +111,7 @@ TEST_CASE("edit mode freezes the trailer and selects the authored camera",
           "[unit][app][trailer]") {
   auto shell = makeShell("trailer-edit.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   run(*shell, 3.0f);
   shell->setTrailerEditing(true);
   CHECK(shell->trailerEditing());
@@ -126,6 +130,7 @@ TEST_CASE("edit mode freezes the trailer and selects the authored camera",
 TEST_CASE("stepping in edit mode lands on the requested ply", "[unit][app][trailer]") {
   auto shell = makeShell("trailer-step.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerEditing(true);
   CHECK_FALSE(shell->trailerStep(-5));  // cannot go before the start
   for (int i = 0; i < 6; ++i) CHECK(shell->trailerStep(+1));
@@ -144,6 +149,7 @@ TEST_CASE("jumping to a beat replays the chain so it continues the position",
           "[unit][app][trailer]") {
   auto shell = makeShell("trailer-goto.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerEditing(true);
   shell->trailerGoto(2, 0);
   CHECK(shell->attractStep() == 2);
@@ -170,6 +176,7 @@ TEST_CASE(
     "[unit][app][trailer]") {
   auto shell = makeShell("trailer-record.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerEditing(true);
   shell->setTrailerCamera(TrailerCamera::Auto);  // recording must switch to Authored
   shell->trailerGoto(1, 0);
@@ -194,6 +201,7 @@ TEST_CASE("changing a setting mid-trailer does not hand the camera back to the p
   shell->settings().cameraMode = "route";
   shell->settings().followStrength = 1.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->applySettings();
   CHECK_FALSE(shell->session()->followsMove());
 }
@@ -228,6 +236,7 @@ TEST_CASE("trailer look overrides survive the beat cut and clear on stop",
           "[unit][app][trailer]") {
   auto shell = makeShell("trailer-override.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerFlatPieces(true);
   shell->setTrailerGhost(0.5f);
   run(*shell, 400.0f);  // across several cuts
@@ -247,6 +256,7 @@ TEST_CASE("the trailer previews each move for the configured time",
   CHECK(shell->settings().trailerMovePreview == 0.5f);
   shell->settings().trailerMovePreview = 0.3f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   bool sawPreview = false;
   constexpr float kStep = 1.0f / 60.0f;
   for (int i = 0; i < 600 && !sawPreview; ++i) {
@@ -263,6 +273,7 @@ TEST_CASE("a beat jump asked for by the interface waits for the next frame",
   // replaces the session, so doing it mid-frame left the panel on a dead one and crashed.
   auto shell = makeShell("trailer-defer.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerEditing(true);
   const Session* before = shell->session();
   shell->requestTrailerJumpBeat(+1);
@@ -305,6 +316,7 @@ TEST_CASE("between keyframes the trailer camera keeps moving smoothly",
   auto shell = makeShell("trailer-spline.conf");
   shell->settings().watchDwell = 0.3f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Authored);
   for (const auto& [ply, yaw] : {std::pair{1, 0.0f}, std::pair{5, 0.6f},
                                  std::pair{9, 0.2f}, std::pair{13, 1.0f}}) {
@@ -339,6 +351,7 @@ TEST_CASE("the 3-D morph is part of a trailer keyframe and a beat still ends",
   shell->settings().watchDwell = 0.05f;
   shell->settings().trailerMovePreview = 0.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Authored);
   shell->cameraTrack().set(trailerKey(1, 1, 0, 0.3f, 0.2f, "cylinder"));
   shell->cameraTrack().set(trailerKey(1, 9, 0, 0.3f, 0.8f, "cylinder"));
@@ -366,6 +379,7 @@ TEST_CASE("fractional steps move through a move on the chosen grid",
           "[unit][app][trailer][spline]") {
   auto shell = makeShell("trailer-grid.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerEditing(true);
   CHECK(shell->trailerGrid() == 1);
   shell->setTrailerGrid(4);
@@ -397,6 +411,7 @@ TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][tra
   auto shell = makeShell("trailer-restart.conf");
   shell->settings().watchDwell = 0.05f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   constexpr float kStep = 1.0f / 60.0f;
   for (int i = 0; i < 60 * 60 && shell->attractStep() < 2; ++i) {
     shell->session()->advanceAnimation(kStep);
@@ -412,6 +427,10 @@ TEST_CASE("restarting the trailer goes back to the first beat", "[unit][app][tra
   CHECK(shell->currentVariant() == "standard");
   CHECK(shell->attracting());
   CHECK(shell->trailerCamera() == TrailerCamera::Authored);  // the mode is kept
+  // A fresh start boots again, and the first move waits for it.
+  CHECK(shell->trailerBootAge().has_value());
+  CHECK(shell->session()->game().moveHistory().empty());
+  shell->skipTrailerBoot();
   CHECK(shell->session()->game().moveHistory().size() == 1);
 }
 
@@ -420,6 +439,7 @@ TEST_CASE("a zoom-in between two keyframes lands between them, not at the close 
   auto shell = makeShell("trailer-zoom.conf");
   shell->settings().watchDwell = 0.3f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Authored);
   CameraKeyframe far = trailerKey(0, 1, 0, 0.5f);
   far.camera.distance = 40.0f;
@@ -453,6 +473,7 @@ TEST_CASE("the authored camera (and so edit mode) owns the camera",
   auto shell = makeShell("trailer-owns.conf");
   CHECK_FALSE(shell->trailerOwnsCamera());  // no trailer
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   CHECK_FALSE(shell->trailerOwnsCamera());  // Auto
   shell->setTrailerCamera(TrailerCamera::Authored);
   CHECK_FALSE(
@@ -509,6 +530,7 @@ TEST_CASE("keyframe times for the timeline are in order and offset by beat",
           "[unit][app][trailer][timeline]") {
   auto shell = makeShell("trailer-keytimes.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->cameraTrack().set(trailerKey(1, 3, 4, 0.1f, 1.0f, "cylinder"));
   shell->cameraTrack().set(trailerKey(0, 2, 0, 0.1f));
   shell->cameraTrack().set(trailerKey(0, 2, 2, 0.1f));
@@ -528,6 +550,7 @@ TEST_CASE("keyframe times for the timeline are in order and offset by beat",
 TEST_CASE("a timeline click seeks a frame later", "[unit][app][trailer][timeline]") {
   auto shell = makeShell("trailer-seek.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
 
   shell->setTrailerEditing(true);
   // Within the beat: same session, the move and fraction set.
@@ -552,6 +575,7 @@ TEST_CASE("a beat's own morph plays until its first keyframe takes over",
   shell->settings().watchDwell = 0.05f;
   shell->settings().trailerMovePreview = 0.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Authored);
   // Keys only in the cylinder beat, from move 6; a formed value of 1 would, held across
   // the whole trailer, erase every beat's reveal.
@@ -605,6 +629,7 @@ TEST_CASE(
     shell->settings().animationSpeed = 1.0f;
     shell->settings().trailerMoveSpeed = moveSpeed;
     shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
     return shell->session()->animation().duration();
   };
   const float normal = firstMoveSeconds(1.0f);
@@ -618,6 +643,7 @@ TEST_CASE(
     shell->settings().watchDwell = 0.05f;
     shell->settings().trailerMorphSpeed = morphSpeed;
     shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
     while (shell->attractStep() < 1) {
       shell->session()->advanceAnimation(1.0f / 60.0f);
       shell->advanceAttract(1.0f / 60.0f);
@@ -640,6 +666,7 @@ TEST_CASE("pausing freezes the trailer without entering edit mode",
           "[unit][app][trailer][pause]") {
   auto shell = makeShell("trailer-pause.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   constexpr float kStep = 1.0f / 60.0f;
   for (int i = 0; i < 90; ++i) {
     shell->session()->advanceAnimation(kStep);
@@ -672,6 +699,7 @@ TEST_CASE("clicking the timeline while playing moves there and keeps playing",
   shell->settings().watchDwell = 0.05f;
   shell->settings().trailerMovePreview = 0.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   constexpr float kStep = 1.0f / 60.0f;
   shell->requestTrailerSeek(2, 4, 4);
   CHECK(shell->advanceAttract(kStep));  // across beats: a cut
@@ -702,6 +730,7 @@ TEST_CASE("keys step to the next and previous keyframe", "[unit][app][trailer][k
   auto shell = makeShell("trailer-keynav.conf");
   shell->settings().watchDwell = 0.05f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->cameraTrack().set(trailerKey(0, 3, 0, 0.1f));
   shell->cameraTrack().set(trailerKey(0, 7, 4, 0.2f));
   shell->cameraTrack().set(trailerKey(1, 2, 0, 0.3f, 1.0f, "cylinder"));  // the cylinder beat
@@ -734,6 +763,7 @@ TEST_CASE("a keyframe added while the trailer plays lands on the nearest eighth"
   shell->settings().watchDwell = 0.6f;
   shell->settings().trailerMovePreview = 0.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   constexpr float kStep = 1.0f / 60.0f;
   for (int i = 0; i < 60 * 2; ++i) {
     shell->session()->advanceAnimation(kStep);
@@ -759,6 +789,7 @@ TEST_CASE("space pauses and resumes; touching the camera pauses into edit mode",
           "[unit][app][trailer][keys]") {
   auto shell = makeShell("trailer-space.conf");
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->toggleTrailerPause();
   CHECK(shell->trailerPaused());
   shell->toggleTrailerPause();
@@ -789,6 +820,7 @@ TEST_CASE("the camera is carried across a cut, not reset to the new beat's defau
   shell->settings().watchDwell = 0.05f;
   shell->settings().trailerMovePreview = 0.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   Action orbit;
   orbit.kind = ActionKind::Orbit;
   orbit.dx = 1.1f;
@@ -834,6 +866,7 @@ TEST_CASE("a keyframe at a beat's first move does not erase the 3-D torus's spre
   shell->settings().watchDwell = 0.05f;
   shell->settings().trailerMovePreview = 0.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Authored);
   for (const std::size_t ply : {std::size_t{0}, std::size_t{6}}) {
     CameraKeyframe kf = trailerKey(5, ply, 0, 0.3f, 1.0f, "torus3d_8x8");
@@ -874,6 +907,7 @@ TEST_CASE("the cylinder's roll blends into its first keyframe instead of snappin
   shell->settings().watchDwell = 0.05f;
   shell->settings().trailerMovePreview = 0.0f;
   shell->startAttract(defaultAttractSequence());
+  shell->skipTrailerBoot();  // these tests are about the beats, not the power-on
   shell->setTrailerCamera(TrailerCamera::Authored);
   shell->cameraTrack().set(trailerKey(1, 1, 0, 0.3f, 1.0f, "cylinder"));
   constexpr float kStep = 1.0f / 60.0f;
@@ -917,4 +951,54 @@ TEST_CASE("the live keyframe blend takes the short way round", "[unit][app][trai
   }
   CHECK(prev == Catch::Approx(32.0f).margin(1e-3));
   CHECK(travel < 2.01f);
+}
+
+TEST_CASE("the trailer boots its first board once per fresh start, on its own clock",
+          "[unit][app][trailer][boot]") {
+  auto shell = makeShell("trailer-boot.conf");
+  shell->settings().watchDwell = 0.1f;
+  shell->settings().trailerMovePreview = 0.0f;
+  AttractSequence seq;
+  for (int i = 0; i < 2; ++i) {
+    AttractStep step;
+    step.variant = "standard";
+    step.moves = {"e2e4", "e7e5"};
+    step.formedTarget = 0.0f;
+    step.formedFrom = 0.0f;
+    seq.push_back(step);
+  }
+  shell->startAttract(seq);
+  constexpr float kStep = 1.0f / 60.0f;
+  REQUIRE(shell->trailerBootAge().has_value());
+  CHECK(*shell->trailerBootAge() == 0.0f);
+  const auto step = [&] {
+    shell->session()->advanceAnimation(kStep);
+    shell->advanceAttract(kStep);
+  };
+  // The beat's schedule waits: no move has been played and the timeline has not moved.
+  for (int i = 0; i < 60; ++i) step();
+  REQUIRE(shell->trailerBootAge().has_value());
+  CHECK(*shell->trailerBootAge() == Catch::Approx(1.0f).margin(0.02));
+  CHECK(shell->session()->game().moveHistory().empty());
+  CHECK(shell->trailerTime() == 0.0f);
+  // Edit mode shows the settled board.
+  shell->setTrailerEditing(true);
+  CHECK_FALSE(shell->trailerBootAge().has_value());
+  shell->setTrailerEditing(false);
+  for (int i = 0; i < 60; ++i) step();
+  CHECK_FALSE(shell->trailerBootAge().has_value());
+  // The second beat and the second lap never boot.
+  bool secondBeat = false;
+  bool wrapped = false;
+  for (int i = 0; i < 60 * 60 && !wrapped; ++i) {
+    step();
+    CHECK_FALSE(shell->trailerBootAge().has_value());
+    if (shell->attractStep() == 1) secondBeat = true;
+    if (secondBeat && shell->attractStep() == 0) wrapped = true;
+  }
+  CHECK(secondBeat);
+  CHECK(wrapped);
+  // Starting again from the beginning boots again.
+  shell->startAttract(seq);
+  CHECK(shell->trailerBootAge().has_value());
 }

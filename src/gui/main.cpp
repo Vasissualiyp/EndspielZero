@@ -25,12 +25,14 @@
 #include <string>
 #include <vector>
 
+#include "app/fx_timeline.hpp"
 #include "app/game_runner.hpp"
 #include "app/shell.hpp"
 #include "audio/audio.hpp"
 #include "io/game_file.hpp"
 #include "io/moveset_library.hpp"
 #include "io/variant_toml.hpp"
+#include "render/board_fx.hpp"
 #include "render/board_renderer.hpp"
 #include "render/image_io.hpp"
 #include "render/panel_response.hpp"
@@ -53,6 +55,9 @@ float gUiScaleOverride = -1.0f;
 /// setting".
 int gPostOverride = -1;
 float gBloomOverride = -1.0f;
+/// --boot-t <s>: render the board as if the boot sequence were `s` seconds old. Negative
+/// means no override. Captures only; they never run a clock of their own.
+float gBootT = -1.0f;
 
 float resolveUiScale(const app::Settings& settings) {
   return gUiScaleOverride > 0.0f ? gUiScaleOverride : settings.guiScale;
@@ -67,6 +72,18 @@ void applyPost(render::BoardRenderer& renderer, const app::Settings& settings) {
     reported = true;
     std::fprintf(stderr, "%s; continuing without it\n", renderer.postUnavailable().c_str());
   }
+}
+
+/// The effects a capture asks for through --boot-t, in the renderer's own terms.
+render::BoardFxState captureFx(const render::BoardRenderer& renderer,
+                               const app::Shell& shell) {
+  render::BoardFxState fx;
+  if (gBootT >= 0.0f) fx.bootAge = gBootT;
+  // The trailer's first board powers on on the trailer's own clock.
+  if (shell.attracting()) fx.bootAge = shell.trailerBootAge();
+  fx.intensity = renderer.options().presentationIntensity;
+  fx.ledCells = renderer.theme().materials.cells == view::Material::Led;
+  return fx;
 }
 
 view::Theme resolveTheme(const app::Settings& settings) {
@@ -868,6 +885,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
           [&](CellId c) { return shell->session()->boardVisible(c); },
           [&](CellId c) { return shell->session()->game().cellInPresent(c); },
           shell->session()->timelineLinks());
+      render::applyBoardFx(instances, *shell->session(), captureFx(*renderer, *shell));
     }
     const view::OrbitCamera camera =
         shell->showsBoard()
@@ -1399,7 +1417,14 @@ int main(int argc, char** argv) {
         return 1;
       }
     }
-    else if (arg == "--matte")
+    else if (arg == "--boot-t" && i + 1 < argc) {
+      char* end = nullptr;
+      gBootT = std::strtof(argv[++i], &end);
+      if (*end != '\0' || !std::isfinite(gBootT) || gBootT < 0.0f) {
+        std::fprintf(stderr, "--boot-t requires seconds >= 0\n");
+        return 1;
+      }
+    } else if (arg == "--matte")
       gMatteCapture = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
       gUiScaleOverride = std::strtof(argv[++i], nullptr);
@@ -1576,6 +1601,8 @@ int main(int argc, char** argv) {
   double visualSeconds = 0;
   render::PanelResponse panelResponse;
   std::vector<render::PanelTarget> panelTargets;
+  // Stamps the session's presentation events (boot, ...) with this loop's visual clock.
+  app::FxTimeline fxTimeline;
   // Hover aids (M20): events only mark the pointer dirty; the cell is resolved once per
   // frame, because the shape view's pick builds a whole surface.
   bool hoverDirty = false;
@@ -1638,6 +1665,12 @@ int main(int argc, char** argv) {
       } else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) &&
                  (e.key.key == SDLK_LCTRL || e.key.key == SDLK_RCTRL)) {
         hoverDirty = true;
+      }
+
+      // The first click or key completes the board's boot at once and is then handled
+      // normally (M23.10 section 3).
+      if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        fxTimeline.skipBoot();
       }
 
       switch (e.type) {
@@ -2008,8 +2041,14 @@ int main(int argc, char** argv) {
     // stands down rather than advancing the same runner twice (M13.9).
     if (!shell->attracting()) shell->advanceWatching(dt);
     // The computer opponent (M10.2-M10.3): it thinks on a worker, so this only starts a
-    // search or collects an answer - the frame is never held up by it.
-    if (!shell->attracting()) (void)shell->advanceEngine(dt);
+    // search or collects an answer - the frame is never held up by it. It waits for the
+    // board to finish powering on (M23.10).
+    fxTimeline.observe(shell->hasGame() ? shell->session() : nullptr, visualSeconds,
+                       shell->screen() == app::Screen::Game && !shell->attracting(),
+                       shell->attracting());
+    if (!shell->attracting() && !fxTimeline.booting(visualSeconds)) {
+      (void)shell->advanceEngine(dt);
+    }
 
     // The attract sequence (M13.9): started from the "Watch trailer" button, never by
     // merely sitting on the menu. It plays on the ordinary game screen like a watched
@@ -2250,6 +2289,12 @@ int main(int argc, char** argv) {
           [&](CellId c) { return shell->session()->game().cellInPresent(c); },
           shell->session()->timelineLinks(), collectPanels ? &panelTargets : nullptr);
       if (collectPanels) panelResponse.apply(instances, panelTargets, visualSeconds);
+      render::BoardFxState fx;
+      fx.bootAge = shell->attracting() ? shell->trailerBootAge()
+                                       : fxTimeline.bootAge(visualSeconds);
+      fx.intensity = renderer->options().presentationIntensity;
+      fx.ledCells = renderer->theme().materials.cells == view::Material::Led;
+      render::applyBoardFx(instances, *shell->session(), fx);
       camera = boardCamera(*shell, shapeSeq);
     }
 

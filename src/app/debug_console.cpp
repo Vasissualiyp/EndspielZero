@@ -208,6 +208,10 @@ std::string execute(Shell& shell, const std::string& line) {
     const auto ok = session->playMoveText(w[1]);
     return ok.has_value() ? "played " + w[1] : ok.error().format();
   }
+  if (cmd == "boot") {
+    session->requestBoot();  // the front end stamps it on its next frame
+    return "booting the board";
+  }
   if (cmd == "undo" || cmd == "reset") {
     Action a;
     a.kind = cmd == "undo" ? ActionKind::Undo : ActionKind::Reset;
@@ -335,6 +339,7 @@ std::string DebugConsole::help() {
          "get [<setting>]          show settings; set <setting> <value> changes one\n"
          "dev [on|off]             developer overlay; no argument toggles it\n"
          "post [on|off]            post processing; no argument toggles it\n"
+         "boot                     replay the board's power-on sequence\n"
          "info                     variant summary: pieces, moves, marks, compounds\n"
          "fen | setfen <fen>       show or replace the position\n"
          "place <cell> <symbol>    put a piece (Q white, q black); remove <cell>; side "

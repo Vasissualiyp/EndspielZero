@@ -26,6 +26,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `set <setting> <value>` | Change one setting. The value goes through the settings-file parser, so it accepts the same syntax as the file |
 | `post [on\|off]` | Turn post-processing (HDR scene, emissive bloom, tone map, grain/dither; ADR-0025) on or off; no argument toggles it. Default on; works without a loaded game. Also `get`/`set postProcess` or `post_process`, and `bloomScale` or `bloom_scale` (finite, clamped to 0..4, multiplies the theme's bloom; 0 skips the bloom passes) |
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
+| `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
 | `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
 | `fen` / `setfen <fen>` | Show or replace the position |
 | `place <cell> <symbol>` | Put a piece on a cell (`Q` white, `q` black) |
@@ -92,6 +93,8 @@ groups:
   - `--post 0|1` forces post-processing off or on and `--bloom <0..4>` scales its bloom, for
     this run only. Use `--post 0` for A/B captures and as the recovery path if the device
     cannot run post (it is reported once on stderr and the legacy path is used).
+  - `--boot-t <s>` renders the board as if its boot sequence were `s` seconds old (0 to 1.8;
+    later is settled), for captures. Run-only.
   - `--theme <name>` picks the palette.
   - `--matte` turns materials off.
   - `--ui-scale N` sets the interface scale.

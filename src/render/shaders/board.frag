@@ -17,6 +17,21 @@ layout(location = 9) in vec3 fragObject;
 layout(location = 10) in vec3 fragPanel;
 layout(location = 11) in vec4 fragPanelSignal;
 layout(location = 12) in vec4 fragPanelPrev;
+layout(location = 13) flat in vec2 fragFx;
+
+// Board presentation effects (M23.10): boot, check ripple and the game-end power-down.
+// One record per cell, mirrored by view::CellFx; record 0 is the neutral one. The header is
+// view::FxGlobals: g0 = (bezel, backdrop, hudDraw, hudLevel), g1 = (tint rgb, record count).
+struct CellFx {
+    vec4 a;  // power, flicker, reveal, heat
+    vec4 b;  // rippleAmp, ripplePhase, tintMix, glitch
+    vec4 c;  // opacity, scanJitter, gain, onAge
+};
+layout(std430, set = 0, binding = 0) readonly buffer FxBuffer {
+    vec4 g0;
+    vec4 g1;
+    CellFx cells[];
+} fxBuf;
 
 layout(push_constant) uniform Push {
     mat4 viewProj;
@@ -179,6 +194,13 @@ float emitterMask(vec2 pitch, vec2 footprint, float undersampled) {
 
 void main() {
     int matId = int(fragMaterial);
+    uint fxIndex = uint(fragFx.x);
+    if (fxIndex >= uint(fxBuf.g1.w)) fxIndex = 0u;  // g1.w = records written
+    const CellFx fx = fxBuf.cells[fxIndex];
+    const bool isPiece = fragFx.y > 0.5;
+    // A piece is revealed from its foot up; whatever is above the reveal height is not
+    // there yet.
+    if (isPiece && fx.a.z < 1.0 && fragHeight >= fx.a.z) discard;
     float matVar = fragMaterial - float(matId);
     // Two-sided: turn the normal toward the viewer before lighting, so a fragment on
     // either side of the surface is shaded the same.
@@ -260,10 +282,12 @@ void main() {
         float weightRaw = fragPanelSignal.z;
         float weight = clamp(abs(weightRaw), 0.0, 1.0);
         bool cue = weightRaw < 0.0;  // a gameplay colour is shown: no glitches here
+        // No ambient interference until a cell has been on for 0.3 s, and none before it.
+        const bool quiet = !isPiece && ((fx.c.w >= 0.0 && fx.c.w < 0.3) || fx.c.w < -1.5);
 
         vec2 pitch = panelPitch;
         Glitch glitch = Glitch(false, 0.0, 0u, 0u);
-        if (alive && intensity >= 0.5 && !cue && undersampled < 0.5)
+        if (alive && intensity >= 0.5 && !cue && !quiet && undersampled < 0.5)
             glitch = panelGlitch(seed16, seconds, push.visual.z);
         float rowIndex = floor(panelPitch.y);
         float glitchRow = float(glitch.lane % 22u) + 1.0;
@@ -281,8 +305,12 @@ void main() {
         // gameplay colours emit and a dark square stays a dark square.
         vec3 cellCol = fragColor.rgb;
         float landing = 0.0;
-        if (alive && fragPanelPrev.w >= 0.0) {
-            float age = fragPanelPrev.w;
+        // Boot (M23.10 section 3): a powering-on cell comes up from dark through the same
+        // per-emitter transition a colour change uses.
+        vec4 prevState = fragPanelPrev;
+        if (!isPiece && fx.c.w >= 0.0) prevState = vec4(fragColor.rgb * 0.08, fx.c.w);
+        if (alive && prevState.w >= 0.0) {
+            float age = prevState.w;
             float x;
             if (undersampled > 0.5) {
                 x = clamp((age - 0.02) / 0.06, 0.0, 1.0);
@@ -291,7 +319,7 @@ void main() {
                 x = clamp((age - t.x) / t.y, 0.0, 1.0);
             }
             float p = x * x * (3.0 - 2.0 * x);
-            cellCol = mix(fragPanelPrev.rgb, fragColor.rgb, p);
+            cellCol = mix(prevState.rgb, fragColor.rgb, p);
             // A slight brightness overshoot as an emitter lands.
             landing = 0.10 * sin(3.14159265 * clamp((x - 0.55) / 0.45, 0.0, 1.0)) * intensity;
         }
@@ -323,6 +351,8 @@ void main() {
         level += vec3(0.06 * emitAmt * face);
         rgb = cellCol * level * (1.0 + landing) * mix(0.58, 1.0, face);
         if (!lit) rgb = fragColor.rgb * 0.55;
+        // Boot / power-down light level, on the cell only (the piece on it has its own).
+        if (!isPiece) rgb *= fx.a.x * fx.a.y;
 
         if (alive) {
             // Breathing: a slow per-cell variation. Periods are 120 / k seconds, so the
@@ -344,7 +374,7 @@ void main() {
             // Wandering emitter faults (mirror of emitterFault in panel_alive.cpp): about
             // one cell in six has up to two, each living 8-60 s, fading in and out and
             // then reappearing elsewhere; blinkers blink ~1-3 times a second.
-            if (intensity >= 0.5 && panelHash(seed16 ^ 0x1b873593u) % 6u == 0u &&
+            if (intensity >= 0.5 && !quiet && panelHash(seed16 ^ 0x1b873593u) % 6u == 0u &&
                 undersampled < 0.5) {
                 const uint kPeriods[9] = uint[9](8u, 10u, 12u, 15u, 20u, 24u, 30u, 40u, 60u);
                 for (uint slot = 0u; slot < 2u; ++slot) {
@@ -376,7 +406,7 @@ void main() {
             float strip = panelInterference(puv, seed16, seconds);
             float settle = clamp(fragPanelSignal.y, -0.04, 0.04);
             rgb *= 1.0 + (strip + settle) * clamp(weight, 0.0, 1.0) * face *
-                         (1.0 - undersampled);
+                         (1.0 - undersampled) * (quiet ? 0.0 : 1.0);
             if (glitch.on) {
                 if (glitch.kind == 1u) {
                     // The tear's own row runs brighter across the whole cell.
@@ -392,7 +422,10 @@ void main() {
         }
         // Projector base (D): a faint standing footprint, warm and neutral, and the
         // heat-up ahead of a handoff. Its own channel, never the colour response.
+        // The standing footprint belongs to the piece, so it arrives with the piece; boot
+        // adds its own heat-up on top.
         float heat = clamp(fragPanelSignal.w, 0.0, 1.0);
+        heat = max(heat * smoothstep(0.0, 0.25, fx.a.z), fx.a.w);
         if (lit && heat > 0.0) {
             // A neutral warm-white glow concentrated under the piece's base - never a cell
             // fill, so it cannot be read as a move cue.
@@ -403,6 +436,16 @@ void main() {
             vec3 warmWhite = vec3(1.0, 0.90, 0.72);
             rgb += warmWhite * (0.45 * heat * disc * disc * lattice) * face;
         }
+    }
+
+    // Other materials take the cell's light level too (boot and power-down on a plain
+    // board); the LED panel applied it above, inside its own emitter model.
+    if (matId != 7 && !isPiece) rgb *= fx.a.x * fx.a.y;
+    // The reveal's leading scan band, twice the brightness of the hologram's own scan
+    // line (M23.10 section 3).
+    if (isPiece && fx.a.z > 0.0 && fx.a.z < 1.0) {
+        float band = 1.0 - smoothstep(0.0, 0.07, abs(fragHeight - fx.a.z));
+        rgb += push.material.rgb * (0.64 * band);
     }
 
     if (matId == 5) {
@@ -438,9 +481,16 @@ void main() {
         if (onEdge) {
             float reach = max(abs(fragLocal.x) - inset.x, abs(fragLocal.y) - inset.y);
             float glow = clamp(reach / max(0.5 - min(inset.x, inset.y), 0.001), 0.0, 1.0);
-            rgb = mix(rgb, fragEdge.rgb, clamp(0.30 + 0.55 * glow, 0.0, 1.0));
+            // The lit bezel draws on around the perimeter at boot (M23.10 section 3):
+            // from the near-left corner, clockwise.
+            float bezel = 1.0;
+            if (matId == 3 && fragEdgeMask >= 15.0 && fxBuf.g0.x < 1.0) {
+                float s = fract((atan(fragLocal.y, fragLocal.x) + 2.3561945) / 6.2831853);
+                bezel = 1.0 - smoothstep(fxBuf.g0.x - 0.02, fxBuf.g0.x + 0.02, s);
+            }
+            rgb = mix(rgb, fragEdge.rgb, clamp(0.30 + 0.55 * glow, 0.0, 1.0) * bezel);
             // The board's lit bezel (M23.9 B): the plinth's rim on an emitting board glows.
-            if (matId == 3 && fragEdgeMask >= 15.0) rgb += fragEdge.rgb * 0.55;
+            if (matId == 3 && fragEdgeMask >= 15.0) rgb += fragEdge.rgb * (0.55 * bezel);
         }
     }
 

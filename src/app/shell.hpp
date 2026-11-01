@@ -265,6 +265,14 @@ class Shell {
   /// started a new beat - the first step, or a cut to the next variant - so the front end
   /// can push renderer options and re-frame the camera for the shape now loaded.
   bool advanceAttract(float dt);
+  /// Seconds into the first board's power-on (M23.10 section 3), or nullopt once it has
+  /// finished or while the trailer is in edit mode. The trailer boots once per fresh
+  /// start - never on a later beat, nor on the loop back to the first - and the first
+  /// beat's whole schedule waits for it, so this clock is the trailer's own `dt`.
+  [[nodiscard]] std::optional<float> trailerBootAge() const;
+  /// Finish the first board's power-on now and release its held first move. Tests of the
+  /// beat schedule use it to start from the moving trailer; so could a skip key.
+  void skipTrailerBoot();
 
   // ---- the trailer's own camera (M13.9 revision) -----------------------------------
   /// The camera mode. Applied to each beat's session; never written to `Settings`.
@@ -555,6 +563,8 @@ class Shell {
   /// A beat was entered outside `advanceAttract` (a jump); the next call reports it.
   bool trailerCutPending_{false};
   float trailerClock_{0.0f};
+  /// Seconds the first board has been powering on; the trailer holds until `kBootSeconds`.
+  float trailerBootClock_{0.0f};
   /// Added to the trailer timeline position so it stays continuous across a cut (a beat's
   /// first move starts at once, which would otherwise skip the clock ahead); it decays to
   /// 0.

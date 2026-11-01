@@ -109,3 +109,19 @@ TEST_CASE("post processing settings and aliases work before a game starts",
   CHECK(std::isfinite(shell->settings().bloomScale));
   CHECK(has(DebugConsole::help(), "post [on|off]"));
 }
+
+TEST_CASE("the console replays the board boot and help lists it", "[unit][app][boot]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  CHECK(has(DebugConsole::help(), "boot"));
+  CHECK(console.run(*shell, "load standard") == "started standard");
+  const std::uint64_t before = shell->session()->bootSerial();
+  CHECK(has(console.run(*shell, "boot"), "boot"));
+  CHECK(shell->session()->bootSerial() == before + 1);
+  // Undo does not boot; reset does.
+  console.run(*shell, "play e2e4");
+  console.run(*shell, "undo");
+  CHECK(shell->session()->bootSerial() == before + 1);
+  console.run(*shell, "reset");
+  CHECK(shell->session()->bootSerial() == before + 2);
+}

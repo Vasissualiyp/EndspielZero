@@ -21,7 +21,8 @@ layout(location = 3) in vec3 instCenter;
 layout(location = 4) in vec3 instScale;
 layout(location = 5) in vec4 instColor;
 layout(location = 6) in vec4 instEdge;    // seam colour; alpha 0 means no seam here
-layout(location = 7) in vec2 instEdgeRoll;  // x = edge mask, y = rotation about the mesh's own Z
+layout(location = 7) in vec3 instEdgeRoll;  // x = edge mask, y = rotation about the mesh's own Z,
+                                            // z = fx cell: 2 * (cell + 1) [+ 1 for its piece], 0 none
 
 layout(location = 8) in vec4 instPanelPrev;
 layout(location = 9) in float instMaterial;
@@ -48,6 +49,7 @@ layout(location = 9) out vec3 fragObject;
 layout(location = 10) out vec3 fragPanel;
 layout(location = 11) out vec4 fragPanelSignal;
 layout(location = 12) out vec4 fragPanelPrev;
+layout(location = 13) flat out vec2 fragFx;  // x = cell fx record, y = 1 for a piece
 
 // Rotate a vector by a unit quaternion.
 vec3 rotateByQuat(vec3 v, vec4 q) {
@@ -88,6 +90,11 @@ void main() {
     // Exactly one source carries a transition; a settled source is (0,0,0,-1), so the
     // other wins by taking the larger age and its colour.
     fragPanelPrev = (inPanelPrev.w >= 0.0 ? inPanelPrev : instPanelPrev);
+    // Which per-cell effect record this fragment reads (M23.10): the instance's, else the
+    // surface mesh's own, which rides in the tag's magnitude.
+    const float instRec = floor(instEdgeRoll.z * 0.5);
+    const float vertRec = max(floor((abs(inPanelCoord.z) - 1.0) * 0.5), 0.0);
+    fragFx = vec2(instRec > 0.0 ? instRec : vertRec, instEdgeRoll.z - 2.0 * instRec);
     fragLocal = inPosition.xy;
     fragEdge = instEdge;
     fragEdgeMask = instEdgeRoll.x;

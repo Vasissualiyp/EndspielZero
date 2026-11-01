@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/shell.hpp"
 
+#include "view/board_boot.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -636,7 +638,8 @@ Result<void> Shell::startAttractStep(std::size_t index) {
   file.moves = step.moves;
   if (auto ok = session_->startWatching(
           std::move(file), step.dwell >= 0.0f ? step.dwell : settings_.watchDwell,
-          settings_.trailerMovePreview);
+          settings_.trailerMovePreview,
+          /*holdFirstMove=*/index == 0 && trailerBootClock_ < view::kBootSeconds);
       !ok.has_value()) {
     message_ = ok.error().format();
     return fail(ok.error().code, ok.error().message);
@@ -805,6 +808,7 @@ void Shell::startAttract(AttractSequence sequence) {
   if (sequence.empty()) return;
   attract_ = std::move(sequence);
   attractIndex_ = 0;
+  trailerBootClock_ = 0.0f;  // a fresh start boots its first board
   // The beats own their starting pose (`formedFrom`); the first one is the flat-to-shape
   // reveal. Clear the ghost so a beat before the first ghosting one starts opaque.
   settings_.geometryGhost = 1.0f;
@@ -834,6 +838,7 @@ void Shell::stopAttract() {
   pendingSeek_.reset();
   pendingRestart_ = false;
   trailerClock_ = 0.0f;
+  trailerBootClock_ = 0.0f;
   swayWeight_ = 1.0f;
   trailerGhost_.reset();
   trailerFlatPieces_.reset();
@@ -893,6 +898,13 @@ bool Shell::advanceAttract(float dt) {
     updateMovePhase(0.0f, step);
     return false;
   }
+  // The first board powers on before its beat begins: the schedule, the watch and the pose
+  // all wait, so the boot costs the trailer exactly `kBootSeconds` and nothing else moves.
+  if (trailerBootClock_ < view::kBootSeconds) {
+    trailerBootClock_ += dt;
+    if (trailerBootClock_ >= view::kBootSeconds) (void)session_->releaseWatch();
+    return false;
+  }
   trailerClock_ += dt;
   trailerShift_ -= std::clamp(trailerShift_, -dt * 0.8f, dt * 0.8f);
   if (session_->watching()) session_->advanceWatching(dt);
@@ -937,6 +949,18 @@ bool Shell::advanceAttract(float dt) {
   // Keep the timeline position continuous through the cut; the loop's wrap is a hard cut.
   if (next != 0) trailerShift_ = before - trailerTime();
   return true;
+}
+
+void Shell::skipTrailerBoot() {
+  trailerBootClock_ = view::kBootSeconds;
+  if (session_ != nullptr) (void)session_->releaseWatch();
+}
+
+std::optional<float> Shell::trailerBootAge() const {
+  if (!attracting() || trailerEditing_ || trailerBootClock_ >= view::kBootSeconds) {
+    return std::nullopt;
+  }
+  return trailerBootClock_;
 }
 
 void Shell::easePose(const TrailerPose& want, float dt, float formSpeed) {

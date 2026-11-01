@@ -81,6 +81,16 @@ class Session {
   [[nodiscard]] std::uint64_t presentationEpoch() const noexcept {
     return presentationEpoch_;
   }
+  /// Presentation events (M23.10). The session has no clock: it counts the things that
+  /// happened, and the front end's `FxTimeline` stamps them with presentation time.
+  /// Distinct per session object, so a replacement session is never mistaken for the old.
+  [[nodiscard]] std::uint64_t id() const noexcept { return id_; }
+  /// Bumped when the board should power on: a new session, a reset, a watch start, and the
+  /// console's `boot`. Never by undo, pause or resume.
+  [[nodiscard]] std::uint64_t bootSerial() const noexcept { return bootSerial_; }
+  void requestBoot() noexcept { ++bootSerial_; }
+  /// Normalised boot order of every cell (`view::bootCellOrder`), built on first use.
+  [[nodiscard]] const std::vector<float>& bootOrder() const;
   [[nodiscard]] const view::PositionView& snapshot() const noexcept { return snapshot_; }
   [[nodiscard]] const view::ViewConfig& viewConfig() const noexcept { return viewCfg_; }
   /// The camera to draw and to pick with.
@@ -314,8 +324,13 @@ class Session {
   /// `previewSeconds` > 0 shows each move before it is played: once the dwell has passed,
   /// the piece about to move is selected - so the board lights its legal squares - and
   /// held for that long, then the move plays. The first move of a watch starts at once.
-  Result<void> startWatching(GameFile file, float dwellSeconds,
-                             float previewSeconds = 0.0f);
+  ///
+  /// With `holdFirstMove` the first move waits for `releaseWatch()` instead of starting at
+  /// once - the trailer's first board powers on before anything moves (M23.10).
+  Result<void> startWatching(GameFile file, float dwellSeconds, float previewSeconds = 0.0f,
+                             bool holdFirstMove = false);
+  /// Play the held first move of a watch. A no-op when nothing is held.
+  Result<void> releaseWatch();
   [[nodiscard]] bool watching() const noexcept { return watching_; }
   /// Leave the watching mode. The game is left where it stopped; the caller decides
   /// which screen to show next.
@@ -365,6 +380,9 @@ class Session {
   std::unique_ptr<VariantSpec> variant_;
   std::unique_ptr<Game> game_;
   std::uint64_t presentationEpoch_{0};
+  std::uint64_t id_{0};
+  std::uint64_t bootSerial_{1};
+  mutable std::vector<float> bootOrder_;
   view::PositionView snapshot_;
   /// What the player asked for; `viewCfg_` is this with the flat-mode adjustment applied.
   view::ViewConfig chosenCfg_;
@@ -413,6 +431,7 @@ class Session {
   float previewClock_{0.0f};
   bool previewing_{false};
   std::string message_;
+  bool watchHeld_{false};
 
   /// The opponent: its side, its options, the derived evaluator (built on first use,
   /// per variant), the search in flight and the position it was asked about.

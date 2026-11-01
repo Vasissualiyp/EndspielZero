@@ -2,6 +2,7 @@
 #include "app/session.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <sstream>
@@ -10,6 +11,7 @@
 #include "io/fen.hpp"
 #include "io/game_file.hpp"
 #include "io/notation.hpp"
+#include "view/board_boot.hpp"
 
 namespace cb::app {
 namespace {
@@ -123,7 +125,9 @@ Result<std::unique_ptr<Session>> Session::create(VariantSpec variant) {
   if (!variant.finalized()) {
     return fail(ErrorCode::Internal, "a session needs a finalized variant");
   }
+  static std::atomic<std::uint64_t> nextId{1};
   auto s = std::unique_ptr<Session>(new Session());
+  s->id_ = nextId.fetch_add(1);
   s->variant_ = std::make_unique<VariantSpec>(std::move(variant));
   s->game_ = std::make_unique<Game>(*s->variant_);
   s->chosenCfg_ = view::ViewConfig::forBoard(s->variant_->dims);
@@ -758,6 +762,7 @@ Result<void> Session::apply(const Action& a) {
       stopEngine();
       game_->reset();
       ++presentationEpoch_;
+      ++bootSerial_;
       pending_ = PendingPromotion{};
       pendingMove_ = PendingMove{};
       selected_ = kInvalidCell;
@@ -884,9 +889,31 @@ Result<void> Session::playMoveText(std::string_view text) {
               "'" + std::string(text) + "' is not legal in this position");
 }
 
+const std::vector<float>& Session::bootOrder() const {
+  if (bootOrder_.empty()) bootOrder_ = view::bootCellOrder(*variant_);
+  return bootOrder_;
+}
+
+Result<void> Session::releaseWatch() {
+  if (!watchHeld_) return {};
+  watchHeld_ = false;
+  if (!watching_ || watchRunner_ == nullptr || watchRunner_->done()) return {};
+  if (auto ok = watchRunner_->step(); !ok.has_value()) {
+    const ErrorCode code = ok.error().code;
+    const std::string text = ok.error().format();
+    stopWatching();
+    message_ = text;
+    return fail(code, ok.error().message);
+  }
+  message_ = "watching " + watchFile_->variant + "  -  move 1 of " +
+             std::to_string(watchRunner_->count());
+  return {};
+}
+
 Result<void> Session::startWatching(GameFile file, float dwellSeconds,
-                                    float previewSeconds) {
+                                    float previewSeconds, bool holdFirstMove) {
   stopWatching();  // replace any watch already running
+  ++bootSerial_;   // each watched game boots
   watchFile_ = std::make_unique<GameFile>(std::move(file));
   watchRunner_ = std::make_unique<GameRunner>(*watchFile_, *this);
   if (auto ok = watchRunner_->reset(); !ok.has_value()) {
@@ -906,20 +933,17 @@ Result<void> Session::startWatching(GameFile file, float dwellSeconds,
     stopWatching();
     return {};
   }
-  if (auto ok = watchRunner_->step(); !ok.has_value()) {
-    const ErrorCode code = ok.error().code;
-    const std::string text = ok.error().format();
-    stopWatching();
-    message_ = text;
-    return fail(code, ok.error().message);
+  watchHeld_ = true;
+  if (holdFirstMove) {
+    message_ = "watching " + watchFile_->variant;
+    return {};
   }
-  message_ = "watching " + watchFile_->variant + "  -  move 1 of " +
-             std::to_string(watchRunner_->count());
-  return {};
+  return releaseWatch();
 }
 
 void Session::stopWatching() noexcept {
   watching_ = false;
+  watchHeld_ = false;
   watchClock_ = 0.0f;
   watchDwell_ = 0.0f;
   watchPreview_ = 0.0f;
@@ -930,6 +954,7 @@ void Session::stopWatching() noexcept {
 
 bool Session::advanceWatching(float dt) {
   if (!watching_ || watchRunner_ == nullptr) return false;
+  if (watchHeld_) return true;  // the first move is waiting for `releaseWatch`
   // Still drawing the move: on a flat board that is the move animation, and on a shape
   // the follow choreography keeps it active until the board has morphed home, so this one
   // test covers both. Hold the dwell clock while anything is moving.

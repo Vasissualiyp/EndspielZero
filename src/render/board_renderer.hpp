@@ -17,6 +17,7 @@
 #include "view/layout.hpp"
 #include "view/move_anim.hpp"
 #include "view/seams.hpp"
+#include "view/cell_fx.hpp"
 #include "view/snapshot.hpp"
 #include "view/theme.hpp"
 
@@ -53,6 +54,10 @@ struct Instance {
   /// of a timeline connector - be placed in any of the four quadrants without four
   /// copies of the geometry.
   float roll{0};
+  /// Which `InstanceSet::cellFx` record the shader reads for this instance (M23.10): 0 is
+  /// "none"; a cell is `2 * (cell + 1)` and the piece standing on it `2 * (cell + 1) + 1`.
+  /// Shares the edge-mask attribute, so the pipeline stays at sixteen vertex inputs.
+  float fxCell{0};
   /// Full orientation as a quaternion (x,y,z,w), applied after `roll`. Identity on the
   /// flat board; on the geometry view it turns a cell's local +Z onto the surface normal,
   /// so a tile or a piece stands on the warped board with the ordinary camera and depth
@@ -73,7 +78,7 @@ struct Instance {
   /// when settled (see `MeshVertex::panelPrev`).
   float panelPrev[4]{0.0f, 0.0f, 0.0f, -1.0f};
 };
-static_assert(sizeof(Instance) == 116);
+static_assert(sizeof(Instance) == 120);
 
 /// The sub-rectangle of the target the board is drawn into, in pixels. Zero width means
 /// the whole target. At namespace scope because a nested class's default member
@@ -173,6 +178,12 @@ struct InstanceSet {
   /// How many LED panels the board has: scales the sparse glitch schedule so the rate is
   /// a few per ten seconds on any board size (M23.9 C).
   std::uint32_t panelCells{0};
+
+  /// Board presentation effects (M23.10): boot, check ripple, game-end power-down. Indexed
+  /// by `cell + 1`; record 0 is the neutral "no effect" one. Empty when nothing is
+  /// running, which costs nothing - the renderer then binds a one-record neutral buffer.
+  std::vector<view::CellFx> cellFx;
+  view::FxGlobals fxGlobals;
 
   /// The geometry view's board, as one mesh (M17). A square on a curved surface is a
   /// patch of that surface, not a slab turned to face it, so it cannot be an instance of
@@ -351,6 +362,12 @@ class BoardRenderer {
   Result<void> bindBlurTarget(const OffscreenTarget& target, std::uint32_t frame);
   Result<void> uploadGeometry();
   Result<void> ensureInstanceCapacity(std::uint32_t frame, std::size_t count);
+  /// Create the effect buffer's descriptor layout and pool; the sets are written when a
+  /// frame's buffer is first made or grown.
+  Result<void> buildFxDescriptors();
+  /// Make the frame's effect buffer hold `set`'s records (or the one neutral record) and
+  /// its globals.
+  Result<void> uploadFx(std::uint32_t frame, const InstanceSet& set);
   Result<void> ensureSurfaceCapacity(std::uint32_t frame, std::size_t vertices,
                                      std::size_t indices);
 
@@ -406,6 +423,14 @@ class BoardRenderer {
   std::array<VkDescriptorSet, kFramesInFlight> blurFromScratch_{};
   std::array<VkImageView, kFramesInFlight> blurBoundColor_{};
   float blur_{0.0f};
+
+  // The per-cell effect records (M23.10), one storage buffer per frame in flight.
+  VkDescriptorSetLayout fxSetLayout_{VK_NULL_HANDLE};
+  VkDescriptorPool fxPool_{VK_NULL_HANDLE};
+  std::array<VkDescriptorSet, kFramesInFlight> fxSets_{};
+  std::array<VkBuffer, kFramesInFlight> fxBuffer_{};
+  std::array<VkDeviceMemory, kFramesInFlight> fxMem_{};
+  std::array<std::size_t, kFramesInFlight> fxCapacity_{};  ///< in records
 
   VkBuffer vertexBuffer_{VK_NULL_HANDLE};
   VkDeviceMemory vertexMem_{VK_NULL_HANDLE};

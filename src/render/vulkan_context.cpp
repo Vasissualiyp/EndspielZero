@@ -212,6 +212,7 @@ Result<VulkanContext> VulkanContext::create(const ContextOptions& opts) {
   f13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
   f13.dynamicRendering = VK_TRUE;
   f13.synchronization2 = VK_TRUE;
+  f13.shaderDemoteToHelperInvocation = VK_TRUE;  // `discard` in the board shader (M23.10)
 
   VkPhysicalDeviceFeatures2 features{};
   features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;

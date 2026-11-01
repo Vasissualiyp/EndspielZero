@@ -86,6 +86,14 @@ if(TARGET endspielzero_gui)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(gui-dev-overlay PROPERTIES LABELS "render;gui" TIMEOUT 180
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-trailer-boot
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR}
+            -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_trailer_boot.cmake
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(gui-trailer-boot PROPERTIES LABELS "render;gui" TIMEOUT 180
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   add_test(NAME gui-live-controls
     COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
             -DWORKDIR=${PROJECT_SOURCE_DIR}
