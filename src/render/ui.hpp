@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "app/captured.hpp"
 #include "app/debug_console.hpp"
 #include "app/session.hpp"
 #include "app/shell.hpp"
@@ -186,6 +187,14 @@ class Ui {
   void setTheme(const view::Theme& t) noexcept;
   /// Presentation seconds for live controls, independent of transitions/background.
   void setVisualTime(double seconds) noexcept;
+  /// The HUD panels' share of the board's presentation (M23.10 section 7): `draw` traces
+  /// the panel edges on (boot, 0..1), `content` fades what is inside them in, `level` dims
+  /// the panels (the end power-down). All 1 is the settled HUD; status stays lit.
+  void setHudFx(float draw, float content, float level) noexcept {
+    hudDraw_ = draw;
+    hudContent_ = content;
+    hudLevel_ = level;
+  }
   /// Run-only presentation override (`--dev`); never changes the saved preference.
   void forceDevOverlay(bool enabled) noexcept { forceDevOverlay_ = enabled; }
   /// Vertices queued for the ambient field behind the board this frame; zero where the
@@ -209,6 +218,13 @@ class Ui {
  private:
   Ui() = default;
   bool forceDevOverlay_{false};
+  float hudDraw_{1.0f}, hudContent_{1.0f}, hudLevel_{1.0f};
+  /// The captured trays are replayed from the history only when it changes (section 7).
+  struct CapturedCache {
+    const void* game{nullptr};
+    std::size_t ply{~std::size_t{0}};
+    app::CapturedPieces pieces;
+  } captured_;
   [[nodiscard]] bool devOverlay(const app::Shell& shell) const noexcept {
     return forceDevOverlay_ || shell.settings().devOverlay;
   }

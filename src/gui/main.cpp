@@ -85,6 +85,23 @@ void setFxTint(render::BoardFxState& fx, const render::BoardRenderer& renderer) 
   fx.tint[2] = blood.b;
 }
 
+/// The HUD panels follow the board (M23.10 section 7): their edges trace on during the
+/// first 0.4 s of a boot and their contents fade in over the next 0.4 s; a finished game
+/// dims them to 0.7 (the status panel stays lit).
+void applyHudFx(render::Ui& ui, std::optional<float> bootAge, std::optional<float> endAge) {
+  const auto smooth = [](float x) {
+    x = std::clamp(x, 0.0f, 1.0f);
+    return x * x * (3.0f - 2.0f * x);
+  };
+  float draw = 1.0f, content = 1.0f, level = 1.0f;
+  if (bootAge) {
+    draw = std::clamp(*bootAge / 0.4f, 0.0f, 1.0f);
+    content = smooth((*bootAge - 0.4f) / 0.4f);
+  }
+  if (endAge) level = 1.0f - 0.3f * smooth(*endAge / 1.0f);
+  ui.setHudFx(draw, content, level);
+}
+
 /// The effects a capture asks for through --boot-t, in the renderer's own terms.
 render::BoardFxState captureFx(const render::BoardRenderer& renderer,
                                const app::Shell& shell) {
@@ -848,6 +865,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                    nullptr) -> std::optional<render::Image> {
     renderer->setVisualTime(visualOrigin + sample.seconds);
     (*ui)->setVisualTime(visualOrigin + sample.seconds);
+    {
+      if (shell->showsBoard() && shell->session() != nullptr) {
+        const render::BoardFxState fx = captureFx(*renderer, *shell);
+        applyHudFx(**ui, fx.bootAge, fx.endAge);
+      }
+    }
     // A fixed step rather than a real clock: the shell animates, and a capture has to be
     // the same picture every time it is taken.
     (*ui)->tick(dt);
@@ -2140,6 +2163,12 @@ int main(int argc, char** argv) {
       }
     }
     (*ui)->setVisualTime(visualSeconds);
+    applyHudFx(**ui, shell->attracting() ? shell->trailerBootAge()
+                                          : fxTimeline.bootAge(visualSeconds),
+               [&]() -> std::optional<float> {
+                 if (const auto over = fxTimeline.end(visualSeconds)) return over->age;
+                 return std::nullopt;
+               }());
     (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);
     (*ui)->newFrame();

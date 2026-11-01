@@ -95,6 +95,64 @@ void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
   }
 }
 
+void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme, float scale,
+              float draw, float level) {
+  const float width = max.x - min.x;
+  const float height = max.y - min.y;
+  if (width <= 0.0f || height <= 0.0f || draw <= 0.0f) return;
+  const bool led = theme.panelStyle == view::PanelStyle::Brackets;
+  const float cut = std::min({6.0f * scale, width * 0.25f, height * 0.25f});
+  const ImVec2 outline[8] = {{min.x + cut, min.y}, {max.x - cut, min.y},
+                             {max.x, min.y + cut}, {max.x, max.y - cut},
+                             {max.x - cut, max.y}, {min.x + cut, max.y},
+                             {min.x, max.y - cut}, {min.x, min.y + cut}};
+  // Dark glass over the stage in the LED theme; the plate theme's own panel colour.
+  const view::Rgba fill = led ? theme.ink : theme.panel;
+  dl->AddConvexPolyFilled(outline, 8, u32(fill, (led ? 0.55f : 0.80f) * level * draw));
+  const view::Rgba edge = led ? theme.ember : theme.emberDeep;
+  const ImU32 edgeColour = u32(edge, (led ? 0.35f : 0.80f) * level);
+  if (draw >= 1.0f) {
+    dl->AddPolyline(outline, 8, edgeColour, ImDrawFlags_Closed, std::max(1.0f, scale));
+  } else {
+    // Trace the perimeter on, from the top-left corner, clockwise.
+    float total = 0.0f;
+    float lengths[8];
+    for (int i = 0; i < 8; ++i) {
+      const ImVec2 a = outline[i], b = outline[(i + 1) % 8];
+      lengths[i] = std::hypot(b.x - a.x, b.y - a.y);
+      total += lengths[i];
+    }
+    float left = draw * total;
+    for (int i = 0; i < 8 && left > 0.0f; ++i) {
+      const ImVec2 a = outline[i], b = outline[(i + 1) % 8];
+      const float f = std::min(1.0f, left / std::max(lengths[i], 1e-3f));
+      dl->AddLine(a, ImVec2(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f), edgeColour,
+                  std::max(1.0f, scale));
+      left -= lengths[i];
+    }
+  }
+  if (led && draw >= 1.0f) {
+    // Faint raster inside the glass: one pixel line every three.
+    const float step = std::max(3.0f, 3.0f * scale);
+    const ImU32 line = u32(theme.ember, 0.04f * level);
+    for (float y = min.y + cut; y < max.y - cut; y += step) {
+      dl->AddLine(ImVec2(min.x + 1.0f, y), ImVec2(max.x - 1.0f, y), line, 1.0f);
+    }
+  }
+  if (draw >= 1.0f) {
+    const float arm = std::min({10.0f * scale, width * 0.3f, height * 0.3f});
+    const ImU32 bracket = u32(led ? theme.ember : theme.emberDeep, level);
+    for (const float x : {min.x, max.x}) {
+      for (const float y : {min.y, max.y}) {
+        const float dx = x == min.x ? arm : -arm;
+        const float dy = y == min.y ? arm : -arm;
+        dl->AddLine(ImVec2(x + dx, y), ImVec2(x, y), bracket, std::max(1.0f, scale));
+        dl->AddLine(ImVec2(x, y), ImVec2(x, y + dy), bracket, std::max(1.0f, scale));
+      }
+    }
+  }
+}
+
 view::Rgba mix(const view::Rgba& a, const view::Rgba& b, float t) {
   return view::Rgba{a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t,
                     a.a + (b.a - a.a) * t};

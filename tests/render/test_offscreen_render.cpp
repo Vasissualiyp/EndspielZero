@@ -2354,6 +2354,78 @@ TEST_CASE("the game screen draws the star room, not the wireframe field, on an e
   CHECK(gpu().ctx.takeValidationMessages().empty());
 }
 
+TEST_CASE("the HUD frame keeps its panels inside the screen, with a ledger and trays",
+          "[render][gpu][hud-chrome]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("hud-chrome", 1920, 1080, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    for (float scale : {1.0f, 3.0f}) {
+      CAPTURE(scale, theme.liveControls);
+      auto shell = app::Shell::create(
+          {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "hud-chrome.conf");
+      shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+        return test::loadVariant(name);
+      });
+      REQUIRE(shell->startGame("standard").has_value());
+      app::Session& session = *shell->session();
+      auto ui = Ui::create(gpu().ctx, window, theme);
+      REQUIRE(ui.has_value());
+      REQUIRE((*ui)->setScale(scale).has_value());
+      const auto frame = [&] {
+        (*ui)->tick(0.1f);
+        (*ui)->newFrame();
+        (void)(*ui)->build(*shell, 60);
+        (*ui)->endFrame();
+      };
+      frame();
+      CHECK(ImGui::FindWindowByName("##recent") == nullptr);   // nothing played
+      CHECK(ImGui::FindWindowByName("##captured") == nullptr);
+      // Knights out and back: a long ledger and no captures.
+      for (int i = 0; i < 3; ++i)
+        for (const char* m : {"g1f3", "g8f6", "f3g1", "f6g8"}) {
+          if (session.game().result() != GameResult::InProgress) break;
+          REQUIRE(session.playMoveText(m).has_value());
+        }
+      frame();
+      const ImGuiWindow* recent = ImGui::FindWindowByName("##recent");
+      REQUIRE(recent != nullptr);
+      CHECK(recent->Active);
+      CHECK(recent->Size.y <= 1080.0f * 0.55f);
+      CHECK(recent->Pos.x + recent->Size.x <= 1920.0f);
+      CHECK(recent->Pos.y >= 0.0f);
+      CHECK(ImGui::FindWindowByName("##captured") == nullptr);
+      // A capture opens the tray, inside the screen. (A FEN-set game keeps no history to
+      // replay, so its tray stays closed; `capturedBySide` is tested on its own.)
+      app::Action reset;
+      reset.kind = app::ActionKind::Reset;
+      REQUIRE(session.apply(reset).has_value());
+      for (const char* m : {"e2e4", "d7d5", "e4d5"}) REQUIRE(session.playMoveText(m).has_value());
+      frame();
+      const ImGuiWindow* tray = ImGui::FindWindowByName("##captured");
+      REQUIRE(tray != nullptr);
+      CHECK(tray->Active);
+      CHECK(tray->Pos.x >= 0.0f);
+      CHECK(tray->Pos.y >= 0.0f);
+      CHECK(tray->Pos.y + tray->Size.y <= 1080.0f);
+      const ImGuiWindow* controls = ImGui::FindWindowByName("##controls");
+      REQUIRE(controls != nullptr);
+      CHECK(controls->Pos.x >= 0.0f);
+      CHECK(controls->Pos.y + controls->Size.y <= 1080.0f + 1.0f);
+    }
+  }
+  CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
 TEST_CASE("the first HUD frame measures current turn and recent rows",
           "[render][gpu][capture-hud]") {
   if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
