@@ -13,7 +13,7 @@
 layout(location = 0) in vec2 uv;
 
 layout(push_constant) uniform Push {
-    vec4 inner;   // board emission colour: the light at the board's centre
+    vec4 inner;   // rgb = board emission colour, w = legacy output dither on/off
     vec4 outer;   // the room's own colour
     vec4 params;  // x,y = board centre in uv, z = stars on (1) or off (0), w = vignette
     vec4 board;   // x,y = board extent-size in uv, z = floor spill strength, w = intensity
@@ -71,7 +71,7 @@ void main() {
     // lit the table it stands on.
     vec2 fd = vec2((uv.x - centre.x) / (extent.x * 1.9),
                    (uv.y - (centre.y + extent.y * 0.95)) / (extent.y * 0.85));
-    float spill = exp(-dot(fd, fd) * 1.3) * smoothstep(0.40, 0.52, uv.y);
+    float spill = exp(-dot(fd, fd) * 1.3) * smoothstep(0.25, 0.60, uv.y);
     rgb += push.inner.rgb * (push.board.z * spill);
 
     // Far stars, only where the camera is a perspective one.
@@ -91,8 +91,22 @@ void main() {
 
     // Corner falloff, so the panels at the edges sit on the darkest part of the frame.
     vec2 c = abs(uv - 0.5) * 2.0;
-    float vignette = 1.0 - push.params.w * pow(max(c.x, c.y), 2.6);
+    // Smooth rounded-square radius: unlike max(c.x,c.y), C1 on the diagonals too.
+    // Keep in step with post_composite.frag and postVignette in post_params.cpp.
+    vec2 c2 = c*c;
+    vec2 c4 = c2*c2;
+    vec2 c8 = c4*c4;
+    float vignette = 1.0 - push.params.w * pow(c8.x+c8.y-c8.x*c8.y, 2.6/8.0);
     rgb *= clamp(vignette, 0.0, 1.0);
 
+    // Same TPDF and hash as post_composite.frag (and postDither in post_params.cpp).
+    // Fixed seed zero keeps the legacy room still. HDR stays unquantised until the
+    // composite, which owns its own explicit-time dither; never apply it twice.
+    if (push.inner.w > 0.5) {
+        uvec2 pixel = uvec2(gl_FragCoord.xy);
+        uint h = hash(pixel.x*0x1f3d5b79u ^ pixel.y*0x9e3779b1u);
+        float dither = (unit(hash(h^0x68bc21ebu))-unit(hash(h^0x31415926u)))/255;
+        rgb = clamp(rgb + vec3(dither), 0.0, 1.0);
+    }
     outColor = vec4(rgb, 1.0);
 }

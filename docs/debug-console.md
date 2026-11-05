@@ -38,7 +38,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `moves` | List the legal moves |
 | `play <move>` | Play one move (`e2e4`) |
 | `undo` / `reset` | Take back one move / restart the game |
-| `script <text>` | Run click-script lines, the same language as `--script` |
+| `script <text>` | Run click-script lines, the same language as `--script`. `script orbit 1.2 -0.35` orbits by yaw/pitch in radians; use with `post on` / `post off` to inspect the floor glow at different angles |
 | `perft <n>` / `divide <n>` | Count nodes / split the count by first move |
 | `hash` | Position hash and its recomputation, to catch incremental-hash drift |
 | `marks` | Marks on the board, with time to live and owner |
@@ -96,6 +96,9 @@ groups:
   - `--post 0|1` forces post-processing off or on and `--bloom <0..4>` scales its bloom, for
     this run only. Use `--post 0` for A/B captures and as the recovery path if the device
     cannot run post (it is reported once on stderr and the legacy path is used).
+    The board's floor glow is dithered in both paths: post on applies TPDF once after
+    the float scene, post off applies a fixed-seed ±1 LSB TPDF to the backdrop itself.
+    Post's intentional grain is separate from this quantisation dither.
   - `--boot-t <s>` renders the board as if its boot sequence were `s` seconds old (0 to 1.8;
     later is settled), for captures. Run-only.
   - `--check-t <s>` renders the check ripple at age `s` (0 to 0.9) from the last check the

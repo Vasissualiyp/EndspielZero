@@ -14,13 +14,15 @@ std::uint32_t hash(std::uint32_t x) {
   x *= 0x846ca68bu;
   return x ^ (x >> 16);
 }
-float unit(std::uint32_t x) { return static_cast<float>(x >> 8) / 16777216.0f; }
+float unit(std::uint32_t x) {
+  return static_cast<float>(x >> 8) / 16777216.0f;
 }
+}  // namespace
 
 float toneMap(float x) noexcept {
   if (x <= kPostShoulder) return x;
-  return kPostShoulder + (1 - kPostShoulder) *
-                            (1 - std::exp(-(x - kPostShoulder) / (1 - kPostShoulder)));
+  return kPostShoulder +
+         (1 - kPostShoulder) * (1 - std::exp(-(x - kPostShoulder) / (1 - kPostShoulder)));
 }
 
 std::uint32_t bloomLevelCount(std::uint32_t width, std::uint32_t height) noexcept {
@@ -40,7 +42,13 @@ float postDither(std::uint32_t x, std::uint32_t y, std::uint32_t seed) noexcept 
 }
 
 float postVignette(float u, float v) noexcept {
-  const float edge = std::max(std::abs(u - .5f), std::abs(v - .5f)) * 2;
-  return std::clamp(1 - kPostVignette * std::pow(edge, 2.6f), 0.0f, 1.0f);
+  const auto power8 = [](float x) {
+    const float x2 = x * x;
+    const float x4 = x2 * x2;
+    return x4 * x4;
+  };
+  const float x = power8((u - .5f) * 2);
+  const float y = power8((v - .5f) * 2);
+  return std::clamp(1 - kPostVignette * std::pow(x + y - x * y, 2.6f / 8), 0.0f, 1.0f);
 }
 }  // namespace cb::render

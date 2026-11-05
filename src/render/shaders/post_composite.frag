@@ -24,7 +24,11 @@ void main() {
     float m=max(rgb.r,max(rgb.g,rgb.b));
     if(m>0) rgb*=toneMap(m)/m;
     vec2 edge=abs(fragUv-.5)*2;
-    rgb*=clamp(1-push.vignette*pow(max(edge.x,edge.y),2.6),0,1);
+    // Smooth rounded square; see backdrop.frag and postVignette in post_params.cpp.
+    vec2 e2=edge*edge;
+    vec2 e4=e2*e2;
+    vec2 e8=e4*e4;
+    rgb*=clamp(1-push.vignette*pow(e8.x+e8.y-e8.x*e8.y,2.6/8.0),0,1);
     uvec2 pixel=uvec2(gl_FragCoord.xy);
     uint h=hash(pixel.x*0x1f3d5b79u ^ pixel.y*0x9e3779b1u ^ push.seed*0x85ebca6bu);
     float y=clamp(dot(rgb,vec3(.2126,.7152,.0722)),0,1);

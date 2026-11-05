@@ -8,6 +8,9 @@
 
 #ifdef CB_HAVE_VULKAN
 
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -17,6 +20,7 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -64,10 +68,22 @@ struct Gpu {
   }
 };
 
+std::optional<Gpu> sharedGpu;
+
 Gpu& gpu() {
-  static Gpu g;
-  return g;
+  if (!sharedGpu) sharedGpu.emplace();
+  return *sharedGpu;
 }
+
+// Keep the shared device for the fast pixel-test loop, but release it before the
+// validation layer's process-exit cleanup. A function-static device can outlive
+// the layer's lazily initialised dispatch registry and abort during destruction.
+class GpuLifetime : public Catch::EventListenerBase {
+ public:
+  using Catch::EventListenerBase::EventListenerBase;
+  void testRunEnded(const Catch::TestRunStats&) override { sharedGpu.reset(); }
+};
+CATCH_REGISTER_LISTENER(GpuLifetime)
 
 /// Where debug captures land, so a human can look at what a failing test saw.
 std::filesystem::path capturePath(const std::string& name) {

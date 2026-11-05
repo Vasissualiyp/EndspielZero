@@ -40,6 +40,19 @@ TEST_CASE("bloom levels are bounded and use the shorter target dimension",
   CHECK(bloomLevelCount(1, 1) == 3);
 }
 
+TEST_CASE("the vignette has a continuous slope across its diagonals",
+          "[render][post][floor-glow]") {
+  constexpr float h = .001f;
+  for (const float v : {.1f, .25f, .4f, .5f, .6f, .75f, .9f}) {
+    const float c = postVignette(v, v);
+    const float left = (c - postVignette(v - h, v)) / h;
+    const float right = (postVignette(v + h, v) - c) / h;
+    CHECK(std::abs(left - right) < .04f);
+  }
+  CHECK(postVignette(.5f, .5f) == 1);
+  CHECK(std::abs(postVignette(0, 0) - (1 - kPostVignette)) < 1e-6f);
+}
+
 TEST_CASE("post noise uses explicit stepped time and a bounded triangular dither",
           "[render][post]") {
   CHECK(postFrameSeed(0) == 0);

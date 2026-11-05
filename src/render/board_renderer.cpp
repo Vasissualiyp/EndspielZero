@@ -35,7 +35,7 @@ static_assert(sizeof(PushConstants) == 128);
 static_assert(offsetof(PushConstants, visual) == 112);
 
 struct BackdropPush {
-  float inner[4]{};                           // board emission colour
+  float inner[4]{};                           // rgb: board emission; w: legacy dither
   float outer[4]{};                           // the room's colour
   float params[4]{0.5f, 0.45f, 0.0f, 0.45f};  // board centre uv, stars on, vignette
   float board[4]{0.3f, 0.3f, 0.35f, 1.0f};    // half-size uv, floor spill, intensity
@@ -421,14 +421,14 @@ Result<void> BoardRenderer::buildPipeline() {
   // The float scene attachment's variants (ADR-0025): identical state, other format.
   const VkFormat hdrFormat = PostProcess::kSceneFormat;
   rendering.pColorAttachmentFormats = &hdrFormat;
-  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
-                                                   nullptr, &hdrPipeline_);
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1,
+                                                   &gpi, nullptr, &hdrPipeline_);
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal,
                 "cannot create the HDR graphics pipeline: " + describe(r));
   }
-  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpiOn,
-                                                   nullptr, &hdrBlendPipeline_);
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1,
+                                                   &gpiOn, nullptr, &hdrBlendPipeline_);
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal,
                 "cannot create the HDR ghost board pipeline: " + describe(r));
@@ -712,8 +712,8 @@ Result<void> BoardRenderer::buildBackdropPipeline() {
   if (!post_.valid()) return {};
   const VkFormat hdrFormat = PostProcess::kSceneFormat;
   rendering.pColorAttachmentFormats = &hdrFormat;
-  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
-                                                   nullptr, &hdrBackdropPipeline_);
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1,
+                                                   &gpi, nullptr, &hdrBackdropPipeline_);
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal,
                 "cannot create the HDR backdrop pipeline: " + describe(r));
@@ -780,10 +780,11 @@ Result<void> BoardRenderer::buildFxDescriptors() {
   lci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   lci.bindingCount = 1;
   lci.pBindings = &binding;
-  if (const VkResult r = vkCreateDescriptorSetLayout(ctx_->device(), &lci, nullptr,
-                                                     &fxSetLayout_);
+  if (const VkResult r =
+          vkCreateDescriptorSetLayout(ctx_->device(), &lci, nullptr, &fxSetLayout_);
       r != VK_SUCCESS) {
-    return fail(ErrorCode::Internal, "cannot create the effect set layout: " + describe(r));
+    return fail(ErrorCode::Internal,
+                "cannot create the effect set layout: " + describe(r));
   }
   const VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight};
   VkDescriptorPoolCreateInfo pci{};
@@ -844,8 +845,8 @@ Result<void> BoardRenderer::uploadFx(std::uint32_t frame, const InstanceSet& set
     vkUpdateDescriptorSets(ctx_->device(), 1, &write, 0, nullptr);
   }
   void* mapped = nullptr;
-  vkMapMemory(ctx_->device(), fxMem_[frame], 0, kHeader + records * sizeof(view::CellFx), 0,
-              &mapped);
+  vkMapMemory(ctx_->device(), fxMem_[frame], 0, kHeader + records * sizeof(view::CellFx),
+              0, &mapped);
   const view::FxGlobals& g = set.fxGlobals;
   const float header[8] = {g.bezel,   g.backdrop, g.hudDraw, g.hudLevel,
                            g.tint[0], g.tint[1],  g.tint[2], static_cast<float>(records)};
@@ -1096,7 +1097,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     constexpr float kHalf = PlaySurface::kThickness * 0.5f;
     std::array<float, 4> prevNow{0.0f, 0.0f, 0.0f,
                                  -1.0f};  // per patch, see the capture pulse
-    std::uint32_t fxCellPlus = 0;  // the patch being pushed, for its fx record
+    std::uint32_t fxCellPlus = 0;         // the patch being pushed, for its fx record
     const auto push = [&](const view::Vec3& at, const view::Vec3& n, float h,
                           const float rgba[4], float u, float panelV, float tag,
                           float seed = 0, float effectWeight = 0, float heat = 0) {
@@ -2397,8 +2398,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
             0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     if (OffscreenTarget::msaaEnabled()) {
-      barrier(msaaImage, VK_IMAGE_ASPECT_COLOR_BIT,
-              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      barrier(msaaImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
               VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
@@ -2460,6 +2461,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       bp.inner[0] = theme_.ink.r + lit.r * 0.80f + theme_.ember.r * 0.035f;
       bp.inner[1] = theme_.ink.g + lit.g * 0.80f + theme_.ember.g * 0.035f;
       bp.inner[2] = theme_.ink.b + lit.b * 0.80f + theme_.ember.b * 0.035f;
+      bp.inner[3] = hdr ? 0.0f : 1.0f;  // HDR gets dither once, in the composite
       toFloat4(theme_.ink, bp.outer);
       bp.params[0] = glow.cx;
       bp.params[1] = glow.cy;
@@ -2468,11 +2470,12 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       bp.board[1] = glow.hy;
       // Boot ramps the room's glow up with the board (M23.10 section 3).
       const float ramp = std::clamp(set.fxGlobals.backdrop, 0.0f, 1.0f);
-      for (int c = 0; c < 3; ++c) bp.inner[c] = bp.outer[c] + (bp.inner[c] - bp.outer[c]) * ramp;
+      for (int c = 0; c < 3; ++c)
+        bp.inner[c] = bp.outer[c] + (bp.inner[c] - bp.outer[c]) * ramp;
       bp.board[2] = 0.45f * ramp;
       bp.board[3] = push.visual[1];
-      // The corner falloff moves into the composite when post is on, so it is applied once
-      // and reaches the board's geometry too.
+      // The corner falloff moves into the composite when post is on, so it is applied
+      // once and reaches the board's geometry too.
       if (hdr) bp.params[3] = 0.0f;
       view::Vec3 f, r, u;
       camera.basis(f, r, u);
@@ -2661,7 +2664,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // Bloom, tone map, vignette and grain: the float scene becomes the target's colour,
     // left as an attachment exactly as the legacy resolve leaves it.
     if (hdr) {
-      post_.record(cmd, target, theme_, bloomStrength, push.visual[1], visualTime_, frame);
+      post_.record(cmd, target, theme_, bloomStrength, push.visual[1], visualTime_,
+                   frame);
     }
 
     // Defocus, in two separable passes that ping-pong between the target's two colour
@@ -2850,7 +2854,8 @@ BoardRenderer::~BoardRenderer() {
     if (hp != VK_NULL_HANDLE) vkDestroyPipeline(d, hp, nullptr);
   if (layout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, layout_, nullptr);
   if (fxPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, fxPool_, nullptr);
-  if (fxSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(d, fxSetLayout_, nullptr);
+  if (fxSetLayout_ != VK_NULL_HANDLE)
+    vkDestroyDescriptorSetLayout(d, fxSetLayout_, nullptr);
   if (backdropPipeline_ != VK_NULL_HANDLE)
     vkDestroyPipeline(d, backdropPipeline_, nullptr);
   if (backdropLayout_ != VK_NULL_HANDLE)

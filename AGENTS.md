@@ -162,6 +162,10 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --post 0 --shot a.ppm  # post-processing A/B
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --post 1 --bloom 2 --shot b.ppm
                                  # run-only; console `post [on|off]` and `set bloomScale 0..4` persist
+./build/dev/src/gui/endspielzero_gui torus --geometry --theme manifold --post 0 \
+                                 --script 'orbit 1.2 -0.35' --shot floor.ppm
+                                 # floor-glow A/B: repeat with --post 1; both paths dither the glow
+                                 # console `script orbit 1.2 -0.35` reaches the same camera
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --boot-t 0.7 --shot boot.ppm
                                  # the board mid power-on (0..1.8 s); console `boot` replays it live
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --script "$MATE" --end-t 0.7 --shot e.ppm
