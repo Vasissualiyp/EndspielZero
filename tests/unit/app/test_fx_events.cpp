@@ -18,7 +18,9 @@ std::unique_ptr<Session> open(const char* name = "standard") {
   REQUIRE(s.has_value());
   return std::move(*s);
 }
-void play(Session& s, const char* move) { REQUIRE(s.playMoveText(move).has_value()); }
+void play(Session& s, const char* move) {
+  REQUIRE(s.playMoveText(move).has_value());
+}
 void act(Session& s, ActionKind k) {
   Action a;
   a.kind = k;
@@ -118,8 +120,9 @@ TEST_CASE("reset clears the end quietly (the board boots instead of powering up)
   CHECK(s->bootSerial() == boot + 1);
 }
 
-TEST_CASE("the timeline holds a finished game, powers it up on undo, waits when ineligible",
-          "[app][fx][endfx]") {
+TEST_CASE(
+    "the timeline holds a finished game, powers it up on undo, waits when ineligible",
+    "[app][fx][endfx]") {
   auto s = open();
   FxTimeline t;
   t.observe(s.get(), 0.0, true, false);
@@ -137,13 +140,15 @@ TEST_CASE("the timeline holds a finished game, powers it up on undo, waits when 
   CHECK(t.end(60.0)->fx.loser == Color::White);
   REQUIRE(t.ripple(2.3).has_value());
   CHECK(t.ripple(2.3)->origin == cellOf(*s, 4, 0));
-  CHECK_FALSE(t.ripple(2.0 + static_cast<double>(view::kRippleSeconds) + 0.01).has_value());
+  CHECK_FALSE(
+      t.ripple(2.0 + static_cast<double>(view::kRippleSeconds) + 0.01).has_value());
   // Undo: the hold ends and the power-up runs for its half second.
   act(*s, ActionKind::Undo);
   t.observe(s.get(), 70.0, true, false);
   CHECK_FALSE(t.end(70.1).has_value());
   REQUIRE(t.powerUp(70.25).has_value());
-  CHECK_FALSE(t.powerUp(70.0 + static_cast<double>(view::kPowerUpSeconds) + 0.01).has_value());
+  CHECK_FALSE(
+      t.powerUp(70.0 + static_cast<double>(view::kPowerUpSeconds) + 0.01).has_value());
   // The trailer swallows both.
   auto s2 = open();
   FxTimeline t2;
@@ -154,7 +159,8 @@ TEST_CASE("the timeline holds a finished game, powers it up on undo, waits when 
   CHECK_FALSE(t2.ripple(5.1).has_value());
 }
 
-TEST_CASE("a boot or a reset forgets a finished game in the timeline", "[app][fx][endfx]") {
+TEST_CASE("a boot or a reset forgets a finished game in the timeline",
+          "[app][fx][endfx]") {
   auto s = open();
   FxTimeline t;
   t.observe(s.get(), 0.0, true, false);
@@ -177,7 +183,8 @@ TEST_CASE("the session caches distances for an event's origin", "[app][fx]") {
   CHECK(&s->distancesFrom(e1) == &d);  // the second ask is the cached flood
 }
 
-TEST_CASE("an undo or reset inside the end delay cancels with no power-up", "[app][fx][endfx]") {
+TEST_CASE("an undo or reset inside the end delay cancels with no power-up",
+          "[app][fx][endfx]") {
   auto s = open();
   FxTimeline t;
   t.observe(s.get(), 0.0, true, false);
@@ -197,6 +204,51 @@ TEST_CASE("an undo or reset inside the end delay cancels with no power-up", "[ap
   for (const char* m : {"f2f3", "e7e5", "g2g4", "d8h4"}) play(*s2, m);
   t2.observe(s2.get(), 10.0, true, false);
   act(*s2, ActionKind::Undo);
-  t2.observe(s2.get(), 10.0 + static_cast<double>(view::kEndDelaySeconds) + 0.5, true, false);
+  t2.observe(s2.get(), 10.0 + static_cast<double>(view::kEndDelaySeconds) + 0.5, true,
+             false);
   CHECK(t2.powerUp(10.0 + static_cast<double>(view::kEndDelaySeconds) + 0.6).has_value());
+}
+
+TEST_CASE("capture events use their own visual timestamp and cancel on undo",
+          "[app][fx][tray-scan]") {
+  auto s = open();
+  FxTimeline clock;
+  clock.observe(s.get(), 0, true, true);
+  CHECK(s->captureSerial() == 0);
+  for (const char* m : {"e2e4", "d7d5"}) play(*s, m);
+  clock.observe(s.get(), 1, true, false);
+  CHECK_FALSE(clock.captureAge(1));
+  play(*s, "e4d5");
+  CHECK(s->captureSerial() == 1);
+  clock.observe(s.get(), 2, true, false);
+  REQUIRE(clock.captureAge(2.175));
+  CHECK(*clock.captureAge(2.175) > .17f);
+  CHECK_FALSE(clock.captureAge(2.36));
+  act(*s, ActionKind::Undo);
+  clock.observe(s.get(), 2.2, true, false);
+  CHECK_FALSE(clock.captureAge(2.2));
+  play(*s, "e4d5");
+  CHECK(s->captureSerial() == 2);
+  clock.observe(s.get(), 3, true, true);
+  CHECK_FALSE(clock.captureAge(3));
+}
+
+TEST_CASE("framing keeps bounds inside the centred HUD clearance", "[app][hud-layout]") {
+  auto s = open();
+  const auto b = view::boundsOf(s->placements());
+  s->setBoardAspect(16.0f / 9.0f);
+  s->frameOn(b);
+  const float before = s->camera().distance;
+  CHECK(s->setFramingArea(.5f, .45f));
+  s->frameOn(b);
+  CHECK(s->camera().distance > before);
+  const auto at = s->camera().project({b.minX, b.minY, b.minZ}, 16.0f / 9.0f, 1920, 1080);
+  CHECK(at.x >= 480);
+  CHECK(at.x <= 1440);
+  CHECK(at.y >= 297);
+  CHECK(at.y <= 783);
+  const float safe = s->camera().distance;
+  s->easeFrameOn(b, 1.4f, 1);
+  CHECK(s->camera().distance == safe);
+  CHECK_FALSE(s->setFramingArea(.5f, .45f));
 }

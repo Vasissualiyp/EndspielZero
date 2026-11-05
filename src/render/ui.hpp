@@ -44,6 +44,8 @@ struct UiRequest {
   /// drawn and picked in this rectangle, so it is centred in what the player can
   /// actually see rather than behind a panel.
   float boardRect[4]{0, 0, 0, 0};
+  /// Framing-only safe area; boardRect remains the full viewport on the game screen.
+  float stageRect[4]{0, 0, 0, 0};
   /// A setting changed and should be written to disk.
   bool settingsChanged{false};
   /// The interface scale changed; fonts have to be rebuilt at the new size.
@@ -188,8 +190,9 @@ class Ui {
   /// Presentation seconds for live controls, independent of transitions/background.
   void setVisualTime(double seconds) noexcept;
   /// The HUD panels' share of the board's presentation (M23.10 section 7): `draw` traces
-  /// the panel edges on (boot, 0..1), `content` fades what is inside them in, `level` dims
-  /// the panels (the end power-down). All 1 is the settled HUD; status stays lit.
+  /// the panel edges on (boot, 0..1), `content` fades what is inside them in, `level`
+  /// dims the panels (the end power-down). All 1 is the settled HUD; status stays lit.
+  void setCaptureAge(std::optional<float> age) noexcept { captureAge_ = age; }
   void setHudFx(float draw, float content, float level) noexcept {
     hudDraw_ = draw;
     hudContent_ = content;
@@ -218,6 +221,7 @@ class Ui {
  private:
   Ui() = default;
   bool forceDevOverlay_{false};
+  std::optional<float> captureAge_;
   float hudDraw_{1.0f}, hudContent_{1.0f}, hudLevel_{1.0f};
   /// The captured trays are replayed from the history only when it changes (section 7).
   struct CapturedCache {

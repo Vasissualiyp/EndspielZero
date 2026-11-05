@@ -87,15 +87,19 @@ class Session {
   /// happened, and the front end's `FxTimeline` stamps them with presentation time.
   /// Distinct per session object, so a replacement session is never mistaken for the old.
   [[nodiscard]] std::uint64_t id() const noexcept { return id_; }
-  /// Bumped when the board should power on: a new session, a reset, a watch start, and the
-  /// console's `boot`. Never by undo, pause or resume.
+  /// Bumped when the board should power on: a new session, a reset, a watch start, and
+  /// the console's `boot`. Never by undo, pause or resume.
   [[nodiscard]] std::uint64_t bootSerial() const noexcept { return bootSerial_; }
   void requestBoot() noexcept { ++bootSerial_; }
+  [[nodiscard]] std::uint64_t captureSerial() const noexcept { return captureSerial_; }
+  [[nodiscard]] std::optional<std::size_t> capturePly() const noexcept {
+    return capturePly_;
+  }
   /// Normalised boot order of every cell (`view::bootCellOrder`), built on first use.
   [[nodiscard]] const std::vector<float>& bootOrder() const;
   /// Bumped by every move that leaves the side to move in check (the player's, the
-  /// engine's and a replay's), never by undo, selection or a position that merely stays in
-  /// check. `checkEvent()` is where the ripple starts.
+  /// engine's and a replay's), never by undo, selection or a position that merely stays
+  /// in check. `checkEvent()` is where the ripple starts.
   [[nodiscard]] std::uint64_t checkSerial() const noexcept { return checkSerial_; }
   [[nodiscard]] std::optional<CellId> checkEvent() const noexcept { return checkEvent_; }
   /// Console `ripple`: fire the ripple from `cell` without touching the game.
@@ -242,6 +246,9 @@ class Session {
   /// Tell the session how wide the board's drawing area is relative to its height, so
   /// the default camera frames the board in the space the interface leaves it.
   void setBoardAspect(float aspect);
+  /// Centred HUD clearance as fractions of the full viewport. Reports a change so the
+  /// front end can reframe the actual shape, without changing the render/pick viewport.
+  bool setFramingArea(float widthFraction, float heightFraction);
 
   /// Frame the camera on a box of world space, keeping the angle the player is looking
   /// from. The geometry view needs this: the shape is a different size from the flat
@@ -353,10 +360,10 @@ class Session {
   /// the piece about to move is selected - so the board lights its legal squares - and
   /// held for that long, then the move plays. The first move of a watch starts at once.
   ///
-  /// With `holdFirstMove` the first move waits for `releaseWatch()` instead of starting at
-  /// once - the trailer's first board powers on before anything moves (M23.10).
-  Result<void> startWatching(GameFile file, float dwellSeconds, float previewSeconds = 0.0f,
-                             bool holdFirstMove = false);
+  /// With `holdFirstMove` the first move waits for `releaseWatch()` instead of starting
+  /// at once - the trailer's first board powers on before anything moves (M23.10).
+  Result<void> startWatching(GameFile file, float dwellSeconds,
+                             float previewSeconds = 0.0f, bool holdFirstMove = false);
   /// Play the held first move of a watch. A no-op when nothing is held.
   Result<void> releaseWatch();
   [[nodiscard]] bool watching() const noexcept { return watching_; }
@@ -410,6 +417,8 @@ class Session {
   std::uint64_t presentationEpoch_{0};
   std::uint64_t id_{0};
   std::uint64_t bootSerial_{1};
+  std::uint64_t captureSerial_{0};
+  std::optional<std::size_t> capturePly_;
   mutable std::vector<float> bootOrder_;
   /// Presentation event bookkeeping (see `trackEvents`).
   void trackEvents();
@@ -448,6 +457,9 @@ class Session {
   HotSeat hotSeatKeys_;
   CellId selected_{kInvalidCell};
   float boardAspect_{1.3f};
+  float stageWidth_{1}, stageHeight_{1};
+  [[nodiscard]] view::OrbitCamera framedCamera(const view::Bounds& b,
+                                               float headroom) const;
   float pullBack_{0.0f};
   bool framedOnce_{false};
   PendingPromotion pending_;

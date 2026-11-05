@@ -38,6 +38,10 @@ inline ImU32 u32(const view::Rgba& c, float alpha = 1.0f) {
   return ImGui::ColorConvertFloat4ToU32(col(c, alpha));
 }
 
+/// Header-only tracking, in pixels of extra advance per glyph. Uses the active font
+/// and text colour; never changes ImGui's layout cursor.
+float trackedText(ImDrawList* drawList, ImVec2 pos, const char* text, float tracking);
+
 inline std::string upper(std::string s) {
   for (char& ch : s) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
   return s;
@@ -52,13 +56,13 @@ view::Rgba shade(const view::Rgba& c, float factor);
 void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
                   float scale);
 
-/// One instrument-frame panel of the game HUD (M23.10 section 7): a chamfered, translucent
-/// fill, a thin accent edge and L-shaped corner brackets. `draw` 0..1 traces the edge on
-/// around the perimeter (the boot), `level` scales the fill and edge (the end power-down
-/// dims it). Themes with brackets (the manifold) get emissive edges and a faint scanline
-/// texture; the plate theme gets the same cut in its own ink and brass.
-void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme, float scale,
-              float draw = 1.0f, float level = 1.0f);
+/// One instrument-frame panel of the game HUD (M23.10 section 7): a chamfered,
+/// translucent fill, a thin accent edge and L-shaped corner brackets. `draw` 0..1 traces
+/// the edge on around the perimeter (the boot), `level` scales the fill and edge (the end
+/// power-down dims it). Themes with brackets (the manifold) get emissive edges and a
+/// faint scanline texture; the plate theme gets the same cut in its own ink and brass.
+void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
+              float scale, float draw = 1.0f, float level = 1.0f);
 
 /// A section heading with a rule running out to the right, the way a plate is labelled.
 void heading(const char* text, const view::Theme& theme, ImFont* font);
@@ -115,7 +119,7 @@ bool stepper(const char* id, int& value, int lo, int hi, const view::Theme& them
 
 bool button(const char* label, const view::Theme& theme, float width = 0.0f,
             bool primary = false, bool cold = false, bool enabled = true,
-            ImFont* font = nullptr);
+            ImFont* font = nullptr, bool compact = false);
 
 /// A settings control that cycles its value on press. There are no drop-downs in the
 /// interface: a settings screen is a list of states, and hiding the states behind a

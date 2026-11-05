@@ -170,7 +170,13 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --visual-time 0.75 --shot holo.ppm
                                  # explicit presentation seconds for hologram capture
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --matte          # material-free A/B capture
-./build/dev/src/gui/endspielzero_gui standard --screen welcome --ui-scale 3 --shot o.ppm # scaling review
+./build/dev/src/gui/endspielzero_gui standard --screen welcome --ui-scale 3 --shot o.ppm # exact scale
+./build/dev/src/gui/endspielzero_gui standard --ui-auto --height 1080 --shot auto.ppm # 1.5x HUD
+                                 # captures default to auto off; `set guiScaleAuto false` disables
+                                 # interactive auto; `set guiScale 1.25` is its multiplier
+                                 # `--hud-framing 0` / `set hudFraming false` restores full framing
+./build/dev/src/gui/endspielzero_gui standard --script $'click e2\nclick e4\nclick d7\nclick d5\nclick e4\nclick d5' \
+                                 --capture-t 0.175 --shot tray.ppm # newest capture half scanned on
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen designer --dims 4
 ./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry        # the board as its shape
 ./build/dev/src/gui/endspielzero_gui torus --shot o.ppm --geometry --evert 1  # ...turned inside out
@@ -291,6 +297,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | A sound effect | `src/audio/audio.hpp` - add a `Sound` and its synthesis, then one `audio::play` at the event site | |
 | A flat piece icon | `src/render/piece_icon.cpp` - polygon tables, two styles | |
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
+| HUD scaling, panel anchors and camera safe area | `render::autoUiFactor`, `stageRect`, `dockLayout` in `src/render/hud_layout.*`; `Session::setFramingArea` feeds `frameOn` and `easeFrameOn`; the full render/picking viewport stays unchanged. See `docs/plan/M23.11-ui-finish.md` section 1 | |
 | Game status / recent-move text | `Ui::buildGameHud` and the measured `drawHudText` overlay in `src/render/ui.cpp` (panels via `widgets::hudPanel`, M23.10 section 7; captured trays from `app::capturedBySide`); size current rows before `Begin`, so first replay frames agree with settled frames. See `docs/plan/M23.5-capture-hud-refresh.md` | |
 | Keyboard ownership between the game and interface | `Ui::create`, `Ui::processEvent`/`capturesKeyboard` and `updateKeyboardNavigation` in `src/render/ui.cpp`; idle navigation passes shortcuts, active widgets/text/modal choices capture them, and hot-seat/trailer keys disable HUD navigation. See `docs/plan/M23.6-game-keyboard-shortcuts.md` | |
 | A menu control's animation | `Theme::liveControls`, `Ui::setVisualTime` and `widgets::rowControl` in `src/render/ui_widgets.cpp`; manifold plates glitch only on hover/focus, using explicit presentation seconds. `menuEntry` bounds rows and `actionPairLayout` measures responsive footers in `ui_menus.cpp`. See `docs/plan/M23.7-manifold-glitch-controls.md` | |

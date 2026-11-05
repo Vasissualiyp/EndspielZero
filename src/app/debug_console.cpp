@@ -101,7 +101,8 @@ std::string execute(Shell& shell, const std::string& line) {
   if (cmd == "dev" || cmd == "post") {
     if (w.size() > 2 || (w.size() == 2 && w[1] != "on" && w[1] != "off"))
       return "usage: " + cmd + " [on|off]";
-    bool& enabled = cmd == "dev" ? shell.settings().devOverlay : shell.settings().postProcess;
+    bool& enabled =
+        cmd == "dev" ? shell.settings().devOverlay : shell.settings().postProcess;
     enabled = w.size() == 1 ? !enabled : w[1] == "on";
     const std::string label = cmd == "dev" ? "dev overlay: " : "post processing: ";
     return label + (enabled ? "on" : "off");
@@ -130,6 +131,9 @@ std::string execute(Shell& shell, const std::string& line) {
   if (cmd == "get" || cmd == "set") {
     const std::string text = settingsText(shell.settings());
     std::string key = w.size() > 1 ? w[1] : std::string{};
+    if (key == "guiScaleAuto") key = "gui_scale_auto";
+    if (key == "hudFraming") key = "hud_framing";
+    if (key == "guiScale") key = "gui_scale";
     if (key == "devOverlay") key = "dev_overlay";
     if (key == "postProcess") key = "post_process";
     if (key == "bloomScale") key = "bloom_scale";
@@ -235,10 +239,12 @@ std::string execute(Shell& shell, const std::string& line) {
     if (w[1] != "win" && w[1] != "draw") return "usage: endfx win|draw|off [white|black]";
     view::EndFx fx;
     fx.kind = w[1] == "draw" ? view::EndKind::Draw : view::EndKind::Decisive;
-    fx.loser = w.size() > 2 && (w[2] == "black" || w[2] == "b") ? Color::Black : Color::White;
+    fx.loser =
+        w.size() > 2 && (w[2] == "black" || w[2] == "b") ? Color::Black : Color::White;
     fx.origin = pos.findRoyal(fx.loser);
     if (fx.origin == kInvalidCell) fx.origin = 0;
-    fx.mated = fx.kind == view::EndKind::Decisive && pos.findRoyal(fx.loser) != kInvalidCell;
+    fx.mated =
+        fx.kind == view::EndKind::Decisive && pos.findRoyal(fx.loser) != kInvalidCell;
     session->requestEndFx(fx);
     return std::string("previewing ") + (w[1] == "draw" ? "a draw" : "a win over ") +
            (w[1] == "draw" ? "" : (fx.loser == Color::White ? "white" : "black"));
@@ -370,8 +376,13 @@ std::string DebugConsole::help() {
          "get [<setting>]          show settings; set <setting> <value> changes one\n"
          "dev [on|off]             developer overlay; no argument toggles it\n"
          "post [on|off]            post processing; no argument toggles it\n"
+         "set guiScaleAuto true|false  automatic interface scale; guiScale is its "
+         "multiplier\n"
+         "set hudFraming true|false  frame inside the HUD (false restores the full "
+         "camera frame)\n"
          "boot                     replay the board's power-on sequence\n"
-         "ripple [<cell>]          play the check ripple from a cell (default: the royal)\n"
+         "ripple [<cell>]          play the check ripple from a cell (default: the "
+         "royal)\n"
          "endfx win|draw|off [<side>]  preview the game-end power-down; off clears it\n"
          "info                     variant summary: pieces, moves, marks, compounds\n"
          "fen | setfen <fen>       show or replace the position\n"

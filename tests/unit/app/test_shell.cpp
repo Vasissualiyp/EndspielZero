@@ -320,6 +320,8 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
   {
     auto shell = makeShell(path);
     shell->settings().guiScale = 1.6f;
+    shell->settings().guiScaleAuto = false;
+    shell->settings().hudFraming = false;
     shell->settings().devOverlay = true;
     shell->settings().postProcess = false;
     shell->settings().bloomScale = .5f;
@@ -353,6 +355,8 @@ TEST_CASE("settings survive a restart", "[unit][app]") {
   {
     auto shell = makeShell(path);
     REQUIRE(shell->settings().guiScale == 1.6f);
+    CHECK_FALSE(shell->settings().guiScaleAuto);
+    CHECK_FALSE(shell->settings().hudFraming);
     REQUIRE(shell->settings().devOverlay);
     REQUIRE_FALSE(shell->settings().postProcess);
     REQUIRE(shell->settings().bloomScale == .5f);
@@ -457,6 +461,7 @@ TEST_CASE("the Klein square shift can be negative, within its own range", "[unit
 TEST_CASE("a missing settings file means defaults, not an error", "[unit][app]") {
   const Settings s = Settings::load("/nonexistent/path/settings.conf");
   REQUIRE(s.guiScale == 1.0f);
+  CHECK(s.guiScaleAuto);
   REQUIRE(s.lastVariant == "standard");
   // The shape view keeps its sculptural pieces until the player asks for the pucks
   // (M17.25): the default must move nothing.

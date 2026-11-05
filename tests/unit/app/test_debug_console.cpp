@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <catch2/catch_test_macros.hpp>
 
-#include <memory>
 #include <cmath>
+#include <memory>
 #include <string>
 
 #include "app/debug_console.hpp"
@@ -119,7 +119,8 @@ TEST_CASE("presentation intensity is a setting the console reaches and clamps",
         "presentationIntensity is now 0.25");
   CHECK(shell->settings().presentationIntensity == 0.25f);
   CHECK(c.run(*shell, "get presentationIntensity") == "presentation_intensity = 0.25");
-  CHECK(c.run(*shell, "set presentation_intensity 7") == "presentation_intensity is now 7");
+  CHECK(c.run(*shell, "set presentation_intensity 7") ==
+        "presentation_intensity is now 7");
   CHECK(shell->settings().presentationIntensity == 1.0f);
   CHECK(c.run(*shell, "set presentationIntensity nan") ==
         "presentationIntensity is now nan");
@@ -169,4 +170,18 @@ TEST_CASE("the console previews the check ripple and the end effect without movi
   CHECK_FALSE(s.endEvent().has_value());
   CHECK(has(console.run(*shell, "endfx sideways"), "usage"));
   CHECK(s.game().plyCount() == 0);
+}
+
+TEST_CASE("automatic interface sizing is reachable by short and file names",
+          "[unit][app][hud-layout]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  CHECK(shell->settings().guiScaleAuto);
+  CHECK(console.run(*shell, "get guiScaleAuto") == "gui_scale_auto = true");
+  CHECK(console.run(*shell, "set guiScaleAuto false") == "guiScaleAuto is now false");
+  CHECK_FALSE(shell->settings().guiScaleAuto);
+  CHECK(console.run(*shell, "get gui_scale_auto") == "gui_scale_auto = false");
+  CHECK(console.run(*shell, "set guiScale 1.25") == "guiScale is now 1.25");
+  CHECK(shell->settings().guiScale == 1.25f);
+  CHECK(has(DebugConsole::help(), "guiScaleAuto"));
 }

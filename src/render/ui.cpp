@@ -18,12 +18,13 @@
 #include "io/notation.hpp"
 #include "pieces/atom.hpp"
 #include "render/deco.hpp"
+#include "render/hud_layout.hpp"
 #include "render/offscreen_target.hpp"
-#include "render/post_process.hpp"
 #include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/play_surface.hpp"
+#include "render/post_process.hpp"
 #include "render/ui_widgets.hpp"
 #include "shaders.hpp"
 #include "view/piece_tint.hpp"
@@ -90,11 +91,13 @@ struct HudTextRow {
 
 /// How a block of HUD text is framed (M23.10 section 7): an instrument panel behind it.
 struct HudPanelSpec {
+  ImVec2 size{};  ///< optional measured panel width/height
   const view::Theme* theme{nullptr};
   float scale{1.0f};
   float draw{1.0f};     ///< edge trace-in, 0..1
   float content{1.0f};  ///< text alpha
   float level{1.0f};    ///< panel dimming
+  bool scrollRows{false};
   bool leftAlign{false};
   const char* header{nullptr};  ///< small accent label above the rows
   ImFont* headerFont{nullptr};
@@ -103,29 +106,36 @@ struct HudPanelSpec {
 
 // Right/bottom pivots must use this frame's measured content, including a window's
 // first appearance. Auto-fit otherwise anchors against the previous frame's size.
-void drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anchor,
-                 ImVec2 pivot, ImGuiWindowFlags flags, float spacing,
-                 const HudPanelSpec* panel = nullptr) {
-  if (rows.empty()) return;
+HudRect drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anchor,
+                    ImVec2 pivot, ImGuiWindowFlags flags, float spacing,
+                    const HudPanelSpec* panel = nullptr) {
+  if (rows.empty()) return {};
   std::vector<ImVec2> extents;
   extents.reserve(rows.size());
   float width = 0, height = 0;
+  const float s = panel ? panel->scale : 1.0f;
+  const float pad = panel ? 10.0f * s : 0.0f;
+  const float wrapWidth =
+      panel && panel->scrollRows
+          ? std::max(1.0f, panel->size.x - 2 * pad - ImGui::GetStyle().ScrollbarSize)
+          : 0;
   for (const auto& row : rows) {
     if (row.font != nullptr) ImGui::PushFont(row.font);
-    ImVec2 size = ImGui::CalcTextSize(row.text.c_str());
+    ImVec2 size = ImGui::CalcTextSize(row.text.c_str(), nullptr, false, wrapWidth);
     size.y = std::max(size.y, ImGui::GetTextLineHeight());
     if (row.font != nullptr) ImGui::PopFont();
     extents.push_back(size);
     width = std::max(width, size.x);
     height += size.y;
   }
-  const float s = panel ? panel->scale : 1.0f;
-  const float pad = panel ? 10.0f * s : 0.0f;
   const float ledW = panel && panel->led ? 14.0f * s : 0.0f;
   ImVec2 headerSize(0, 0);
   if (panel && panel->header) {
     if (panel->headerFont) ImGui::PushFont(panel->headerFont);
     headerSize = ImGui::CalcTextSize(panel->header);
+    headerSize.x +=
+        static_cast<float>(std::char_traits<char>::length(panel->header) - 1) *
+        ImGui::GetFontSize() * .12f;
     if (panel->headerFont) ImGui::PopFont();
     width = std::max(width, headerSize.x);
     height += headerSize.y + spacing;
@@ -133,6 +143,13 @@ void drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anchor
   width = std::max(1.0f, std::ceil(width + ledW));
   height =
       std::max(1.0f, std::ceil(height + spacing * static_cast<float>(rows.size() - 1)));
+  const float rowsHeight = height - (panel && panel->header ? headerSize.y + spacing : 0);
+  if (panel) {
+    width = panel->scrollRows ? panel->size.x - 2 * pad
+                              : std::max(width, panel->size.x - 2 * pad);
+    height = panel->size.y > 0 ? std::min(height, std::max(1.0f, panel->size.y - 2 * pad))
+                               : height;
+  }
   ImGui::SetNextWindowPos(anchor, ImGuiCond_Always, pivot);
   ImGui::SetNextWindowSize(ImVec2(width + 2 * pad, height + 2 * pad), ImGuiCond_Always);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
@@ -142,18 +159,37 @@ void drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anchor
   if (panel) {
     const ImVec2 wp = ImGui::GetWindowPos();
     widgets::hudPanel(ImGui::GetWindowDrawList(), wp,
-                      ImVec2(wp.x + width + 2 * pad, wp.y + height + 2 * pad), *panel->theme,
-                      s, panel->draw, panel->level);
+                      ImVec2(wp.x + width + 2 * pad, wp.y + height + 2 * pad),
+                      *panel->theme, s, panel->draw, panel->level);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, std::clamp(panel->content, 0.0f, 1.0f));
   }
-  const float left = ImGui::GetCursorPosX();
+  float left = ImGui::GetCursorPosX();
   if (panel && panel->header) {
     if (panel->headerFont) ImGui::PushFont(panel->headerFont);
     ImGui::PushStyleColor(ImGuiCol_Text, col(panel->theme->ember, 0.8f));
     ImGui::SetCursorPosX(panel->leftAlign ? left : left + width - headerSize.x);
-    ImGui::TextUnformatted(panel->header);
+    widgets::trackedText(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(),
+                         panel->header, ImGui::GetFontSize() * .12f);
+    ImGui::Dummy(headerSize);
     ImGui::PopStyleColor();
     if (panel->headerFont) ImGui::PopFont();
+  }
+  const bool scroll = panel && panel->scrollRows;
+  if (scroll) {
+    ImGuiStorage* storage = ImGui::GetStateStorage();
+    const ImGuiID countId = ImGui::GetID("##rowCount");
+    const int count = static_cast<int>(rows.size());
+    ImGui::SetNextWindowContentSize(ImVec2(0, rowsHeight));
+    if (storage->GetInt(countId, -1) != count) {
+      ImGui::SetNextWindowScroll(ImVec2(-1, rowsHeight));
+      storage->SetInt(countId, count);
+    }
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::BeginChild("##rows",
+                      ImVec2(width, std::max(1.0f, height - headerSize.y - spacing)), 0,
+                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::PopStyleVar();
+    left = ImGui::GetCursorPosX();
   }
   for (std::size_t i = 0; i < rows.size(); ++i) {
     const auto& row = rows[i];
@@ -170,13 +206,19 @@ void drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anchor
       dl->AddCircle(centre, r, u32(panel->theme->boneFaint, 0.8f), 16, std::max(1.0f, s));
     }
     ImGui::PushStyleColor(ImGuiCol_Text, col(row.colour));
+    if (scroll) ImGui::PushTextWrapPos(left + wrapWidth);
     ImGui::TextUnformatted(row.text.c_str());
+    if (scroll) ImGui::PopTextWrapPos();
     ImGui::PopStyleColor();
     if (row.font != nullptr) ImGui::PopFont();
   }
+  if (scroll) ImGui::EndChild();
+  const ImVec2 pos = ImGui::GetWindowPos();
+  const HudRect rect{pos.x, pos.y, width + 2 * pad, height + 2 * pad};
   if (panel) ImGui::PopStyleVar();
   ImGui::End();
   ImGui::PopStyleVar(3);
+  return rect;
 }
 
 std::filesystem::path findFont(const char* name) {
@@ -564,8 +606,8 @@ Result<void> Ui::buildBoardFieldPipeline(VkFormat colorFormat) {
   if (!PostProcess::supported(*ctx_)) return {};
   const VkFormat hdrFormat = PostProcess::kSceneFormat;
   rendering.pColorAttachmentFormats = &hdrFormat;
-  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
-                                                   nullptr, &boardFieldHdrPipeline_);
+  if (const VkResult r = vkCreateGraphicsPipelines(
+          ctx_->device(), VK_NULL_HANDLE, 1, &gpi, nullptr, &boardFieldHdrPipeline_);
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal,
                 "cannot create the HDR field pipeline: " + describe(r));
@@ -685,7 +727,7 @@ void Ui::applyStyle() {
 }
 
 Result<void> Ui::setScale(float scale) {
-  const float clamped = std::clamp(scale, 0.6f, 3.0f);
+  const float clamped = std::clamp(scale, 0.6f, 9.0f);
   if (std::abs(clamped - scale_) < 0.01f) return {};
   scale_ = clamped;
 
@@ -1751,8 +1793,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // to its own list, not ImGui's shared background list, so `recordBackground` can submit
   // it early - inside the board's pass, behind the board (M18 correction). The
   // coordinate labels further down stay on the shared list and the late overlay path.
-  // Where the renderer draws the stars instead (an emitting board), the field is left out:
-  // the game screen's room is the stars alone (M23.10 section 6).
+  // Where the renderer draws the stars instead (an emitting board), the field is left
+  // out: the game screen's room is the stars alone (M23.10 section 6).
   if (!view::gameScreenHasStars(theme_)) {
     boardField_.draw(boardFieldList_.get(), ImVec2(0.0f, 0.0f),
                      ImVec2(vp->Size.x, vp->Size.y), t, iconStyle_, false, true, 0.80f);
@@ -1858,36 +1900,78 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus |
       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
 
-  const float margin = px(22.0f);
+  const float margin = px(16.0f);
 
   // ---------------------------------------------------------- variant, top left
-  const float hudPad = px(10.0f);
+  const float hudPad = px(8.0f);
   // One frame for every HUD panel (M23.10 section 7): the panel is drawn behind the
   // window's own content, sized from this frame's measured content extent.
-  const auto beginFramed = [&](const char* id, ImVec2 pos, ImVec2 pivot) {
+  ImVec2 framedSize;
+  const auto beginFramed = [&](const char* id, ImVec2 pos, ImVec2 pivot,
+                               ImVec2 size = ImVec2(0, 0)) {
+    framedSize = size;
+    if (size.x > 0) ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(hudPad, hudPad));
-    ImGui::Begin(id, nullptr, overlayFlags);
+    ImGui::Begin(
+        id, nullptr,
+        size.x > 0 ? overlayFlags & ~ImGuiWindowFlags_AlwaysAutoResize : overlayFlags);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->ChannelsSplit(2);
     dl->ChannelsSetCurrent(1);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, std::clamp(hudContent_, 0.0f, 1.0f));
   };
+  HudRect lastPanel;
   const auto endFramed = [&](float level) {
     ImGui::PopStyleVar();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 wp = ImGui::GetWindowPos();
-    const ImVec2 maxPos = ImGui::GetCurrentWindow()->DC.CursorMaxPos;
+    const ImVec2 maxPos = framedSize.x > 0 ? ImVec2(wp.x + framedSize.x - hudPad,
+                                                    wp.y + framedSize.y - hudPad)
+                                           : ImGui::GetCurrentWindow()->DC.CursorMaxPos;
     dl->ChannelsSetCurrent(0);
     widgets::hudPanel(dl, wp, ImVec2(maxPos.x + hudPad, maxPos.y + hudPad), t, px(1.0f),
                       hudDraw_, level);
+    lastPanel = {wp.x, wp.y, maxPos.x + hudPad - wp.x, maxPos.y + hudPad - wp.y};
     dl->ChannelsMerge();
     ImGui::End();
     ImGui::PopStyleVar();
   };
+  std::string axisLegend;
+  if (shell.settings().showCoordinates) {
+    const auto& axes = session.viewConfig().screenAxes;
+    for (std::size_t i = 0; i < axes.size(); ++i) {
+      if (i) axisLegend += "   ";
+      axisLegend += v.dims.name(axes[i]);
+      axisLegend += i == 0 ? " ->" : " ^";
+    }
+  }
+  const char* topology = v.geom.isBox()          ? "flat board"
+                         : v.geom.isOrientable() ? "glued board"
+                                                 : "glued with a twist";
+  std::vector<view::SeamLegendEntry> seamKey;
+  if (shell.settings().showSeams && shell.settings().showSeamLegend && !v.geom.isBox())
+    seamKey = view::seamLegend(session.seams(), session.viewConfig(), v.dims);
+  const auto textWidth = [](ImFont* font, const std::string& text) {
+    return font->CalcTextSizeA(font->FontSize, FLT_MAX, 0, text.c_str()).x;
+  };
+  const float metaWidth = textWidth(small, topology) +
+                          (axisLegend.empty() ? 0 : px(8) + textWidth(small, axisLegend));
+  float seamWidth = 0;
+  for (const auto& e : seamKey)
+    seamWidth +=
+        px(21) + textWidth(small, e.axis + " edges") + (seamWidth > 0 ? px(8) : 0);
+  const ImVec2 variantSize(
+      std::ceil(std::max({textWidth(display, upper(shell.currentVariant())), metaWidth,
+                          seamWidth}) +
+                2 * hudPad),
+      std::ceil(display->FontSize + px(2) + small->FontSize +
+                (seamKey.empty() ? 0 : px(2) + std::max(small->FontSize, px(12))) +
+                2 * hudPad));
   beginFramed("##variant", ImVec2(vp->WorkPos.x + margin, vp->WorkPos.y + margin),
-              ImVec2(0, 0));
+              ImVec2(0, 0), variantSize);
   {
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(px(8), px(2)));
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGui::PushFont(display);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
@@ -1899,27 +1983,18 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::GetWindowDrawList()->AddLine(ImVec2(origin.x, nameMax.y + px(3)),
                                         ImVec2(nameMax.x, nameMax.y + px(3)),
                                         u32(t.emberDeep), 1.0f);
-    ImGui::Dummy(ImVec2(0, px(5)));
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(v.geom.isBox() ? t.boneFaint : t.rift));
-    ImGui::TextUnformatted(
-        v.geom.isBox() ? "flat board"
-                       : (v.geom.isOrientable() ? "glued board" : "glued with a twist"));
+    ImGui::TextUnformatted(topology);
     ImGui::PopStyleColor();
     ImGui::PopFont();
     // Name the screen axes, so a 3-D or 4-D board says which axis runs which way: a 4-D
     // board otherwise raises "which of these four is up?" as its first question.
     if (shell.settings().showCoordinates) {
-      const auto& axes = session.viewConfig().screenAxes;
-      std::string legend;
-      for (std::size_t i = 0; i < axes.size(); ++i) {
-        if (i != 0) legend += "   ";
-        legend += v.dims.name(axes[i]);
-        legend += i == 0 ? " ->" : " ^";
-      }
+      ImGui::SameLine(0, px(8));
       ImGui::PushFont(small);
       ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-      ImGui::TextUnformatted(legend.c_str());
+      ImGui::TextUnformatted(axisLegend.c_str());
       ImGui::PopStyleColor();
       ImGui::PopFont();
     }
@@ -1930,14 +2005,15 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     // ordinary items, not free text, so the overlay window sizes to the labels.
     if (shell.settings().showSeams && shell.settings().showSeamLegend &&
         !v.geom.isBox() && !session.seams().empty()) {
-      const std::vector<view::SeamLegendEntry> key =
-          view::seamLegend(session.seams(), session.viewConfig(), v.dims);
-      for (const view::SeamLegendEntry& e : key) {
+      bool firstSeam = true;
+      for (const view::SeamLegendEntry& e : seamKey) {
+        if (!firstSeam) ImGui::SameLine(0, px(8));
+        firstSeam = false;
         const ImVec2 p = ImGui::GetCursorScreenPos();
         ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + px(2)),
                                                   ImVec2(p.x + px(11), p.y + px(13)),
                                                   u32(e.color), px(2));
-        const std::string label = "the " + e.axis + " edges are the same edge";
+        const std::string label = e.axis + " edges";
         ImGui::Dummy(ImVec2(px(15), px(12)));
         ImGui::SameLine(0.0f, px(6));
         ImGui::PushFont(small);
@@ -1947,8 +2023,10 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         ImGui::PopFont();
       }
     }
+    ImGui::PopStyleVar();
   }
   endFramed(hudLevel_);
+  const HudRect variantRect = lastPanel;
 
   // ------------------------------------------------------------ status, top right
   const GameResult result = game.result();
@@ -1978,180 +2056,90 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   const view::Rgba turnLed =
       game.position().sideToMove() == Color::White ? t.whitePiece : t.blackPiece;
   if (result == GameResult::InProgress) statusPanel.led = &turnLed;
-  drawHudText("##status", status,
-              ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin, vp->WorkPos.y + margin),
-              ImVec2(1, 0), overlayFlags, ImGui::GetStyle().ItemSpacing.y, &statusPanel);
+  const HudRect statusRect = drawHudText(
+      "##status", status,
+      ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin, vp->WorkPos.y + margin),
+      ImVec2(1, 0), overlayFlags, ImGui::GetStyle().ItemSpacing.y, &statusPanel);
 
-  // ------------------------------------------------------- move ledger, right edge
-  // A column centred on the right edge, up to about half the height: the newest row lit,
-  // older rows fading. The rows are measured with the strings and fonts they are drawn in.
-  if (game.plyCount() > 0) {
-    float lineH = 0.0f;
-    ImGui::PushFont(small);
-    lineH = ImGui::GetTextLineHeight() + px(1);
-    ImGui::PopFont();
-    const float budget = vp->WorkSize.y * 0.5f - 2.0f * hudPad - lineH * 2.0f;
-    const std::size_t fit = static_cast<std::size_t>(std::max(3.0f, budget / lineH));
-    const auto& moves = game.moveHistory();
-    const std::size_t show = std::min<std::size_t>(moves.size(), std::min<std::size_t>(fit, 14));
-    std::vector<HudTextRow> recent;
-    recent.reserve(show);
-    for (std::size_t i = moves.size() - show; i < moves.size(); ++i) {
-      const bool last = i + 1 == moves.size();
-      const float age = static_cast<float>(moves.size() - 1 - i) / static_cast<float>(show);
-      char row[96];
-      std::snprintf(row, sizeof(row), "%2zu%s %s", i / 2 + 1, (i % 2 == 0) ? "." : "..",
-                    moveText(v, moves[i]).c_str());
-      view::Rgba c = last ? t.ember : t.boneDim;
-      c.a *= last ? 1.0f : 1.0f - 0.7f * age;
-      recent.push_back({row, small, c});
-    }
-    HudPanelSpec ledger = statusPanel;
-    ledger.led = nullptr;
-    ledger.leftAlign = true;
-    ledger.header = "MOVES";
-    ledger.headerFont = small;
-    ledger.level = hudLevel_;
-    drawHudText("##recent", recent,
-                ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin,
-                       vp->WorkPos.y + vp->WorkSize.y * 0.5f),
-                ImVec2(1, 0.5f), overlayFlags, px(1), &ledger);
-  }
-
-  // ------------------------------------------------------ captured trays, left edge
-  if (!game.isTemporal() && game.plyCount() > 0) {
-    if (captured_.game != &game || captured_.ply != game.plyCount()) {
-      captured_.pieces = app::capturedBySide(game);
-      captured_.game = &game;
-      captured_.ply = game.plyCount();
-    }
-    struct Group {
-      Piece piece;
-      int n;
-    };
-    const auto group = [](const std::vector<Piece>& pieces) {
-      std::vector<Group> out;
-      for (const Piece& p : pieces) {
-        auto it = std::find_if(out.begin(), out.end(), [&](const Group& g) {
-          return g.piece.type == p.type && g.piece.colorOf() == p.colorOf();
-        });
-        if (it == out.end())
-          out.push_back({p, 1});
-        else
-          ++it->n;
-      }
-      return out;
-    };
-    const std::vector<Group> sides[2] = {group(captured_.pieces.byWhite),
-                                         group(captured_.pieces.byBlack)};
-    if (!sides[0].empty() || !sides[1].empty()) {
-      const float r = px(11.0f);
-      const float maxW = px(176.0f);
-      const float gap = px(6.0f);
-      // Width of one group: icons overlapped up to four, then one icon with a count.
-      const auto groupW = [&](const Group& g) {
-        return g.n <= 4 ? 2 * r + static_cast<float>(g.n - 1) * r * 1.1f : 2 * r + px(26);
-      };
-      struct Placed {
-        float x, y;
-        const Group* g;
-      };
-      std::vector<Placed> placed;
-      struct Label {
-        float y;
-        const char* text;
-      };
-      std::vector<Label> labels;
-      float y = 0.0f, widest = 0.0f;
-      ImGui::PushFont(small);
-      const float labelH = ImGui::GetTextLineHeight() + px(3);
-      ImGui::PopFont();
-      const char* names[2] = {"BY WHITE", "BY BLACK"};
-      for (int side = 0; side < 2; ++side) {
-        if (sides[side].empty()) continue;
-        labels.push_back({y, names[side]});
-        y += labelH;
-        float x = 0.0f;
-        for (const Group& g : sides[side]) {
-          const float w = groupW(g);
-          if (x > 0.0f && x + w > maxW) {
-            x = 0.0f;
-            y += 2 * r + gap;
-          }
-          placed.push_back({x, y, &g});
-          x += w + gap;
-          widest = std::max(widest, x - gap);
-        }
-        y += 2 * r + gap * 2;
-      }
-      y -= gap * 2;
-      ImGui::PushFont(small);
-      widest = std::max(widest, ImGui::CalcTextSize("CAPTURED").x);
-      ImGui::PopFont();
-      const float top = ImGui::GetTextLineHeight() + px(6);  // header row
-      ImGui::SetNextWindowPos(
-          ImVec2(vp->WorkPos.x + margin, vp->WorkPos.y + vp->WorkSize.y * 0.5f),
-          ImGuiCond_Always, ImVec2(0, 0.5f));
-      ImGui::SetNextWindowSize(ImVec2(widest + 2 * hudPad, y + top + 2 * hudPad),
-                               ImGuiCond_Always);
-      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(hudPad, hudPad));
-      ImGui::Begin("##captured", nullptr, overlayFlags & ~ImGuiWindowFlags_AlwaysAutoResize);
-      ImDrawList* dl = ImGui::GetWindowDrawList();
-      const ImVec2 wp = ImGui::GetWindowPos();
-      widgets::hudPanel(dl, wp,
-                        ImVec2(wp.x + widest + 2 * hudPad, wp.y + y + top + 2 * hudPad), t,
-                        px(1.0f), hudDraw_, hudLevel_);
-      const float alpha = std::clamp(hudContent_, 0.0f, 1.0f);
-      const ImVec2 o(wp.x + hudPad, wp.y + hudPad);
-      dl->AddText(small, small->FontSize, o, u32(t.ember, 0.8f * alpha), "CAPTURED");
-      for (const Label& l : labels) {
-        dl->AddText(small, small->FontSize, ImVec2(o.x, o.y + top + l.y),
-                    u32(t.boneFaint, alpha), l.text);
-      }
-      for (const Placed& p : placed) {
-        const Group& g = *p.g;
-        const bool white = g.piece.colorOf() == Color::White;
-        const view::Rgba figure = white ? t.whitePiece : t.blackPiece;
-        const int icons = g.n <= 4 ? g.n : 1;
-        for (int k = 0; k < icons; ++k) {
-          const ImVec2 c(o.x + p.x + r + static_cast<float>(k) * r * 1.1f,
-                         o.y + top + p.y + r);
-          dl->AddCircleFilled(c, r, u32(t.pieceToken, alpha), 20);
-          dl->AddCircle(c, r, u32(t.boardRim, alpha), 20, px(1.0f));
-          drawPieceOf(dl, c, r * 0.82f, u32(figure, alpha), u32(t.pieceToken, alpha),
-                      v.pieces[g.piece.type], iconStyle_, false);
-        }
-        if (g.n > 4) {
-          char count[16];
-          std::snprintf(count, sizeof(count), "x%d", g.n);
-          dl->AddText(small, small->FontSize,
-                      ImVec2(o.x + p.x + 2 * r + px(4),
-                             o.y + top + p.y + r - small->FontSize * 0.5f),
-                      u32(t.bone, alpha), count);
-        }
-      }
-      ImGui::End();
-      ImGui::PopStyleVar();
-    }
-  }
-
-  // ------------------------------------------------------------ controls, bottom left
+  // ------------------------------------------------------------ dock, bottom centre
   // The trailer's timeline strip takes the bottom edge; the controls sit above it.
   const float timelineLift = shell.attracting() ? buildTrailerTimeline(shell) : 0.0f;
+  std::vector<float> dockWidths;
+  if (!shell.attracting() && !shell.watching()) {
+    dockWidths = {px(78), px(84)};
+    if (v.dims.dims() > 2) dockWidths.push_back(px(78));
+    dockWidths.push_back(px(64));
+    if (hasPlaySurface(v)) {
+      dockWidths.push_back(px(84));
+      if (shell.settings().geometryView && !session.flatView()) {
+        for (float width : {100.0f, 92.0f, 84.0f}) dockWidths.push_back(px(width));
+        if (shell.settings().cameraMode != "off" && PlaySurface::slidesAlongRanks(v))
+          dockWidths.push_back(px(92));
+      }
+    }
+    if (shell.settings().cameraMode != "off" && shell.settings().geometryView)
+      dockWidths.push_back(px(92));
+    dockWidths.push_back(px(78));
+  }
+  const float dockAvailable = vp->WorkSize.x - 2 * margin - 2 * hudPad;
+  const float fullRowHeight = std::ceil(controlHeight());
+  const auto fullDock = dockLayout(dockWidths, 2, dockAvailable, fullRowHeight,
+                                   ImGui::GetStyle().ItemSpacing.x, px(12));
+  const bool compactDock = fullDock.height > fullRowHeight;
+  if (compactDock)
+    for (float& width : dockWidths) width *= .98f;
+  const float dockRowHeight =
+      compactDock
+          ? std::ceil(std::max(controlHeight() * 20 / 42,
+                               actionFont()->FontSize + 4 * ImGui::GetFontSize() / 15))
+          : fullRowHeight;
+  const auto dock = compactDock ? dockLayout(dockWidths, 2, dockAvailable, dockRowHeight,
+                                             ImGui::GetStyle().ItemSpacing.x, px(12))
+                                : fullDock;
+  std::string hint;
+  if (!shell.attracting() && !shell.watching()) {
+    if (session.hotSeat()) {
+      const Color mover = game.position().sideToMove();
+      const auto partial = session.hotSeatKeys().partial(mover);
+      hint = mover == Color::White ? "p1 (white): " : "p2 (black): ";
+      if (partial.empty())
+        hint += mover == Color::White ? "qwertasdfgzxcvb" : "yuiophjkl;nm,./";
+      else
+        for (std::int16_t c : partial) hint += std::to_string(c) + " ";
+    } else if (game.plyCount() == 0) {
+      hint = surfaceView ? "middle-drag slides; right-drag orbits"
+                         : "click a piece, then a lit cell";
+    }
+  }
+  auto* labelFont = static_cast<ImFont*>(fontLabel_);
+  const float hintWidth =
+      dockWidths.empty() ? vp->WorkSize.x - 2 * margin - 2 * hudPad : dock.width;
+  const ImVec2 hintSize = hint.empty()
+                              ? ImVec2(0, 0)
+                              : labelFont->CalcTextSizeA(labelFont->FontSize, FLT_MAX,
+                                                         hintWidth, hint.c_str());
+  const float dockHeight = dock.height + (hint.empty() ? 0 : hintSize.y + px(6));
   beginFramed("##controls",
-              ImVec2(vp->WorkPos.x + margin,
+              ImVec2(vp->WorkPos.x + vp->WorkSize.x * .5f,
                      vp->WorkPos.y + vp->WorkSize.y - margin - timelineLift),
-              ImVec2(0.0f, 1.0f));
-  // A thin rule between the dock's groups: game actions | view controls | menu.
-  const auto dockRule = [&] {
-    ImGui::SameLine(0.0f, px(8));
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float h = ImGui::GetItemRectSize().y;
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y + px(6)),
-                                        ImVec2(p.x, p.y + h - px(6)),
-                                        u32(t.ember, 0.35f), 1.0f);
-    ImGui::Dummy(ImVec2(px(1), h));
-    ImGui::SameLine(0.0f, px(8));
+              ImVec2(.5f, 1.0f),
+              dockWidths.empty()
+                  ? ImVec2(0, 0)
+                  : ImVec2(dock.width + 2 * hudPad, dockHeight + 2 * hudPad));
+  const ImVec2 dockOrigin = ImGui::GetCursorScreenPos();
+  std::size_t dockIndex = 0;
+  const int dockFirstVertex = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+  // Keep original button IDs and enable predicates. Boot adds a temporary input gate.
+  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 1.0f);
+  ImGui::BeginDisabled(hudContent_ < 1.0f);
+  const auto dockButton = [&](const char* name, const view::Theme& theme, float width,
+                              bool primary, bool cold, bool enabled, ImFont* font) {
+    if (!dockWidths.empty()) {
+      const auto& rect = dock.buttons.at(dockIndex++);
+      ImGui::SetCursorScreenPos(ImVec2(dockOrigin.x + rect.x, dockOrigin.y + rect.y));
+      width = rect.width;
+    }
+    return widgets::button(name, theme, width, primary, cold, enabled, font, compactDock);
   };
   if (shell.attracting()) {
     // A trailer beat is a watch run under the hood, so `watching()` is also true here -
@@ -2162,28 +2150,28 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     // The shape buttons are offered while it plays too; the stepping and keyframe rows
     // only while editing. They sit above the main row, so the main row never moves.
     buildTrailerEditRows(shell, session, request, small, editing);
-    if (button("STOP TRAILER", t, px(180), false, true, true, actionFont())) {
+    if (dockButton("STOP TRAILER", t, px(180), false, true, true, actionFont())) {
       shell.stopAttract();
     }
     ImGui::SameLine();
     // Back to the first beat (deferred a frame - it replaces the session this frame
     // holds).
-    if (button("RESTART", t, px(110), false, true, true, actionFont())) {
+    if (dockButton("RESTART", t, px(110), false, true, true, actionFont())) {
       shell.requestTrailerRestart();
     }
     ImGui::SameLine();
     // Render the whole trailer to a video, frame by frame, in a separate process - what
     // plays here is as fast as this machine can draw it, what is rendered is every frame.
-    if (button("RENDER", t, px(110), renderRunning_, true, !renderRunning_,
-               actionFont())) {
+    if (dockButton("RENDER", t, px(110), renderRunning_, true, !renderRunning_,
+                   actionFont())) {
       request.renderTrailer = true;
     }
     ImGui::SameLine();
     // Pause without the edit controls; edit mode pauses too, so then it only reads.
     {
       const bool paused = shell.trailerPaused() || editing;
-      if (button(paused ? "PLAY" : "PAUSE", t, px(100), paused, true, !editing,
-                 actionFont())) {
+      if (dockButton(paused ? "PLAY" : "PAUSE", t, px(100), paused, true, !editing,
+                     actionFont())) {
         shell.setTrailerPaused(!shell.trailerPaused());
       }
     }
@@ -2196,7 +2184,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const char* label = cam == app::TrailerCamera::Auto     ? "CAM: AUTO"
                           : cam == app::TrailerCamera::Follow ? "CAM: FOLLOW"
                                                               : "CAM: AUTHORED";
-      if (button(label, t, px(150), false, true, true, actionFont())) {
+      if (dockButton(label, t, px(150), false, true, true, actionFont())) {
         shell.setTrailerCamera(
             cam == app::TrailerCamera::Auto     ? app::TrailerCamera::Follow
             : cam == app::TrailerCamera::Follow ? app::TrailerCamera::Authored
@@ -2204,8 +2192,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       }
     }
     ImGui::SameLine();
-    if (button(editing ? "DONE" : "EDIT CAMERA", t, px(editing ? 78 : 140), editing, true,
-               true, actionFont())) {
+    if (dockButton(editing ? "DONE" : "EDIT CAMERA", t, px(editing ? 78 : 140), editing,
+                   true, true, actionFont())) {
       shell.setTrailerEditing(!editing);
     }
     ImGui::SameLine();
@@ -2222,7 +2210,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   } else if (shell.watching()) {
     // Watching is not playing: the only control that matters is the way out, so it is
     // the only one offered. Esc does the same (M12.8).
-    if (button("STOP WATCHING", t, px(180), false, true, true, actionFont())) {
+    if (dockButton("STOP WATCHING", t, px(180), false, true, true, actionFont())) {
       shell.stopWatching();
     }
     ImGui::SameLine();
@@ -2235,21 +2223,20 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
   } else {
-    if (button("UNDO", t, px(78), false, false, true, actionFont())) {
+    if (dockButton("UNDO", t, px(78), false, false, true, actionFont())) {
       app::Action a;
       a.kind = app::ActionKind::Undo;
       (void)session.apply(a);
     }
     ImGui::SameLine();
-    if (button("RESET", t, px(84), false, false, true, actionFont())) {
+    if (dockButton("RESET", t, px(84), false, false, true, actionFont())) {
       app::Action a;
       a.kind = app::ActionKind::Reset;
       (void)session.apply(a);
     }
-    dockRule();
     if (v.dims.dims() > 2) {
       // Cold, because it acts on the geometry rather than on the game.
-      if (button("AXES", t, px(78), false, true, true, actionFont())) {
+      if (dockButton("AXES", t, px(78), false, true, true, actionFont())) {
         const DimSpec& d = v.dims;
         bool temporal = false;
         for (std::uint8_t ax = 0; ax < d.dims(); ++ax) {
@@ -2301,7 +2288,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     const bool surfaceAvailable = hasPlaySurface(session.variant());
     const ViewModeButton mode =
         viewModeButton(shell.settings(), session.flatView(), surfaceAvailable);
-    if (button(mode.label, t, px(64), false, true, mode.enabled, actionFont())) {
+    if (dockButton(mode.label, t, px(64), false, true, mode.enabled, actionFont())) {
       if (mode.pieceStyle) {
         shell.settings().shapePieceCylinders = !shell.settings().shapePieceCylinders;
       } else {
@@ -2319,7 +2306,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const bool on = shell.settings().geometryView;
       // Greyed out in 2D (M18.6): a donut has no 2D rendering, so SHAPE is refused there
       // rather than silently doing something. Visible but inert, as above.
-      if (button("SHAPE", t, px(84), on, true, !session.flatView(), actionFont())) {
+      if (dockButton("SHAPE", t, px(84), on, true, !session.flatView(), actionFont())) {
         shell.settings().geometryView = !on;
         request.settingsChanged = true;
       }
@@ -2333,13 +2320,13 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         // without leaving the board. Lit while it follows.
         ImGui::SameLine();
         const bool follow = shell.settings().cameraMode != "off";
-        if (button("CAMERA", t, px(100), follow, true, true, actionFont())) {
+        if (dockButton("CAMERA", t, px(100), follow, true, true, actionFont())) {
           shell.settings().cameraMode = follow ? "off" : "route";
           request.settingsChanged = true;
         }
         ImGui::SameLine();
         const bool inverted = shell.settings().geometryInvert;
-        if (button("INVERT", t, px(92), inverted, true, true, actionFont())) {
+        if (dockButton("INVERT", t, px(92), inverted, true, true, actionFont())) {
           shell.settings().geometryInvert = !inverted;
           request.settingsChanged = true;
         }
@@ -2347,7 +2334,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         // through the near side (M17.10). The pieces stay opaque.
         ImGui::SameLine();
         const bool ghost = shell.settings().geometryGhost < 0.99f;
-        if (button("GHOST", t, px(84), ghost, true, true, actionFont())) {
+        if (dockButton("GHOST", t, px(84), ghost, true, true, actionFont())) {
           shell.settings().geometryGhost = ghost ? 1.0f : 0.35f;
           request.settingsChanged = true;
         }
@@ -2360,7 +2347,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
             PlaySurface::slidesAlongRanks(session.variant())) {
           ImGui::SameLine();
           const bool aligned = shell.settings().geometryAlign;
-          if (button("NOCLIP", t, px(92), aligned, true, true, actionFont())) {
+          if (dockButton("NOCLIP", t, px(92), aligned, true, true, actionFont())) {
             shell.settings().geometryAlign = !aligned;
             request.settingsChanged = true;
           }
@@ -2373,47 +2360,247 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (shell.settings().cameraMode != "off" && shell.settings().geometryView) {
       ImGui::SameLine();
       const bool upright = shell.settings().followUpright;
-      if (button(upright ? "UPRIGHT" : "TILT", t, px(92), upright, true, true,
-                 actionFont())) {
+      if (dockButton(upright ? "UPRIGHT" : "TILT", t, px(92), upright, true, true,
+                     actionFont())) {
         shell.settings().followUpright = !upright;
         request.settingsChanged = true;
       }
     }
-    dockRule();
-    if (button("MENU", t, px(78), false, false, true, actionFont())) shell.pause();
+    if (dockButton("MENU", t, px(78), false, false, true, actionFont())) shell.pause();
 
-    ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-    if (session.hotSeat()) {
-      // Whose turn, and the coordinates entered so far, so a player can see the square
-      // they are spelling out before it completes.
-      const Color mover = game.position().sideToMove();
-      const auto partial = session.hotSeatKeys().partial(mover);
-      std::string line = mover == Color::White ? "p1 (white): " : "p2 (black): ";
-      if (partial.empty()) {
-        line += mover == Color::White ? "qwertasdfgzxcvb" : "yuiophjkl;nm,./";
-        line += "   -   one key per axis, then the next square";
-      } else {
-        for (std::int16_t c : partial) line += std::to_string(c) + " ";
-      }
-      ImGui::TextUnformatted(line.c_str());
-    } else if (game.plyCount() == 0) {
-      // Only while it is still useful; a permanent instruction line is clutter.
-      // On the shape the seams need no explaining - they are the shape - so the line
-      // spends itself on the one control nothing else hints at.
-      ImGui::TextUnformatted(
-          surfaceView ? "middle-drag to slide the board round its shape   -   "
-                        "right-drag to orbit"
-          : v.geom.isBox()
-              ? "click a piece, then a lit cell   -   right-drag to orbit"
-              : "cyan edges are joined to each other   -   right-drag to orbit");
-    } else if (!session.message().empty()) {
-      ImGui::TextUnformatted(session.message().c_str());
+    if (!hint.empty()) {
+      ImGui::SetCursorScreenPos(ImVec2(dockOrigin.x, dockOrigin.y + dock.height + px(6)));
+      ImGui::PushFont(labelFont);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+      ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + dock.width);
+      ImGui::TextUnformatted(hint.c_str());
+      ImGui::PopTextWrapPos();
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
     }
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
+  }
+  ImGui::EndDisabled();
+  ImGui::PopStyleVar();
+  ImDrawList* dockDl = ImGui::GetWindowDrawList();
+  for (const auto& rule : dock.rules)
+    dockDl->AddRectFilled(
+        ImVec2(dockOrigin.x + rule.x, dockOrigin.y + rule.y),
+        ImVec2(dockOrigin.x + rule.x + rule.width, dockOrigin.y + rule.y + rule.height),
+        u32(t.ember, .35f));
+  // Custom draw-list controls don't inherit ImGui alpha. Multiply their actual vertices
+  // once, including text/fill, while leaving the panel's edge trace independent.
+  const float dockAlpha = std::clamp(hudContent_ * hudLevel_, 0.0f, 1.0f);
+  for (int i = dockFirstVertex; i < dockDl->VtxBuffer.Size; ++i) {
+    auto& colour = dockDl->VtxBuffer[i].col;
+    const auto alpha = static_cast<ImU32>(
+        static_cast<float>((colour >> IM_COL32_A_SHIFT) & 255) * dockAlpha);
+    colour = (colour & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
+  }
+  if (!dockWidths.empty()) {
+    ImGui::SetCursorScreenPos(ImVec2(dockOrigin.x, dockOrigin.y));
+    ImGui::Dummy(ImVec2(dock.width, dockHeight));
   }
   endFramed(hudLevel_);
+  const HudRect dockRect = lastPanel;
+
+  // ------------------------------------------------------- move ledger, right edge
+  // A measured, scrolling column from status to dock: the newest row lit,
+  // older rows fading. The rows are measured with the strings and fonts they are drawn
+  // in.
+  HudRect ledgerRect;
+  if (game.plyCount() > 0) {
+    auto* readout = static_cast<ImFont*>(fontMono_);
+    const float ledgerTop = statusRect.y + statusRect.height + margin;
+    const float ledgerHeight = std::max(px(30), dockRect.y - margin - ledgerTop);
+    const auto& moves = game.moveHistory();
+    const std::size_t show = moves.size();
+    std::vector<HudTextRow> recent;
+    recent.reserve(show);
+    for (std::size_t i = moves.size() - show; i < moves.size(); ++i) {
+      const bool last = i + 1 == moves.size();
+      const float age =
+          static_cast<float>(moves.size() - 1 - i) / static_cast<float>(show);
+      char row[96];
+      std::snprintf(row, sizeof(row), "%2zu%s %s", i / 2 + 1, (i % 2 == 0) ? "." : "..",
+                    moveText(v, moves[i]).c_str());
+      view::Rgba c = last ? t.ember : t.boneDim;
+      c.a *= last ? 1.0f : 1.0f - 0.7f * age;
+      recent.push_back({row, readout, c});
+    }
+    HudPanelSpec ledger = statusPanel;
+    ledger.led = nullptr;
+    ledger.leftAlign = true;
+    ledger.scrollRows = true;
+    ledger.header = "MOVES";
+    ledger.headerFont = small;
+    ledger.level = hudLevel_;
+    ImGui::PushFont(readout);
+    const float ledgerWidth = ImGui::CalcTextSize("000. Qxh8+ Qxh8+").x + px(20);
+    ImGui::PopFont();
+    ledger.size = ImVec2(ledgerWidth, ledgerHeight);
+    ledgerRect = drawHudText("##recent", recent,
+                             ImVec2(vp->WorkPos.x + vp->WorkSize.x - margin, ledgerTop),
+                             ImVec2(1, 0), overlayFlags, px(1), &ledger);
+  }
+
+  HudRect trayRect;
+  // ------------------------------------------------------ captured trays, left edge
+  if (!game.isTemporal() && game.plyCount() > 0) {
+    if (captured_.game != &game || captured_.ply != game.plyCount()) {
+      captured_.pieces = app::capturedBySide(game);
+      captured_.game = &game;
+      captured_.ply = game.plyCount();
+    }
+    const std::vector<CapturedGroup> sides[2] = {groupCaptured(captured_.pieces.byWhite),
+                                                 groupCaptured(captured_.pieces.byBlack)};
+    if (!sides[0].empty() || !sides[1].empty()) {
+      const float r = px(11.0f);
+      const float maxW = px(176.0f);
+      const float gap = px(6.0f);
+      // Width of one group: icons overlapped up to four, then one icon with a count.
+      const auto groupW = [&](const CapturedGroup& g) {
+        return g.count <= 4 ? 2 * r + static_cast<float>(g.count - 1) * r * 1.1f
+                            : 2 * r + px(26);
+      };
+      struct Placed {
+        float x, y;
+        const CapturedGroup* g;
+      };
+      std::vector<Placed> placed;
+      struct Label {
+        float x, y;
+        const char* text;
+      };
+      std::vector<Label> labels;
+      float y = 0.0f, widest = 0.0f;
+      ImGui::PushFont(small);
+      const float labelH = ImGui::GetTextLineHeight() + px(3);
+      ImGui::PopFont();
+      const char* names[2] = {"BY WHITE", "BY BLACK"};
+      for (int side = 0; side < 2; ++side) {
+        labels.push_back({0, y, names[side]});
+        y += labelH;
+        float x = 0.0f;
+        for (const CapturedGroup& g : sides[side]) {
+          const float w = groupW(g);
+          if (x > 0.0f && x + w > maxW) {
+            x = 0.0f;
+            y += 2 * r + gap;
+          }
+          placed.push_back({x, y, &g});
+          x += w + gap;
+          widest = std::max(widest, x - gap);
+        }
+        y += 2 * r + gap * 2;
+      }
+      y -= gap * 2;
+      ImGui::PushFont(small);
+      widest = std::max(widest,
+                        ImGui::CalcTextSize("CAPTURED").x + 7 * small->FontSize * .12f);
+      ImGui::PopFont();
+      const float top = small->FontSize + px(6);
+      const float trayRoom =
+          dockRect.y - margin - variantRect.y - variantRect.height - margin;
+      if (y + top + 2 * hudPad > trayRoom) {
+        // On a short, highly scaled screen put both sections in one row, retaining both
+        // labels and full-size icons. Each section is measured before Begin.
+        placed.clear();
+        labels.clear();
+        float x = 0;
+        y = 2 * r;
+        for (int side = 0; side < 2; ++side) {
+          const float labelWidth =
+              small->CalcTextSizeA(small->FontSize, FLT_MAX, 0, names[side]).x;
+          labels.push_back({x, r - small->FontSize * .5f, names[side]});
+          x += labelWidth + gap;
+          for (const auto& g : sides[side]) {
+            placed.push_back({x, 0, &g});
+            x += groupW(g) + gap;
+          }
+          x += gap;
+        }
+        widest = std::max(widest, x - gap);
+      }
+      ImGui::SetNextWindowPos(
+          ImVec2(vp->WorkPos.x + margin, variantRect.y + variantRect.height + margin),
+          ImGuiCond_Always, ImVec2(0, 0));
+      ImGui::SetNextWindowSize(ImVec2(widest + 2 * hudPad, y + top + 2 * hudPad),
+                               ImGuiCond_Always);
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(hudPad, hudPad));
+      ImGui::Begin("##captured", nullptr,
+                   overlayFlags & ~ImGuiWindowFlags_AlwaysAutoResize);
+      ImDrawList* dl = ImGui::GetWindowDrawList();
+      const ImVec2 wp = ImGui::GetWindowPos();
+      trayRect = {wp.x, wp.y, widest + 2 * hudPad, y + top + 2 * hudPad};
+      widgets::hudPanel(dl, wp,
+                        ImVec2(wp.x + widest + 2 * hudPad, wp.y + y + top + 2 * hudPad),
+                        t, px(1.0f), hudDraw_, hudLevel_);
+      const float alpha = std::clamp(hudContent_, 0.0f, 1.0f);
+      const ImVec2 o(wp.x + hudPad, wp.y + hudPad);
+      ImGui::PushFont(small);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember, .8f * alpha));
+      widgets::trackedText(dl, o, "CAPTURED", small->FontSize * .12f);
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+      for (const Label& l : labels) {
+        dl->AddText(small, small->FontSize, ImVec2(o.x + l.x, o.y + top + l.y),
+                    u32(t.boneFaint, alpha), l.text);
+      }
+      for (const Placed& p : placed) {
+        const CapturedGroup& g = *p.g;
+        const bool white = g.piece.colorOf() == Color::White;
+        const view::Rgba figure = white ? t.whitePiece : t.blackPiece;
+        const int icons = g.icons();
+        const auto& newest = white ? captured_.pieces.byBlack : captured_.pieces.byWhite;
+        const bool latest = session.capturePly() == game.plyCount() && !newest.empty() &&
+                            newest.back().type == g.piece.type &&
+                            game.position().sideToMove() == g.piece.colorOf();
+        for (int k = 0; k < icons; ++k) {
+          const ImVec2 c(o.x + p.x + r + static_cast<float>(k) * r * 1.1f,
+                         o.y + top + p.y + r);
+          const float reveal =
+              latest && k + 1 == icons && captureAge_
+                  ? captureReveal(*captureAge_, shell.settings().presentationIntensity)
+                  : 1;
+          const float edge = c.y + r - 2 * r * reveal;
+          dl->PushClipRect(ImVec2(c.x - r - 1, edge), ImVec2(c.x + r + 1, c.y + r + 1),
+                           true);
+          dl->AddCircleFilled(c, r, u32(t.pieceToken, alpha), 20);
+          dl->AddCircle(c, r, u32(t.boardRim, alpha), 20, px(1.0f));
+          drawPieceOf(dl, c, r * 0.82f, u32(figure, alpha), u32(t.pieceToken, alpha),
+                      v.pieces[g.piece.type], iconStyle_, false);
+          if (reveal < 1 && reveal > 0)
+            dl->AddRectFilled(ImVec2(c.x - r, edge), ImVec2(c.x + r, edge + px(2)),
+                              u32(t.ember, alpha));
+          dl->PopClipRect();
+        }
+        if (g.count > 4) {
+          char count[16];
+          std::snprintf(count, sizeof(count), "x%d", g.count);
+          dl->AddText(small, small->FontSize,
+                      ImVec2(o.x + p.x + 2 * r + px(4),
+                             o.y + top + p.y + r - small->FontSize * 0.5f),
+                      u32(t.bone, alpha), count);
+        }
+      }
+      ImGui::End();
+      ImGui::PopStyleVar();
+    }
+  }
+
+  const StagePanel stagePanels[] = {{variantRect, StageEdge::Left},
+                                    {statusRect, StageEdge::Top},
+                                    {trayRect, StageEdge::Left},
+                                    {ledgerRect, StageEdge::Right},
+                                    {dockRect, StageEdge::Bottom}};
+  const auto stage = render::stageRect({vp->Pos.x, vp->Pos.y, vp->Size.x, vp->Size.y},
+                                       stagePanels, px(4));
+  if (!shell.attracting()) {
+    request.stageRect[0] = stage.x;
+    request.stageRect[1] = stage.y;
+    request.stageRect[2] = stage.width;
+    request.stageRect[3] = stage.height;
+  }
 
   // --------------------------------------------------------------------- frame rate
   if (devOverlay(shell)) {

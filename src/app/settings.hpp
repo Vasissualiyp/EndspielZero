@@ -23,6 +23,10 @@ struct Settings {
   /// Interface scale. Fonts are rebuilt at the new size rather than stretched, so text
   /// stays crisp - which is the whole point of the option on a high-density display.
   float guiScale{1.0f};
+  /// Multiply by framebuffer height / 720, rounded to quarter steps (M23.11).
+  bool guiScaleAuto{true};
+  /// Frame within HUD clearance; debug A/B for material and camera captures.
+  bool hudFraming{true};
   bool fullscreen{false};
   /// Developer-only presentation: fps and unfinished menu entries. Console access only.
   bool devOverlay{false};
@@ -30,8 +34,8 @@ struct Settings {
   /// Multiplies theme bloom. Zero skips bloom; clamped to the finite range [0,4].
   float bloomScale{1.0f};
   /// How much the board's presentation moves (M23.9, M23.10): the glitches, the boot
-  /// sweep, the check ripple, the end power-down. 1 is the full show; below one half every
-  /// effect takes its calm form. Clamped to [0,1].
+  /// sweep, the check ripple, the end power-down. 1 is the full show; below one half
+  /// every effect takes its calm form. Clamped to [0,1].
   float presentationIntensity{1.0f};
   /// Frame pacing. The game redraws on input, so this only bounds the idle loop.
   bool vsync{true};

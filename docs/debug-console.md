@@ -104,7 +104,19 @@ groups:
     for the first 3 s; the hold is reached by about 9). Example: `--theme manifold --script "..." --end-t 0.7`.
   - `--theme <name>` picks the palette.
   - `--matte` turns materials off.
-  - `--ui-scale N` sets the interface scale.
+  - `--ui-auto` enables framebuffer-height scaling for captures (off by default for
+    `--shot`, `--clip`, and `--trailer-clip`). `--ui-scale N` is exact and takes precedence
+    over `--ui-auto`, in either order. Interactive sizing defaults to automatic: use
+    `set guiScaleAuto false` (alias `gui_scale_auto`) to disable it. `guiScale` (alias
+    `gui_scale`) is the multiplier. The automatic factor is height / 720 rounded to the
+    nearest quarter step and clamped to 1..3; 1080p uses 1.5, 1440p 2, 2160p 3. Resizing
+    rebuilds fonts only when that effective factor changes.
+  - `--hud-framing 0|1` toggles the HUD's camera safe area for this run. The viewport
+    always stays full-screen. Console `get`/`set hudFraming` (alias `hud_framing`) controls
+    the persisted preference. Off preserves the original camera for material A/B tests.
+  - `--capture-t S` pins the newest captured tray icon's bottom-to-top scan, over
+    0..0.35 seconds. Ordinary captures stay settled; interactive moves use their capture
+    event's visual timestamp. Console `play <move>` reaches the same capture event.
   - `--user-settings` uses the player's saved settings instead of defaults.
 - **Other:**
   - `--variants-dir <dir>` and `--piece` set where variants and pieces come from.

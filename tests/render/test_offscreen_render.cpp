@@ -32,9 +32,11 @@
 #include <SDL3/SDL.h>
 #include <imgui_internal.h>
 
+#include "render/hud_layout.hpp"
 #include "render/overture_scene.hpp"  // derivedSurfaceAt, for the geometry view (M17)
 #include "render/play_surface.hpp"
 #include "render/ui.hpp"
+#include "render/ui_widgets.hpp"
 #endif
 #include "support/variants.hpp"
 #include "view/theme.hpp"
@@ -118,6 +120,21 @@ Frame renderVariant(const std::string& name, std::uint32_t w = 512, std::uint32_
   f.messages = gpu().ctx.takeValidationMessages();
   return f;
 }
+
+#ifdef CB_HAVE_IMGUI
+// Pointer fixtures follow the measured standard-game dock when its panel is moved.
+// No button IDs, enable rules or keyboard-ownership assertions depend on coordinates.
+ImVec2 standardDockButtonCentre(std::size_t index) {
+  const auto* dock = ImGui::FindWindowByName("##controls");
+  REQUIRE(dock);
+  const float widths[] = {78, 84, 64, 78};
+  const auto layout = dockLayout(widths, 2, ImGui::GetMainViewport()->WorkSize.x - 48,
+                                 std::ceil(widgets::controlHeight()),
+                                 ImGui::GetStyle().ItemSpacing.x, 12);
+  const auto& r = layout.buttons.at(index);
+  return {dock->Pos.x + 8 + r.x + r.width * .5f, dock->Pos.y + 8 + r.y + r.height * .5f};
+}
+#endif
 
 }  // namespace
 
@@ -2315,8 +2332,9 @@ TEST_CASE("the fps window is submitted only when developer presentation is enabl
   CHECK(gpu().ctx.takeValidationMessages().empty());
 }
 
-TEST_CASE("the game screen draws the star room, not the wireframe field, on an emitting board",
-          "[render][gpu][stars]") {
+TEST_CASE(
+    "the game screen draws the star room, not the wireframe field, on an emitting board",
+    "[render][gpu][stars]") {
   if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   REQUIRE(SDL_Init(SDL_INIT_VIDEO));
@@ -2340,7 +2358,8 @@ TEST_CASE("the game screen draws the star room, not the wireframe field, on an e
   for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
     auto ui = Ui::create(gpu().ctx, window, theme);
     REQUIRE(ui.has_value());
-    for (int i = 0; i < 3; ++i) {  // the field advances over frames; it stays absent or present
+    for (int i = 0; i < 3;
+         ++i) {  // the field advances over frames; it stays absent or present
       (*ui)->tick(0.1f);
       (*ui)->newFrame();
       (void)(*ui)->build(*shell, 60);
@@ -2388,7 +2407,7 @@ TEST_CASE("the HUD frame keeps its panels inside the screen, with a ledger and t
         (*ui)->endFrame();
       };
       frame();
-      CHECK(ImGui::FindWindowByName("##recent") == nullptr);   // nothing played
+      CHECK(ImGui::FindWindowByName("##recent") == nullptr);  // nothing played
       CHECK(ImGui::FindWindowByName("##captured") == nullptr);
       // Knights out and back: a long ledger and no captures.
       for (int i = 0; i < 3; ++i)
@@ -2400,7 +2419,13 @@ TEST_CASE("the HUD frame keeps its panels inside the screen, with a ledger and t
       const ImGuiWindow* recent = ImGui::FindWindowByName("##recent");
       REQUIRE(recent != nullptr);
       CHECK(recent->Active);
-      CHECK(recent->Size.y <= 1080.0f * 0.55f);
+      const auto* status = ImGui::FindWindowByName("##status");
+      const auto* dock = ImGui::FindWindowByName("##controls");
+      REQUIRE(status != nullptr);
+      REQUIRE(dock != nullptr);
+      CHECK(recent->Pos.y >= status->Pos.y + status->Size.y + 16 * scale - 1);
+      CHECK(recent->Pos.y + recent->Size.y <= dock->Pos.y - 16 * scale + 1);
+      CHECK(recent->Pos.y + recent->Size.y <= 1080);
       CHECK(recent->Pos.x + recent->Size.x <= 1920.0f);
       CHECK(recent->Pos.y >= 0.0f);
       CHECK(ImGui::FindWindowByName("##captured") == nullptr);
@@ -2409,7 +2434,8 @@ TEST_CASE("the HUD frame keeps its panels inside the screen, with a ledger and t
       app::Action reset;
       reset.kind = app::ActionKind::Reset;
       REQUIRE(session.apply(reset).has_value());
-      for (const char* m : {"e2e4", "d7d5", "e4d5"}) REQUIRE(session.playMoveText(m).has_value());
+      for (const char* m : {"e2e4", "d7d5", "e4d5"})
+        REQUIRE(session.playMoveText(m).has_value());
       frame();
       const ImGuiWindow* tray = ImGui::FindWindowByName("##captured");
       REQUIRE(tray != nullptr);
@@ -2424,6 +2450,257 @@ TEST_CASE("the HUD frame keeps its panels inside the screen, with a ledger and t
     }
   }
   CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
+TEST_CASE("HUD panel bands leave a framed board clear at every supported size",
+          "[render][gpu][hud-layout-gpu]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("HUD bands", 1280, 720, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct WindowGuard {
+    SDL_Window* w;
+    ~WindowGuard() { SDL_DestroyWindow(w); }
+  } guard{window};
+  std::map<std::pair<int, float>, float> ledgerWidths;
+  for (const char* variant : {"standard", "torus", "cube5"}) {
+    auto shell = app::Shell::create(
+        {variant}, std::filesystem::path(CB_BINARY_DIR) / "hud-bands.conf");
+    shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+      return test::loadVariant(name);
+    });
+    REQUIRE(shell->startGame(variant).has_value());
+    auto& session = *shell->session();
+    if (std::string(variant) == "standard")
+      for (const char* m : {"e2e4", "d7d5", "e4d5", "d8d5"})
+        REQUIRE(session.playMoveText(m).has_value());
+    else if (std::string(variant) == "torus")
+      REQUIRE(session.playMoveText("a1a5").has_value());
+    else {
+      const auto move = session.game().legalMoves().front();
+      REQUIRE(session
+                  .apply(app::Action{
+                      .kind = app::ActionKind::ClickCell, .cell = move.from, .text = {}})
+                  .has_value());
+      REQUIRE(session
+                  .apply(app::Action{
+                      .kind = app::ActionKind::ClickCell, .cell = move.to, .text = {}})
+                  .has_value());
+    }
+    BoardOptions options;
+    options.surface = std::string(variant) == "torus";
+    shell->settings().geometryView = options.surface;
+    auto renderer = BoardRenderer::create(gpu().ctx);
+    REQUIRE(renderer);
+    renderer->setOptions(options);
+    renderer->setTheme(view::Theme::console());
+    renderer->setPost(false, 1);
+    for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+      auto ui = Ui::create(gpu().ctx, window, theme);
+      REQUIRE(ui);
+      for (int height : {720, 1080, 1440}) {
+        const int width = height * 16 / 9;
+        SDL_SetWindowSize(window, width, height);
+        auto target =
+            OffscreenTarget::create(gpu().ctx, static_cast<std::uint32_t>(width),
+                                    static_cast<std::uint32_t>(height));
+        REQUIRE(target);
+        for (float scale : {1.0f, 2.0f, 3.0f, autoUiFactor(height)}) {
+          CAPTURE(variant, theme.liveControls, height, scale);
+          REQUIRE((*ui)->setScale(scale).has_value());
+          (*ui)->newFrame();
+          const auto request = (*ui)->build(*shell, 60);
+          std::vector<ImRect> panels;
+          for (const char* name :
+               {"##variant", "##status", "##controls", "##recent", "##captured"}) {
+            const auto* w = ImGui::FindWindowByName(name);
+            if (!w || !w->Active) continue;
+            CAPTURE(name);
+            const ImRect r(w->Pos, ImVec2(w->Pos.x + w->Size.x, w->Pos.y + w->Size.y));
+            CHECK(r.Min.x >= 0);
+            CHECK(r.Min.y >= 0);
+            CHECK(r.Max.x <= static_cast<float>(width) + 1);
+            CHECK(r.Max.y <= static_cast<float>(height) + 1);
+            for (const auto& previous : panels) CHECK_FALSE(r.Overlaps(previous));
+            panels.push_back(r);
+            if (std::string(name) == "##recent") {
+              const auto key = std::pair{height, scale};
+              if (std::string(variant) == "standard")
+                ledgerWidths[key] = r.GetWidth();
+              else
+                CHECK(r.GetWidth() == ledgerWidths.at(key));
+              CHECK(std::abs(r.Max.x - (static_cast<float>(width) - 16 * scale)) < 2);
+              const auto* status = ImGui::FindWindowByName("##status");
+              const auto* dock = ImGui::FindWindowByName("##controls");
+              CHECK(std::abs(r.Min.y - status->Pos.y - status->Size.y - 16 * scale) < 2);
+              CHECK(r.Max.y <= dock->Pos.y - 16 * scale + 1);
+            }
+            if (std::string(name) == "##captured") {
+              CHECK(std::abs(r.Min.x - 16 * scale) < 2);
+              const auto* plate = ImGui::FindWindowByName("##variant");
+              CHECK(std::abs(r.Min.y - plate->Pos.y - plate->Size.y - 16 * scale) < 2);
+            }
+          }
+          (*ui)->endFrame();
+          const float cx = static_cast<float>(width) * .5f,
+                      cy = static_cast<float>(height) * .5f;
+          const auto* stage = request.stageRect;
+          const float halfW = std::min(cx - stage[0], stage[0] + stage[2] - cx);
+          const float halfH = std::min(cy - stage[1], stage[1] + stage[3] - cy);
+          REQUIRE(halfW > 0);
+          REQUIRE(halfH > 0);
+          session.setBoardAspect(static_cast<float>(width) / static_cast<float>(height));
+          session.setFramingArea(halfW / cx, halfH / cy);
+          frameGeometryCamera(session, options, {});
+          // Board-only capture: no panel, backdrop or stars can mask an overlap. The
+          // clear colour is sampled in the empty corner, so both palettes work.
+          const auto instances =
+              renderer->buildInstances(session.snapshot(), session.viewConfig());
+          REQUIRE(renderer->render(*target, instances, session.camera()).has_value());
+          const auto pixels = target->readPixels();
+          REQUIRE(pixels);
+          std::size_t overlaps = 0, visible = 0;
+          for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x) {
+              const std::size_t offset = static_cast<std::size_t>(y * width + x) * 4;
+              const bool board = (*pixels)[offset] != (*pixels)[0] ||
+                                 (*pixels)[offset + 1] != (*pixels)[1] ||
+                                 (*pixels)[offset + 2] != (*pixels)[2];
+              if (!board) continue;
+              ++visible;
+              for (const auto& panel : panels)
+                if (panel.Contains(
+                        ImVec2(static_cast<float>(x), static_cast<float>(y)))) {
+                  ++overlaps;
+                  break;
+                }
+            }
+          CHECK(visible > 0);
+          CHECK(overlaps == 0);
+        }
+      }
+    }
+  }
+  CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
+TEST_CASE("the move ledger opens scrolled to its newest row",
+          "[render][gpu][hud-scroll]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("ledger scroll", 1280, 720, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct WindowGuard {
+    SDL_Window* w;
+    ~WindowGuard() { SDL_DestroyWindow(w); }
+  } guard{window};
+  auto shell = app::Shell::create({"standard"}, {});
+  shell->setVariantLoader(
+      [](const std::string& n) -> Result<VariantSpec> { return test::loadVariant(n); });
+  REQUIRE(shell->startGame("standard").has_value());
+  std::vector<std::string> history;
+  for (char file : {'a', 'b', 'c', 'd', 'e', 'h'}) {
+    for (const char* m : {"g1f3", "g8f6", "f3g1", "f6g8"}) history.emplace_back(m);
+    history.push_back(std::string{file} + "2" + file + "3");
+    history.push_back(std::string{file} + "7" + file + "6");
+  }
+  REQUIRE(shell->session()->playMoveText(history.front()).has_value());
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  REQUIRE(ui);
+  REQUIRE((*ui)->setScale(3).has_value());
+  float firstHeight = 0;
+  for (int frame = 0; frame < 3; ++frame) {
+    if (frame == 1)
+      for (std::size_t i = 1; i < history.size(); ++i)
+        REQUIRE(shell->session()->playMoveText(history[i]).has_value());
+    (*ui)->newFrame();
+    (void)(*ui)->build(*shell, 60);
+    const auto* ledger = ImGui::FindWindowByName("##recent");
+    const auto* status = ImGui::FindWindowByName("##status");
+    const auto* dock = ImGui::FindWindowByName("##controls");
+    REQUIRE(ledger);
+    REQUIRE(status);
+    REQUIRE(dock);
+    REQUIRE(ledger->DC.ChildWindows.size() == 1);
+    const float band = dock->Pos.y - 48 - ledger->Pos.y;
+    const auto* rows = ledger->DC.ChildWindows[0];
+    CHECK(ledger->Pos.y >= status->Pos.y + status->Size.y + 48 - 1);
+    CHECK(ledger->Size.y <= band + 1);
+    if (frame == 0) {
+      firstHeight = ledger->Size.y;
+      CHECK(firstHeight < band - 1);
+      CHECK(rows->ScrollMax.y == 0);
+    } else {
+      CHECK(ledger->Size.y > firstHeight);
+      CHECK(std::abs(ledger->Size.y - band) < 1);
+      CHECK(rows->ScrollMax.y > 0);
+    }
+    CHECK(std::abs(rows->Scroll.y - rows->ScrollMax.y) < 1);
+    // The newest row's bottom and its complete 36px line are inside the child clip.
+    CHECK(rows->DC.CursorMaxPos.y <= rows->InnerRect.Max.y + 1);
+    CHECK(rows->DC.CursorMaxPos.y - 36 >= rows->InnerRect.Min.y - 1);
+    (*ui)->endFrame();
+  }
+}
+
+TEST_CASE("boot-dimmed dock controls are invisible at zero and cannot reset",
+          "[render][gpu][hud-boot]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("dock boot", 1280, 720, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct WindowGuard {
+    SDL_Window* w;
+    ~WindowGuard() { SDL_DestroyWindow(w); }
+  } guard{window};
+  auto shell = app::Shell::create({"standard"}, {});
+  shell->setVariantLoader(
+      [](const std::string& n) -> Result<VariantSpec> { return test::loadVariant(n); });
+  REQUIRE(shell->startGame("standard").has_value());
+  REQUIRE(shell->session()->playMoveText("e2e4").has_value());
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  REQUIRE(ui);
+  const auto frame = [&] {
+    (*ui)->newFrame();
+    (void)(*ui)->build(*shell, 60);
+    (*ui)->endFrame();
+  };
+  (*ui)->setHudFx(0, 0, 1);
+  frame();
+  const auto* dock = ImGui::FindWindowByName("##controls");
+  REQUIRE(dock);
+  for (const auto& vertex : dock->DrawList->VtxBuffer)
+    CHECK((vertex.col & IM_COL32_A_MASK) == 0);
+  const auto clickReset = [&] {
+    auto& io = ImGui::GetIO();
+    const ImVec2 at = standardDockButtonCentre(1);
+    io.AddMousePosEvent(at.x, at.y);
+    io.AddMouseButtonEvent(0, true);
+    frame();
+    io.AddMouseButtonEvent(0, false);
+    frame();
+  };
+  (*ui)->setHudFx(1, .5f, 1);
+  frame();
+  clickReset();
+  CHECK(shell->session()->game().plyCount() == 1);
+  (*ui)->setHudFx(1, 1, 1);
+  frame();
+  clickReset();
+  CHECK(shell->session()->game().plyCount() == 0);
+  CHECK(shell->session()->bootSerial() == 2);
 }
 
 TEST_CASE("the first HUD frame measures current turn and recent rows",
@@ -2594,19 +2871,20 @@ TEST_CASE("SDL keyboard ownership distinguishes navigation from active UI",
         return consumed;
       };
       const auto mouse = [&](bool down) {
+        const ImVec2 at = standardDockButtonCentre(2);
         SDL_Event event{};
         event.type = SDL_EVENT_MOUSE_MOTION;
         event.motion.windowID = SDL_GetWindowID(window);
-        event.motion.x = 220;
-        event.motion.y = 658;
+        event.motion.x = at.x;
+        event.motion.y = at.y;
         (void)u.processEvent(event);
         event = {};
         event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
         event.button.windowID = SDL_GetWindowID(window);
         event.button.button = SDL_BUTTON_LEFT;
         event.button.down = down;
-        event.button.x = 220;
-        event.button.y = 658;
+        event.button.x = at.x;
+        event.button.y = at.y;
         (void)u.processEvent(event);
       };
       const auto idleKeys = [&] {
@@ -3043,7 +3321,8 @@ TEST_CASE("the board screen's real ambient field is submitted behind the board",
   });
   REQUIRE(shell->startGame("standard").has_value());
 
-  // The wood theme: the manifold game screen shows stars instead of this field (M23.10 6).
+  // The wood theme: the manifold game screen shows stars instead of this field (M23.10
+  // 6).
   auto ui = Ui::create(gpu().ctx, window, view::Theme::console());
   REQUIRE(ui.has_value());
   Ui& u = **ui;

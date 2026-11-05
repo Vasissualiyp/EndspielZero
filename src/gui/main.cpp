@@ -33,11 +33,12 @@
 #include "io/moveset_library.hpp"
 #include "io/variant_toml.hpp"
 #include "render/board_fx.hpp"
-#include "view/game_end_fx.hpp"
 #include "render/board_renderer.hpp"
+#include "render/hud_layout.hpp"
 #include "render/image_io.hpp"
 #include "render/panel_response.hpp"
 #include "render/window.hpp"
+#include "view/game_end_fx.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"
 #include "render/shape_sequence.hpp"
@@ -52,6 +53,9 @@ std::string gThemeOverride;
 bool gMatteCapture = false;
 bool gDevOverlay = false;
 float gUiScaleOverride = -1.0f;
+bool gUiAuto = false;
+int gHudFraming = -1;
+float gCaptureT = -1.0f;
 /// --post 0|1 and --bloom <scale>: this run only, never saved. Negative means "use the
 /// setting".
 int gPostOverride = -1;
@@ -64,18 +68,21 @@ float gBootT = -1.0f;
 float gCheckT = -1.0f;
 float gEndT = -1.0f;
 
-float resolveUiScale(const app::Settings& settings) {
-  return gUiScaleOverride > 0.0f ? gUiScaleOverride : settings.guiScale;
+float resolveUiScale(const app::Settings& settings, int height, bool capture) {
+  return render::effectiveUiScale(settings.guiScale, settings.guiScaleAuto, height,
+                                  capture, gUiAuto, gUiScaleOverride);
 }
 
-/// Hand the renderer the effective post settings, and say once if the device cannot run it.
+/// Hand the renderer the effective post settings, and say once if the device cannot run
+/// it.
 void applyPost(render::BoardRenderer& renderer, const app::Settings& settings) {
   const bool want = gPostOverride >= 0 ? gPostOverride == 1 : settings.postProcess;
   renderer.setPost(want, gBloomOverride >= 0.0f ? gBloomOverride : settings.bloomScale);
   static bool reported = false;
   if (want && !renderer.postAvailable() && !reported) {
     reported = true;
-    std::fprintf(stderr, "%s; continuing without it\n", renderer.postUnavailable().c_str());
+    std::fprintf(stderr, "%s; continuing without it\n",
+                 renderer.postUnavailable().c_str());
   }
 }
 
@@ -89,7 +96,8 @@ void setFxTint(render::BoardFxState& fx, const render::BoardRenderer& renderer) 
 /// The HUD panels follow the board (M23.10 section 7): their edges trace on during the
 /// first 0.4 s of a boot and their contents fade in over the next 0.4 s; a finished game
 /// dims them to 0.7 (the status panel stays lit).
-void applyHudFx(render::Ui& ui, std::optional<float> bootAge, std::optional<float> endAge) {
+void applyHudFx(render::Ui& ui, std::optional<float> bootAge,
+                std::optional<float> endAge) {
   const auto smooth = [](float x) {
     x = std::clamp(x, 0.0f, 1.0f);
     return x * x * (3.0f - 2.0f * x);
@@ -527,6 +535,19 @@ void updateShapeSequence(app::Shell& shell, render::ShapeMoveSequence& seq, floa
   render::stepShapeSequenceOnce(shell, seq, dt);
 }
 
+bool applyStage(app::Session& session, const render::UiRequest& request,
+                render::BoardRect viewport, bool enabled) {
+  if (!enabled || request.stageRect[2] <= 0 || request.stageRect[3] <= 0)
+    return session.setFramingArea(1, 1);
+  const float cx = viewport.x + viewport.width * .5f;
+  const float cy = viewport.y + viewport.height * .5f;
+  const float halfW = std::min(cx - request.stageRect[0],
+                               request.stageRect[0] + request.stageRect[2] - cx);
+  const float halfH = std::min(cy - request.stageRect[1],
+                               request.stageRect[1] + request.stageRect[3] - cy);
+  return session.setFramingArea(2 * halfW / viewport.width, 2 * halfH / viewport.height);
+}
+
 /// Put the camera round whatever the board has just become.
 ///
 /// The shape and the flat board are different sizes and sit in different places, so a
@@ -830,7 +851,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // The capture has to show the interface at the scale the player set, or it is not a
   // picture of what they would see.
   (*ui)->forceDevOverlay(gDevOverlay);
-  (void)(*ui)->setScale(resolveUiScale(shell->settings()));
+  (void)(*ui)->setScale(
+      resolveUiScale(shell->settings(), static_cast<int>(target->height()), true));
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   // Cinema dresses the frame with a grade and a vignette, not an interface (M18.3).
   (*ui)->setCinema(cinema);
@@ -874,6 +896,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     }
     // A fixed step rather than a real clock: the shell animates, and a capture has to be
     // the same picture every time it is taken.
+    (*ui)->setCaptureAge(gCaptureT >= 0 ? std::optional<float>(gCaptureT) : std::nullopt);
     (*ui)->tick(dt);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
@@ -903,7 +926,13 @@ int captureFrame(const std::string& variantName, const std::string& path,
       const float away = sharp ? 0.0f : 1.0f;
       shell->session()->setPullBack(away);
       renderer->setBlur(away);
-      if (frame.valid()) shell->session()->setBoardAspect(frame.width / frame.height);
+      if (frame.valid()) {
+        shell->session()->setBoardAspect(frame.width / frame.height);
+        if (applyStage(
+                *shell->session(), request, frame,
+                gHudFraming >= 0 ? gHudFraming == 1 : shell->settings().hudFraming))
+          frameBoard(*shell);
+      }
       // The attract board is the menu's subject and its frame is only the left half. A
       // single capture has no later frame to ease the framing home, so state it now.
       if (shell->screen() == app::Screen::MainMenu && optionsFor(*shell).surface) {
@@ -1398,11 +1427,15 @@ int main(int argc, char** argv) {
           "picker.\n"
           "--width W --height H set the capture/window resolution (default 1920x1080).\n"
           "--dev forces the developer overlay on for this run (not saved).\n"
-          "--post 0|1 forces post-processing off or on and --bloom 0..4 scales its bloom,\n"
+          "--post 0|1 forces post-processing off or on and --bloom 0..4 scales its "
+          "bloom,\n"
           "for this run only (not saved).\n"
           "--theme console|manifold overrides the theme for this run; --matte disables "
           "materials.\n"
-          "--ui-scale 0.6..3.0 overrides interface size for this run (not saved).\n"
+          "--ui-scale 0.6..3.0 is exact; --ui-auto opts captures into automatic "
+          "scaling.\n"
+          "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
+          "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
           "--ui-click \"x,y;x,y,button;drag:x1,y1,x2,y2,button\" replays pointer clicks "
           "and\n"
           "drags (pixels; button 0 left, 1 right, 2 middle) before the capture.\n"
@@ -1465,17 +1498,17 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--bloom requires a scale from 0 to 4\n");
         return 1;
       }
-    }
-    else if (arg == "--boot-t" && i + 1 < argc) {
+    } else if (arg == "--boot-t" && i + 1 < argc) {
       char* end = nullptr;
       gBootT = std::strtof(argv[++i], &end);
       if (*end != '\0' || !std::isfinite(gBootT) || gBootT < 0.0f) {
         std::fprintf(stderr, "--boot-t requires seconds >= 0\n");
         return 1;
       }
-    } else if ((arg == "--check-t" || arg == "--end-t") && i + 1 < argc) {
+    } else if ((arg == "--check-t" || arg == "--end-t" || arg == "--capture-t") &&
+               i + 1 < argc) {
       char* end = nullptr;
-      float& target = arg == "--check-t" ? gCheckT : gEndT;
+      float& target = arg == "--check-t" ? gCheckT : arg == "--end-t" ? gEndT : gCaptureT;
       target = std::strtof(argv[++i], &end);
       if (*end != '\0' || !std::isfinite(target) || target < 0.0f) {
         std::fprintf(stderr, "%s requires seconds >= 0\n", arg.c_str());
@@ -1483,6 +1516,15 @@ int main(int argc, char** argv) {
       }
     } else if (arg == "--matte")
       gMatteCapture = true;
+    else if (arg == "--hud-framing" && i + 1 < argc) {
+      const std::string value = argv[++i];
+      if (value != "0" && value != "1") {
+        std::fprintf(stderr, "--hud-framing requires 0 or 1\n");
+        return 1;
+      }
+      gHudFraming = value == "1" ? 1 : 0;
+    } else if (arg == "--ui-auto")
+      gUiAuto = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
       gUiScaleOverride = std::strtof(argv[++i], nullptr);
     else if (arg == "--formed" && i + 1 < argc) {
@@ -1615,7 +1657,8 @@ int main(int argc, char** argv) {
     return 1;
   }
   (*ui)->forceDevOverlay(gDevOverlay);
-  (void)(*ui)->setScale(resolveUiScale(shell->settings()));
+  (void)(*ui)->setScale(
+      resolveUiScale(shell->settings(), static_cast<int>(window->height()), false));
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   {
     const view::Theme theme = resolveTheme(shell->settings());
@@ -2164,12 +2207,14 @@ int main(int argc, char** argv) {
       }
     }
     (*ui)->setVisualTime(visualSeconds);
-    applyHudFx(**ui, shell->attracting() ? shell->trailerBootAge()
-                                          : fxTimeline.bootAge(visualSeconds),
-               [&]() -> std::optional<float> {
-                 if (const auto over = fxTimeline.end(visualSeconds)) return over->age;
-                 return std::nullopt;
-               }());
+    applyHudFx(
+        **ui,
+        shell->attracting() ? shell->trailerBootAge() : fxTimeline.bootAge(visualSeconds),
+        [&]() -> std::optional<float> {
+          if (const auto over = fxTimeline.end(visualSeconds)) return over->age;
+          return std::nullopt;
+        }());
+    (*ui)->setCaptureAge(fxTimeline.captureAge(visualSeconds));
     (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);
     (*ui)->newFrame();
@@ -2318,6 +2363,12 @@ int main(int argc, char** argv) {
     if (shell->showsBoard()) {
       if (boardRect.valid()) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
+#ifdef CB_HAVE_IMGUI
+        if (applyStage(
+                *shell->session(), request, boardRect,
+                gHudFraming >= 0 ? gHudFraming == 1 : shell->settings().hudFraming))
+          frameBoard(*shell);
+#endif
       }
 #ifdef CB_HAVE_IMGUI
       // The board's bounds are a continuous function of `geometryFormed` while the morph
@@ -2420,7 +2471,8 @@ int main(int argc, char** argv) {
 
 #ifdef CB_HAVE_IMGUI
     // Rescaling rebuilds the font atlas, so it happens between frames, never inside one.
-    if (request.applyScale) (void)(*ui)->setScale(resolveUiScale(shell->settings()));
+    (void)(*ui)->setScale(
+        resolveUiScale(shell->settings(), static_cast<int>(window->height()), false));
 #endif
 
     // Frame cap (M4.8): with vsync off the loop would redraw as fast as the CPU allows,

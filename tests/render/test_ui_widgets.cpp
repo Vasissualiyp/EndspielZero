@@ -451,3 +451,34 @@ TEST_CASE("scoped widget time restores nesting and is local to its ImGui context
   CHECK(sameDrawing(zero, h.read(theme)));
 }
 #endif
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("tracked headers add advance without moving the layout cursor",
+          "[render][hud-layout]") {
+  WidgetFrame frame(1);
+  ImGui::Begin("tracking");
+  const auto pos = ImGui::GetCursorScreenPos();
+  const float plain = ImGui::CalcTextSize("MOVES").x;
+  const float tracked =
+      render::widgets::trackedText(ImGui::GetWindowDrawList(), pos, "MOVES", 2);
+  CHECK(std::abs(tracked - plain - 8) < .01f);
+  CHECK(ImGui::GetCursorScreenPos().x == pos.x);
+  CHECK(ImGui::GetCursorScreenPos().y == pos.y);
+  ImGui::End();
+}
+#endif
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("the compact dock button keeps its ID in a shorter row",
+          "[render][hud-layout]") {
+  WidgetFrame frame(1);
+  ImGui::SetNextWindowSize(ImVec2(320, 200));
+  ImGui::Begin("compact");
+  const auto id = ImGui::GetID("UNDO");
+  render::widgets::button("UNDO", view::Theme::manifold(), 100, false, false, true,
+                          nullptr, true);
+  CHECK(ImGui::GetItemID() == id);
+  CHECK(ImGui::GetItemRectSize().y <= 27);
+  ImGui::End();
+}
+#endif

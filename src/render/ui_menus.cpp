@@ -1189,7 +1189,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::PushItemWidth(px(220));
 
   heading("DISPLAY", t, small);
-  ImGui::SliderFloat("Interface scale", &s.guiScale, 0.6f, 3.0f, "%.2fx");
+  if (ImGui::Checkbox("Automatic", &s.guiScaleAuto)) request.applyScale = true;
+  ImGui::SliderFloat(s.guiScaleAuto ? "Scale relative to automatic" : "Interface scale",
+                     &s.guiScale, 0.6f, 3.0f, "%.2fx");
   if (ImGui::IsItemDeactivatedAfterEdit()) request.applyScale = true;
   ImGui::Checkbox("Fullscreen", &s.fullscreen);
   if (ImGui::IsItemDeactivatedAfterEdit()) request.toggleFullscreen = true;
@@ -1455,9 +1457,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // A struct with a std::string in it cannot be compared byte-wise; compare the
   // fields that a control can actually change.
   const bool moved =
-      before.guiScale != s.guiScale || before.fullscreen != s.fullscreen ||
-      before.vsync != s.vsync || before.frameCap != s.frameCap ||
-      before.showLegalMoves != s.showLegalMoves ||
+      before.guiScaleAuto != s.guiScaleAuto || before.guiScale != s.guiScale ||
+      before.fullscreen != s.fullscreen || before.vsync != s.vsync ||
+      before.frameCap != s.frameCap || before.showLegalMoves != s.showLegalMoves ||
       before.peekMovesOnCtrl != s.peekMovesOnCtrl ||
       before.showAttackHints != s.showAttackHints ||
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||

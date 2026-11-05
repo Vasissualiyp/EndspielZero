@@ -7,7 +7,8 @@
 
 namespace cb::app {
 
-void FxTimeline::observe(const Session* session, double now, bool eligible, bool swallow) {
+void FxTimeline::observe(const Session* session, double now, bool eligible,
+                         bool swallow) {
   if (session == nullptr) {
     *this = FxTimeline{};
     return;
@@ -29,12 +30,20 @@ void FxTimeline::observe(const Session* session, double now, bool eligible, bool
       endFx_.reset();
       powerUpStart_.reset();
       powerUpFx_.reset();
+      captureSeen_ = session->captureSerial();
+      captureStart_.reset();
       checkSeen_ = session->checkSerial();
       endSeen_ = session->endSerial();
       powerUpSeen_ = session->powerUpSerial();
     }
   }
   if (!swallow && !eligible) return;
+  if (!session->capturePly()) captureStart_.reset();
+  if (session->captureSerial() != captureSeen_) {
+    captureSeen_ = session->captureSerial();
+    captureStart_ =
+        !swallow && session->capturePly() ? std::optional<double>(now) : std::nullopt;
+  }
   if (session->checkSerial() != checkSeen_) {
     checkSeen_ = session->checkSerial();
     if (!swallow && session->checkEvent()) {
@@ -66,6 +75,12 @@ void FxTimeline::observe(const Session* session, double now, bool eligible, bool
   }
 }
 
+std::optional<float> FxTimeline::captureAge(double now) const {
+  if (!captureStart_ || now < *captureStart_ || now - *captureStart_ >= .35)
+    return std::nullopt;
+  return static_cast<float>(now - *captureStart_);
+}
+
 std::optional<float> FxTimeline::bootAge(double now) const {
   if (!bootStart_ || now < *bootStart_) return std::nullopt;
   const double age = now - *bootStart_;
@@ -93,7 +108,7 @@ std::optional<FxTimeline::End> FxTimeline::powerUp(double now) const {
 }
 
 bool FxTimeline::animating(double now) const {
-  return booting(now) || ripple(now) || end(now) || powerUp(now);
+  return captureAge(now) || booting(now) || ripple(now) || end(now) || powerUp(now);
 }
 
 }  // namespace cb::app

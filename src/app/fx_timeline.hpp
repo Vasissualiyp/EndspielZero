@@ -27,6 +27,9 @@ class FxTimeline {
   /// The first click, key or engine move completes the boot at once.
   void skipBoot() noexcept { bootStart_.reset(); }
 
+  /// A newly captured tray icon scans on for 0.35 s; absent for settled captures.
+  [[nodiscard]] std::optional<float> captureAge(double now) const;
+
   /// The check ripple (M23.10 section 4): seconds since the check, and where it started.
   /// Nullopt before it and once it has died out.
   struct Ripple {
@@ -50,6 +53,8 @@ class FxTimeline {
   std::uint64_t sessionId_{0};
   std::uint64_t bootSeen_{0};
   std::optional<double> bootStart_;
+  std::uint64_t captureSeen_{0};
+  std::optional<double> captureStart_;
   std::uint64_t checkSeen_{0};
   std::uint64_t endSeen_{0};
   std::uint64_t powerUpSeen_{0};

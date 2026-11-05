@@ -74,6 +74,10 @@ Settings Settings::load(const std::filesystem::path& path) {
 
     if (key == "gui_scale")
       s.guiScale = asFloat(value, s.guiScale);
+    else if (key == "hud_framing")
+      s.hudFraming = asBool(value);
+    else if (key == "gui_scale_auto")
+      s.guiScaleAuto = asBool(value);
     else if (key == "fullscreen")
       s.fullscreen = asBool(value);
     else if (key == "dev_overlay")
@@ -217,6 +221,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   }
   out << "# EndspielZero settings. Edited by the game; safe to edit by hand.\n";
   out << "gui_scale = " << guiScale << '\n';
+  out << "gui_scale_auto = " << boolText(guiScaleAuto) << '\n';
+  out << "hud_framing = " << boolText(hudFraming) << '\n';
   out << "fullscreen = " << boolText(fullscreen) << '\n';
   out << "dev_overlay = " << boolText(devOverlay) << '\n';
   out << "post_process = " << boolText(postProcess) << '\n';
@@ -287,9 +293,9 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
 
 void Settings::sanitize() {
   bloomScale = std::isfinite(bloomScale) ? std::clamp(bloomScale, 0.0f, 4.0f) : 1.0f;
-  presentationIntensity =
-      std::isfinite(presentationIntensity) ? std::clamp(presentationIntensity, 0.0f, 1.0f)
-                                           : 1.0f;
+  presentationIntensity = std::isfinite(presentationIntensity)
+                              ? std::clamp(presentationIntensity, 0.0f, 1.0f)
+                              : 1.0f;
   guiScale = std::clamp(guiScale, 0.6f, 3.0f);
   frameCap = std::clamp(frameCap, 0, 360);
   computerLevel = std::clamp(computerLevel, 1, 5);

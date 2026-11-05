@@ -193,7 +193,7 @@ void Session::refreshView() {
   seams_ = view::SeamMap::build(*variant_, viewCfg_, theme_);
   // Framed for the shape of the area the board is drawn into, which the interface
   // narrows with its rails - not for the whole window.
-  camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
+  camera_ = framedCamera(view::boundsOf(placements_), 1.4f);
   applyViewMode();
 }
 
@@ -342,7 +342,7 @@ void Session::setBoardAspect(float aspect) {
   const float keptDistance = camera_.distance;
   const float keptYaw = camera_.yaw;
   const float keptPitch = camera_.pitch;
-  camera_ = view::OrbitCamera::frame(view::boundsOf(placements_), boardAspect_);
+  camera_ = framedCamera(view::boundsOf(placements_), 1.4f);
   // A resize re-frames, but whatever the player had turned, panned or zoomed to is
   // theirs to keep. A temporal board has just been centered on the present board, so it
   // keeps that target even on the first framing.
@@ -356,10 +356,29 @@ void Session::setBoardAspect(float aspect) {
   applyViewMode();
 }
 
+bool Session::setFramingArea(float widthFraction, float heightFraction) {
+  const float w = std::clamp(widthFraction, .01f, 1.0f);
+  const float h = std::clamp(heightFraction, .01f, 1.0f);
+  if (std::abs(w - stageWidth_) < .001f && std::abs(h - stageHeight_) < .001f)
+    return false;
+  stageWidth_ = w;
+  stageHeight_ = h;
+  return true;
+}
+
+view::OrbitCamera Session::framedCamera(const view::Bounds& b, float headroom) const {
+  auto cam =
+      view::OrbitCamera::frame(b, boardAspect_ * stageWidth_ / stageHeight_, headroom);
+  const float old = cam.distance;
+  cam.distance /= stageHeight_;
+  cam.farZ += cam.distance - old;
+  return cam;
+}
+
 void Session::frameOn(const view::Bounds& b, float headroom) {
   const float yaw = camera_.yaw;
   const float pitch = camera_.pitch;
-  camera_ = view::OrbitCamera::frame(b, boardAspect_, headroom);
+  camera_ = framedCamera(b, headroom);
   camera_.yaw = yaw;
   camera_.pitch = pitch;
   framedOnce_ = true;
@@ -367,7 +386,7 @@ void Session::frameOn(const view::Bounds& b, float headroom) {
 }
 
 void Session::easeFrameOn(const view::Bounds& b, float headroom, float k) {
-  const view::OrbitCamera want = view::OrbitCamera::frame(b, boardAspect_, headroom);
+  const view::OrbitCamera want = framedCamera(b, headroom);
   const float t = std::clamp(k, 0.0f, 1.0f);
   // Only the frame moves toward the box; the angle, roll and field of view stay the
   // player's, exactly as `frameOn` promises.
@@ -525,6 +544,11 @@ void Session::trackEvents() {
   const bool moved = eventsPrimed_ && ply > lastPly_;
   const bool changed = !eventsPrimed_ || ply != lastPly_ || endEventDirty_;
   lastPly_ = ply;
+  if (capturePly_ && ply < *capturePly_) capturePly_.reset();
+  if (moved && !game_->moveHistory().empty() && game_->moveHistory().back().isCapture()) {
+    ++captureSerial_;
+    capturePly_ = ply;
+  }
   if (!changed) return;
   endEventDirty_ = false;
   // A move that gives check; undo, a load and a stay-in-check never do.
@@ -550,7 +574,8 @@ void Session::trackEvents() {
       if (fx.origin == kInvalidCell) {
         // No royal: the loser's last-moved piece that still stands.
         const auto& moves = game_->moveHistory();
-        for (auto it = moves.rbegin(); it != moves.rend() && fx.origin == kInvalidCell; ++it) {
+        for (auto it = moves.rbegin(); it != moves.rend() && fx.origin == kInvalidCell;
+             ++it) {
           const Piece p = snapshot_.at(it->to);
           if (!p.empty() && p.colorOf() == fx.loser) fx.origin = it->to;
         }
@@ -834,6 +859,7 @@ Result<void> Session::apply(const Action& a) {
       game_->reset();
       ++presentationEpoch_;
       ++bootSerial_;
+      capturePly_.reset();
       // The board boots instead of powering up: the end is forgotten without an event.
       endDecided_ = false;
       endEvent_.reset();

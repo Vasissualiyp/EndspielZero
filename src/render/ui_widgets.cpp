@@ -13,6 +13,24 @@
 #include "audio/audio.hpp"
 
 namespace cb::render::widgets {
+float trackedText(ImDrawList* dl, ImVec2 pos, const char* text, float tracking) {
+  const float start = pos.x;
+  ImFont* font = ImGui::GetFont();
+  const float size = ImGui::GetFontSize();
+  const ImU32 colour = ImGui::GetColorU32(ImGuiCol_Text);
+  for (const char* p = text; *p;) {
+    unsigned int codepoint = 0;
+    const int bytes = ImTextCharFromUtf8(&codepoint, p, nullptr);
+    if (bytes <= 0) break;
+    dl->AddText(font, size, pos, colour, p, p + bytes);
+    const ImFontGlyph* glyph = font->FindGlyph(static_cast<ImWchar>(codepoint));
+    pos.x += (glyph ? glyph->AdvanceX : font->FallbackAdvanceX) * size / font->FontSize;
+    p += bytes;
+    if (*p) pos.x += tracking;
+  }
+  return pos.x - start;
+}
+
 namespace {
 
 struct VisualInput {
@@ -95,8 +113,8 @@ void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
   }
 }
 
-void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme, float scale,
-              float draw, float level) {
+void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
+              float scale, float draw, float level) {
   const float width = max.x - min.x;
   const float height = max.y - min.y;
   if (width <= 0.0f || height <= 0.0f || draw <= 0.0f) return;
@@ -205,7 +223,8 @@ struct ControlLayout {
 };
 
 ControlLayout measureControl(const char* label, const char* tail, ImFont* font,
-                             float width, float height, float s, int index) {
+                             float width, float height, float s, int index,
+                             bool compact = false) {
   ControlLayout l;
   l.font = font ? font : ImGui::GetFont();
   l.fontSize = font ? font->FontSize : ImGui::GetFontSize();
@@ -243,7 +262,7 @@ ControlLayout measureControl(const char* label, const char* tail, ImFont* font,
   l.tailWrap = std::max(1.0f, l.width - 24 * s);
   const ImVec2 tailSize = measure(l.tail, l.tailSize, l.tailWrap);
   const float contentH = labelSize.y + (below ? 4 * s + tailSize.y : 0);
-  l.height = std::ceil(std::max(height, contentH + 16 * s));
+  l.height = std::ceil(std::max(height, contentH + (compact ? 4 : 16) * s));
   l.label = ImVec2(left, (l.height - contentH) * 0.5f);
   l.number = ImVec2(6 * s, (l.height - l.tailSize) * 0.5f);
   l.value = below ? ImVec2(12 * s, l.label.y + labelSize.y + 4 * s)
@@ -367,11 +386,11 @@ void drawLiveControl(ImDrawList* dl, ImVec2 min, ImVec2 max, const ControlLayout
 /// is what keeps the two from drifting apart again.
 bool rowControl(const char* id, const char* label, const view::Theme& theme, ImFont* font,
                 float width, float height, float scale, bool enabled, bool primary,
-                bool cold, int index, const char* tail) {
+                bool cold, int index, const char* tail, bool compact = false) {
   const float s = scale;
-  const auto layout = theme.liveControls
-                          ? measureControl(label, tail, font, width, height, s, index)
-                          : ControlLayout{};
+  const auto layout = theme.liveControls ? measureControl(label, tail, font, width,
+                                                          height, s, index, compact)
+                                         : ControlLayout{};
   // The stock button is only an input target: every pixel is drawn after it.
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
@@ -698,10 +717,10 @@ bool stepper(const char* id, int& value, int lo, int hi, const view::Theme& them
 }
 
 bool button(const char* label, const view::Theme& theme, float width, bool primary,
-            bool cold, bool enabled, ImFont* font) {
+            bool cold, bool enabled, ImFont* font, bool compact) {
   const float s = uiScale();
-  return rowControl(label, label, theme, font, width, controlHeight(), s, enabled,
-                    primary, cold, -1, nullptr);
+  return rowControl(label, label, theme, font, width, compact ? 20 * s : controlHeight(),
+                    s, enabled, primary, cold, -1, nullptr, compact);
 }
 
 bool cycleButton(const char* label, const std::string& value, const view::Theme& theme,
