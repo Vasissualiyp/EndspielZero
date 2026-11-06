@@ -117,6 +117,38 @@ TEST_CASE("result placement stays in the stage and avoids the king", "[render][r
   CHECK(p.x == Approx(640));
   CHECK(p.y == Approx(350));
 }
+TEST_CASE("result panel sits beside the board, not over it", "[render][result]") {
+  const HudRect stage{300, 100, 1100, 700};
+  const HudPoint size{240, 380};
+  const auto overlaps = [](HudRect a, HudPoint p, HudPoint s) {
+    return p.x < a.x + a.width && p.x + s.x > a.x && p.y < a.y + a.height &&
+           p.y + s.y > a.y;
+  };
+  // Room on the right only: it goes there, vertically centred.
+  const HudRect board{520, 180, 500, 540};
+  const auto p = resultPanelPos(stage, board, HudPoint{760, 400}, size, 16);
+  CHECK_FALSE(overlaps(board, p, size));
+  CHECK(p.x >= stage.x);
+  CHECK(p.x + size.x <= stage.x + stage.width);
+  CHECK(p.y == Approx(stage.y + (stage.height - size.y) * .5f));
+  CHECK(std::min(std::abs(p.x - (board.x + board.width)),
+                 std::abs(p.x + size.x - board.x)) == Approx(16));
+  // Only the left has room.
+  const HudRect right{560, 180, 800, 540};
+  const auto q = resultPanelPos(stage, right, HudPoint{900, 400}, size, 16);
+  CHECK_FALSE(overlaps(right, q, size));
+  CHECK(q.x + size.x == Approx(right.x - 16));
+  // A board filling the stage leaves no room: the king-clear placement is used.
+  const HudRect full{300, 100, 1100, 700};
+  const HudPoint king{850, 450};
+  const auto f = resultPanelPos(stage, full, king, size, 16);
+  const auto old = resultPanelPos(stage, king, size);
+  CHECK(f.x == Approx(old.x));
+  CHECK(f.y == Approx(old.y));
+  // No board known: identical to the plain overload.
+  const auto n = resultPanelPos(stage, std::nullopt, king, size, 16);
+  CHECK(n.x == Approx(old.x));
+}
 TEST_CASE("result panel traces after the end hold and calm only fades",
           "[render][result]") {
   const float hold = view::kEndDelaySeconds + 7 / view::kPowerDownCellsPerSecond +

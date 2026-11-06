@@ -27,4 +27,23 @@ CapturedPieces capturedBySide(const Game& game) {
   return out;
 }
 
+bool replayable(const Game& game) {
+  if (game.isTemporal()) return false;
+  const auto end = positionAtPly(game, game.plyCount());
+  return end && end->hash() == game.currentHash();
+}
+
+std::optional<Position> positionAtPly(const Game& game, std::size_t ply) {
+  if (game.isTemporal() || ply > game.plyCount()) return std::nullopt;
+  Position pos = game.startPosition();
+  const auto& moves = game.moveHistory();
+  for (std::size_t i = 0; i < ply; ++i) {
+    const Piece mover = pos.at(moves[i].from);
+    if (mover.empty() || mover.colorOf() != pos.sideToMove()) return std::nullopt;
+    Undo u;
+    pos.make(moves[i], u);
+  }
+  return pos;
+}
+
 }  // namespace cb::app

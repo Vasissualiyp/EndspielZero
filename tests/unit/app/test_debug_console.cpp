@@ -196,3 +196,21 @@ TEST_CASE("result console opens only an adjudicated game", "[unit][app][result]"
   CHECK(shell->session()->resultRequested());
   CHECK(has(DebugConsole::help(), "result"));
 }
+
+TEST_CASE("review console browses the history and leaves it", "[unit][app][review]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK(has(c.run(*shell, "review"), "cannot be reviewed"));
+  REQUIRE(shell->session()->playMoveText("e2e4").has_value());
+  REQUIRE(shell->session()->playMoveText("e7e5").has_value());
+  CHECK(has(c.run(*shell, "review"), "ply 2 of 2"));
+  CHECK(has(c.run(*shell, "review 1"), "ply 1 of 2"));
+  CHECK(shell->session()->reviewPly() == std::optional<std::size_t>(1));
+  CHECK(has(c.run(*shell, "review 9"), "past the end"));
+  CHECK(has(c.run(*shell, "review x"), "not a ply"));
+  CHECK(c.run(*shell, "review off") == "review off");
+  CHECK_FALSE(shell->session()->reviewPly());
+  CHECK(c.run(*shell, "review 1 2") == "usage: review [<ply>|off]");
+  CHECK(has(DebugConsole::help(), "review [<ply>|off]"));
+}

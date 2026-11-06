@@ -3472,15 +3472,79 @@ TEST_CASE("result panel rematches, returns to menu and collapses without pausing
     frame();
   };
   const auto boot = session.bootSerial();
-  click(ImVec2(result->Pos.x + 70, result->Pos.y + 140));
+  // The stacked layout (M23.11 3b): REMATCH is the first of three full-width rows.
+  click(ImVec2(result->Pos.x + result->Size.x * .5f,
+               result->Pos.y + result->Size.y * .49f));
   CHECK(session.game().plyCount() == 0);
   CHECK(session.bootSerial() == boot + 1);
   mate();
   frame();
   frame();
   result = ImGui::FindWindowByName("##result");
-  click(ImVec2(result->Pos.x + 210, result->Pos.y + 140));
+  click(ImVec2(result->Pos.x + result->Size.x * .5f,
+               result->Pos.y + result->Size.y * .89f));
   CHECK(shell->screen() == app::Screen::MainMenu);
+  CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
+TEST_CASE("result panel offers review, which esc leaves",
+          "[render][gpu][result][review]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  auto* window = SDL_CreateWindow("review", 1920, 1080, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct WindowGuard {
+    SDL_Window* w;
+    ~WindowGuard() { SDL_DestroyWindow(w); }
+  } guard{window};
+  auto shell = app::Shell::create(
+      {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "review-panel.conf");
+  shell->settings() = app::Settings{};
+  shell->setVariantLoader(
+      [](const std::string& n) -> Result<VariantSpec> { return test::loadVariant(n); });
+  REQUIRE(shell->startGame("standard").has_value());
+  auto& session = *shell->session();
+  REQUIRE(session
+              .applyScript("click f2\nclick f3\nclick e7\nclick e5\nclick g2\nclick "
+                           "g4\nclick d8\nclick h4")
+              .has_value());
+  REQUIRE(session.showResult());
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  REQUIRE(ui);
+  const auto frame = [&] {
+    (*ui)->newFrame();
+    (void)(*ui)->build(*shell, 60);
+    (*ui)->endFrame();
+  };
+  frame();
+  frame();
+  auto* result = ImGui::FindWindowByName("##result");
+  REQUIRE(result->Active);
+  const auto click = [&](ImVec2 p) {
+    (*ui)->injectMouse(p.x, p.y, true);
+    frame();
+    (*ui)->injectMouse(p.x, p.y, false);
+    frame();
+  };
+  // REVIEW is the middle of three stacked rows.
+  click(ImVec2(result->Pos.x + result->Size.x * .5f,
+               result->Pos.y + result->Size.y * .69f));
+  REQUIRE(session.reviewPly());
+  CHECK(*session.reviewPly() == 4);
+  CHECK(session.game().plyCount() == 4);
+  CHECK(session.resultCollapsed());  // the panel gives way to the RESULT tab
+  frame();
+  CHECK_FALSE(ImGui::FindWindowByName("##result")->Active);
+  CHECK(ImGui::FindWindowByName("##controls")->Active);
+  // Esc leaves review first; the next one collapses nothing more, then pauses.
+  shell->back();
+  CHECK_FALSE(session.reviewPly());
+  CHECK(shell->screen() == app::Screen::Game);
+  frame();
   CHECK(gpu().ctx.takeValidationMessages().empty());
 }
 

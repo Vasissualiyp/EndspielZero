@@ -104,6 +104,7 @@ struct HudPanelSpec {
   const char* header{nullptr};  ///< small accent label above the rows
   ImFont* headerFont{nullptr};
   const view::Rgba* led{nullptr};  ///< a lit dot before the first row, in this colour
+  int focusRow{-1};  ///< scrolling rows: centre this row when it changes (review cursor)
 };
 
 // Right/bottom pivots must use this frame's measured content, including a window's
@@ -185,6 +186,23 @@ HudRect drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anc
     if (storage->GetInt(countId, -1) != count) {
       ImGui::SetNextWindowScroll(ImVec2(-1, rowsHeight));
       storage->SetInt(countId, count);
+    }
+    // A row to keep in view (the review cursor): centred when it moves, and the newest
+    // row again when the focus is dropped.
+    const ImGuiID focusId = ImGui::GetID("##focusRow");
+    if (storage->GetInt(focusId, -1) != panel->focusRow) {
+      storage->SetInt(focusId, panel->focusRow);
+      if (panel->focusRow < 0) {
+        ImGui::SetNextWindowScroll(ImVec2(-1, rowsHeight));
+      } else {
+        float top = 0;
+        for (int j = 0; j < panel->focusRow && j < count; ++j)
+          top += extents[static_cast<std::size_t>(j)].y + spacing;
+        const float view = std::max(1.0f, height - headerSize.y - spacing);
+        const float rowH =
+            extents[static_cast<std::size_t>(std::min(panel->focusRow, count - 1))].y;
+        ImGui::SetNextWindowScroll(ImVec2(-1, std::max(0.0f, top - (view - rowH) * .5f)));
+      }
     }
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::BeginChild("##rows",
@@ -2055,6 +2073,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   } else if (game.inCheck()) {
     status.push_back({"IN CHECK", small, t.blood});
   }
+  const auto reviewing = session.reviewPly();
+  if (reviewing) {
+    status.push_back(
+        {"REVIEW " + std::to_string(*reviewing) + " / " + std::to_string(game.plyCount()),
+         small, t.ember});
+  }
   if (session.resultCollapsed() && result != GameResult::InProgress)
     status.push_back({"RESULT", small, t.ember, [&] { (void)session.showResult(); }});
   // The status panel is exempt from the end power-down: it shows the result lit.
@@ -2076,7 +2100,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   const float timelineLift = shell.attracting() ? buildTrailerTimeline(shell) : 0.0f;
   std::vector<float> dockWidths;
   if (!shell.attracting() && !shell.watching()) {
-    dockWidths = {px(78), px(84)};
+    // Review replaces the game actions with the cursor controls (M23.11 3b).
+    if (reviewing)
+      dockWidths = {px(56), px(56), px(140)};
+    else
+      dockWidths = {px(78), px(84)};
     if (v.dims.dims() > 2) dockWidths.push_back(px(78));
     dockWidths.push_back(px(64));
     if (hasPlaySurface(v)) {
@@ -2093,7 +2121,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   }
   const float dockAvailable = vp->WorkSize.x - 2 * margin - 2 * hudPad;
   const float fullRowHeight = std::ceil(controlHeight());
-  const auto fullDock = dockLayout(dockWidths, 2, dockAvailable, fullRowHeight,
+  const std::size_t gameButtons = reviewing ? 3 : 2;
+  const auto fullDock = dockLayout(dockWidths, gameButtons, dockAvailable, fullRowHeight,
                                    ImGui::GetStyle().ItemSpacing.x, px(12));
   const bool compactDock = fullDock.height > fullRowHeight;
   if (compactDock)
@@ -2103,9 +2132,10 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
           ? std::ceil(std::max(controlHeight() * 20 / 42,
                                actionFont()->FontSize + 4 * ImGui::GetFontSize() / 15))
           : fullRowHeight;
-  const auto dock = compactDock ? dockLayout(dockWidths, 2, dockAvailable, dockRowHeight,
-                                             ImGui::GetStyle().ItemSpacing.x, px(12))
-                                : fullDock;
+  const auto dock =
+      compactDock ? dockLayout(dockWidths, gameButtons, dockAvailable, dockRowHeight,
+                               ImGui::GetStyle().ItemSpacing.x, px(12))
+                  : fullDock;
   std::string hint;
   if (!shell.attracting() && !shell.watching()) {
     if (session.hotSeat()) {
@@ -2116,6 +2146,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         hint += mover == Color::White ? "qwertasdfgzxcvb" : "yuiophjkl;nm,./";
       else
         for (std::int16_t c : partial) hint += std::to_string(c) + " ";
+    } else if (reviewing) {
+      // No hint line: it would grow the dock and reframe the board under the player.
     } else if (game.plyCount() == 0) {
       hint = surfaceView ? "middle-drag slides; right-drag orbits"
                          : "click a piece, then a lit cell";
@@ -2233,16 +2265,42 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
   } else {
-    if (dockButton("UNDO", t, px(78), false, false, true, actionFont())) {
-      app::Action a;
-      a.kind = app::ActionKind::Undo;
-      (void)session.apply(a);
-    }
-    ImGui::SameLine();
-    if (dockButton("RESET", t, px(84), false, false, true, actionFont())) {
-      app::Action a;
-      a.kind = app::ActionKind::Reset;
-      (void)session.apply(a);
+    if (reviewing) {
+      // The triangles where the font has them; the plain arrows otherwise.
+      const bool glyphs = actionFont()->FindGlyphNoFallback(0x25C0) != nullptr &&
+                          actionFont()->FindGlyphNoFallback(0x25B6) != nullptr;
+      const std::size_t at = *reviewing;
+      app::Action step;
+      step.kind = app::ActionKind::ReviewStep;
+      if (dockButton(glyphs ? "\xE2\x97\x80" : "<", t, px(56), false, false, at > 0,
+                     actionFont())) {
+        step.dx = -1;
+        (void)session.apply(step);
+      }
+      ImGui::SameLine();
+      if (dockButton(glyphs ? "\xE2\x96\xB6" : ">", t, px(56), false, false,
+                     at < game.plyCount(), actionFont())) {
+        step.dx = 1;
+        (void)session.apply(step);
+      }
+      ImGui::SameLine();
+      if (dockButton("EXIT REVIEW", t, px(140), true, false, true, actionFont())) {
+        app::Action end;
+        end.kind = app::ActionKind::ReviewEnd;
+        (void)session.apply(end);
+      }
+    } else {
+      if (dockButton("UNDO", t, px(78), false, false, true, actionFont())) {
+        app::Action a;
+        a.kind = app::ActionKind::Undo;
+        (void)session.apply(a);
+      }
+      ImGui::SameLine();
+      if (dockButton("RESET", t, px(84), false, false, true, actionFont())) {
+        app::Action a;
+        a.kind = app::ActionKind::Reset;
+        (void)session.apply(a);
+      }
     }
     if (v.dims.dims() > 2) {
       // Cold, because it acts on the geometry rather than on the game.
@@ -2426,16 +2484,29 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     const std::size_t show = moves.size();
     std::vector<HudTextRow> recent;
     recent.reserve(show);
+    // The lit row is the newest, or the review cursor's; older rows fade away from it.
+    const std::size_t lit = session.reviewPly().value_or(moves.size());
     for (std::size_t i = moves.size() - show; i < moves.size(); ++i) {
-      const bool last = i + 1 == moves.size();
-      const float age =
-          static_cast<float>(moves.size() - 1 - i) / static_cast<float>(show);
+      const bool last = i + 1 == lit;
+      const float age = static_cast<float>(
+                            std::abs(static_cast<long>(lit) - 1 - static_cast<long>(i))) /
+                        static_cast<float>(show);
       char row[96];
       std::snprintf(row, sizeof(row), "%2zu%s %s", i / 2 + 1, (i % 2 == 0) ? "." : "..",
                     moveText(v, moves[i]).c_str());
       view::Rgba c = last ? t.ember : t.boneDim;
       c.a *= last ? 1.0f : 1.0f - 0.7f * age;
-      recent.push_back({row, readout, c});
+      HudTextRow entry{row, readout, c};
+      // While reviewing, a row is a jump to the position after it.
+      if (session.reviewPly()) {
+        entry.clicked = [&session, i] {
+          app::Action jump;
+          jump.kind = app::ActionKind::ReviewJump;
+          jump.text = std::to_string(i + 1);
+          (void)session.apply(jump);
+        };
+      }
+      recent.push_back(std::move(entry));
     }
     HudPanelSpec ledger = statusPanel;
     ledger.led = nullptr;
@@ -2444,6 +2515,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ledger.header = "MOVES";
     ledger.headerFont = small;
     ledger.level = hudLevel_;
+    if (session.reviewPly())
+      ledger.focusRow =
+          static_cast<int>(std::max<std::size_t>(*session.reviewPly(), 1)) - 1;
     ImGui::PushFont(readout);
     const float ledgerWidth = ImGui::CalcTextSize("000. Qxh8+ Qxh8+").x + px(20);
     ImGui::PopFont();
@@ -2626,7 +2700,23 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
                       end.kind, maxDistance, shell.settings().presentationIntensity);
     if (fx.draw > 0) {
       const auto text = session.resultText();
-      const ImVec2 size(std::min(stage.width, px(350)), px(190));
+      const bool reviewable = session.canReview();
+      const float inset = px(16);
+      ImGui::PushFont(display);
+      const ImVec2 titleSize = ImGui::CalcTextSize(text.title.c_str());
+      ImGui::PopFont();
+      // A narrow column: wide enough for the title and its close button, with the
+      // buttons stacked, so it fits beside the board rather than over it (M23.11 3b).
+      const float width =
+          std::min(stage.width, std::max(px(190), titleSize.x + px(36) + 2 * inset));
+      const float rowH = std::ceil(controlHeight());
+      const float lineH = ImGui::GetStyle().ItemSpacing.y;
+      ImGui::PushFont(small);
+      const float smallH = ImGui::GetTextLineHeight();
+      ImGui::PopFont();
+      const float bodyH = titleSize.y + ImGui::GetTextLineHeight() + smallH + 3 * lineH +
+                          px(10) + (reviewable ? 3.0f : 2.0f) * (rowH + lineH);
+      const ImVec2 size(width, std::min(stage.height, bodyH + 2 * px(12)));
       std::optional<HudPoint> king;
       if (end.mated) {
         for (const auto& pl : session.placements()) {
@@ -2636,10 +2726,31 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
           if (at.visible) king = HudPoint{at.x, at.y};
         }
       }
-      const auto pos = resultPanelPos(stage, king, {size.x, size.y});
+      // The board's projected bounds: every cell's corners and a piece's height above it.
+      std::optional<HudRect> board;
+      {
+        float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+        const float aspect = vp->Size.x / vp->Size.y;
+        const auto cam = session.camera();
+        for (const auto& pl : session.placements()) {
+          for (const float dz : {0.0f, 1.0f})
+            for (const float dx : {-.5f, .5f})
+              for (const float dy : {-.5f, .5f}) {
+                const auto at = cam.project({pl.x + dx, pl.y + dy, pl.z + dz}, aspect,
+                                            vp->Size.x, vp->Size.y);
+                if (!at.visible) continue;
+                x0 = std::min(x0, at.x);
+                y0 = std::min(y0, at.y);
+                x1 = std::max(x1, at.x);
+                y1 = std::max(y1, at.y);
+              }
+        }
+        if (x1 > x0 && y1 > y0) board = HudRect{x0, y0, x1 - x0, y1 - y0};
+      }
+      const auto pos = resultPanelPos(stage, board, king, {size.x, size.y}, px(16));
       ImGui::SetNextWindowPos(ImVec2(pos.x, pos.y));
       ImGui::SetNextWindowSize(size);
-      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(16), px(12)));
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(inset, px(12)));
       ImGui::Begin("##result", nullptr,
                    overlayFlags & ~ImGuiWindowFlags_AlwaysAutoResize);
       auto* dl = ImGui::GetWindowDrawList();
@@ -2654,7 +2765,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGui::PopStyleColor();
       ImGui::PopFont();
       ImGui::SameLine();
-      ImGui::SetCursorPosX(size.x - px(40));
+      ImGui::SetCursorPosX(size.x - inset - px(24));
       if (button("X", t, px(24), false, false, true, actionFont(), true))
         session.collapseResult();
       const auto winner = game.result() == GameResult::WhiteWins   ? t.whitePiece
@@ -2668,13 +2779,18 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGui::TextUnformatted(text.detail.c_str());
       ImGui::PopFont();
       ImGui::Dummy(ImVec2(0, px(10)));
-      if (button("REMATCH", t, px(132), true, false, true, actionFont())) {
+      const float inner = size.x - 2 * inset;
+      if (button("REMATCH", t, inner, true, false, true, actionFont())) {
         app::Action reset;
         reset.kind = app::ActionKind::Reset;
         (void)session.apply(reset);
       }
-      ImGui::SameLine();
-      if (button("MENU", t, px(110), false, false, true, actionFont()))
+      if (reviewable && button("REVIEW", t, inner, false, false, true, actionFont())) {
+        app::Action review;
+        review.kind = app::ActionKind::ReviewStart;
+        (void)session.apply(review);
+      }
+      if (button("MENU", t, inner, false, false, true, actionFont()))
         shell.go(app::Screen::MainMenu);
       ImGui::EndDisabled();
       for (int i = first; i < dl->VtxBuffer.Size; ++i) {

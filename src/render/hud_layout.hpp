@@ -26,6 +26,13 @@ struct HudPoint {
 /// Centre where possible; choose the nearest clear position with a king-cell margin.
 [[nodiscard]] HudPoint resultPanelPos(HudRect stage, std::optional<HudPoint> king,
                                       HudPoint size) noexcept;
+/// As above, but first looks for room beside the board: outside `board` (its projected
+/// bounds), inside the stage, vertically centred, on the side nearest the stage centre
+/// (above or below as a last try). Falls back to the clear-of-king placement when the
+/// panel cannot fit anywhere clear of the board.
+[[nodiscard]] HudPoint resultPanelPos(HudRect stage, std::optional<HudRect> board,
+                                      std::optional<HudPoint> king, HudPoint size,
+                                      float gap) noexcept;
 struct ResultPanelFx {
   float draw{}, content{}, level{1};
 };

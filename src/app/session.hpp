@@ -42,6 +42,10 @@ enum class ActionKind : std::uint8_t {
   Resign,         ///< the side to move concedes
   AgreeDraw,      ///< the players agree a draw
   EngineMove,     ///< the computer plays one move for the side to move, now (scripts)
+  ReviewStart,    ///< begin browsing the history; `text` is the ply, default the end
+  ReviewEnd,      ///< leave review: the final position again
+  ReviewStep,     ///< dx = +1 / -1: one ply on or back
+  ReviewJump,     ///< `text` is the ply to show (begins review if needed)
 };
 
 struct Action {
@@ -212,8 +216,22 @@ class Session {
   /// (M12.8). One gate for picking, so a watched board and a shot-followed board cannot
   /// disagree about whether a click counts.
   [[nodiscard]] bool boardLocked() const noexcept {
-    return shotInFlight() || watching_ || engineToMove();
+    return shotInFlight() || watching_ || engineToMove() || reviewPly_.has_value();
   }
+
+  // ---- review (M23.11 section 3b) -------------------------------------------------
+  /// A non-destructive browser over the game's history. While `reviewPly()` is set the
+  /// snapshot shows the position after that many moves, rebuilt by replaying from the
+  /// start; `game()` is never touched and the board refuses every move.
+  [[nodiscard]] std::optional<std::size_t> reviewPly() const noexcept {
+    return reviewPly_;
+  }
+  /// Moves exist and the history replays onto the position being played (not temporal,
+  /// not a FEN-set game: its start is not kept). Cached per game state.
+  [[nodiscard]] bool canReview() const;
+  /// The move whose result the snapshot shows (for the last-move mark): the move at the
+  /// review cursor, or the game's last move. Empty at ply 0.
+  [[nodiscard]] std::optional<std::pair<CellId, CellId>> shownLastMove() const;
 
   // ---- the computer opponent (M10.2-M10.3) ---------------------------------------
   /// Which side the computer plays, or none for a game between people. Setting it
@@ -412,6 +430,8 @@ class Session {
  private:
   Session() = default;
   void refreshSnapshot();
+  Result<void> reviewTo(std::size_t ply, bool animate);
+  void endReview();
   void refreshView();
   /// Re-lay the temporal view after a move changed which boards exist, keeping the
   /// player's camera angle and zoom.
@@ -495,6 +515,14 @@ class Session {
   float watchClock_{0.0f};
   bool resultCollapsed_{false};
   bool resultRequested_{false};
+  std::optional<std::size_t> reviewPly_;
+  std::optional<Position> reviewPos_;
+  struct ReplayCache {
+    std::uint64_t epoch{~0ull}, hash{0};
+    std::size_t ply{0};
+    bool ok{false};
+  };
+  mutable ReplayCache replayCache_;
   float watchPreview_{0.0f};
   float previewClock_{0.0f};
   bool previewing_{false};

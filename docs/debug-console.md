@@ -139,3 +139,11 @@ Esc or the close button collapses it to RESULT in the status panel; RESULT reope
 REMATCH uses Reset and boots the board; MENU returns to the main menu. Undo removes
 an ended result. For a deterministic capture use `--result --end-t 9` (or 12) after a
 mating script. Without `--result`, existing captures retain their panel-free conditions.
+
+M23.11 review: `review [<ply>|off]` browses the game's history without touching it (no ply
+starts at the end; `off` returns to the final position). Left/Right step, Home/End jump,
+Esc leaves; while reviewing the board takes no move and the dock offers the step buttons
+and EXIT REVIEW. A clicked ledger row jumps to it. REVIEW is also on the result panel, and
+is hidden for a game that cannot be replayed (FEN-started or temporal). Capture a review
+frame with `--script "$MATE" --review 2 --end-t 9`; in a script, `review 2`, `review next`,
+`review prev`, `review off`.

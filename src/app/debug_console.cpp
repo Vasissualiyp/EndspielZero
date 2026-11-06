@@ -187,6 +187,19 @@ std::string execute(Shell& shell, const std::string& line) {
     if (w.size() != 1) return "usage: result";
     return session->showResult() ? "result panel opened" : "the game is not decided";
   }
+  if (cmd == "review") {
+    if (w.size() > 2) return "usage: review [<ply>|off]";
+    Action a;
+    a.kind = w.size() == 1   ? ActionKind::ReviewStart
+             : w[1] == "off" ? ActionKind::ReviewEnd
+                             : ActionKind::ReviewJump;
+    if (w.size() == 2 && w[1] != "off") a.text = w[1];
+    if (auto ok = session->apply(a); !ok.has_value()) return ok.error().message;
+    if (const auto ply = session->reviewPly())
+      return "reviewing ply " + std::to_string(*ply) + " of " +
+             std::to_string(game.plyCount());
+    return "review off";
+  }
   if (cmd == "fen") return toFen(pos);
   if (cmd == "hash") {
     std::ostringstream out;
@@ -389,6 +402,8 @@ std::string DebugConsole::help() {
          "ripple [<cell>]          play the check ripple from a cell (default: the "
          "royal)\n"
          "result                     show the decided game result now\n"
+         "review [<ply>|off]       browse the game's history (no ply: the end); off "
+         "leaves\n"
          "endfx win|draw|off [<side>]  preview the game-end power-down; off clears it\n"
          "info                     variant summary: pieces, moves, marks, compounds\n"
          "fen | setfen <fen>       show or replace the position\n"

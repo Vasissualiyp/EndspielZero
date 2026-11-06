@@ -63,6 +63,31 @@ HudPoint resultPanelPos(HudRect stage, std::optional<HudPoint> king,
   }
   return best;
 }
+HudPoint resultPanelPos(HudRect stage, std::optional<HudRect> board,
+                        std::optional<HudPoint> king, HudPoint size, float gap) noexcept {
+  if (board) {
+    const float right = stage.x + stage.width - size.x;
+    const float bottom = stage.y + stage.height - size.y;
+    const HudPoint centre{(stage.x + right) * .5f, (stage.y + bottom) * .5f};
+    const HudPoint candidates[] = {
+        {board->x + board->width + gap, centre.y},   // right of the board
+        {board->x - gap - size.x, centre.y},         // left of it
+        {centre.x, board->y + board->height + gap},  // below
+        {centre.x, board->y - gap - size.y}};        // above
+    HudPoint best{};
+    float distance = 1e30f;
+    for (const auto p : candidates) {
+      if (p.x < stage.x || p.y < stage.y || p.x > right || p.y > bottom) continue;
+      const float d = std::hypot(p.x - centre.x, p.y - centre.y);
+      if (d < distance) {
+        best = p;
+        distance = d;
+      }
+    }
+    if (distance < 1e30f) return best;
+  }
+  return resultPanelPos(stage, king, size);
+}
 ResultPanelFx resultPanelFx(float age, view::EndKind kind, int maxDistance,
                             float intensity) noexcept {
   const bool calm = intensity < .5f;

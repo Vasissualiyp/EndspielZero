@@ -21,7 +21,8 @@ std::uint32_t cellSeed(std::uint32_t cell) {
 
 }  // namespace
 
-void applyBoardFx(InstanceSet& set, const app::Session& session, const BoardFxState& state) {
+void applyBoardFx(InstanceSet& set, const app::Session& session,
+                  const BoardFxState& state) {
   set.cellFx.clear();
   set.fxGlobals = view::FxGlobals{};
   if (!state.any()) return;
@@ -66,9 +67,9 @@ void applyBoardFx(InstanceSet& set, const app::Session& session, const BoardFxSt
     const bool decisive = state.end.kind == EndKind::Decisive;
     // The last move's two cells stay readable in the hold, whatever the power.
     CellId lastFrom = kInvalidCell, lastTo = kInvalidCell;
-    if (!session.game().moveHistory().empty()) {
-      lastFrom = session.game().moveHistory().back().from;
-      lastTo = session.game().moveHistory().back().to;
+    if (const auto last = session.shownLastMove()) {
+      lastFrom = last->first;
+      lastTo = last->second;
     }
     for (CellId c = 0; c < count; ++c) {
       view::CellFx& fx = set.cellFx[c + 1];
@@ -81,11 +82,11 @@ void applyBoardFx(InstanceSet& set, const app::Session& session, const BoardFxSt
       const Piece piece = pos.at(c);
       if (piece.empty()) continue;
       const float arrival =
-          view::kEndDelaySeconds +
-          (decisive ? static_cast<float>(std::max(dist[c], 0)) / view::kPowerDownCellsPerSecond
-                    : 0.0f);
-      const view::HologramEnd h =
-          view::hologramEnd(sideOf(piece), *state.endAge - arrival, cellSeed(c), fxIntensity);
+          view::kEndDelaySeconds + (decisive ? static_cast<float>(std::max(dist[c], 0)) /
+                                                   view::kPowerDownCellsPerSecond
+                                             : 0.0f);
+      const view::HologramEnd h = view::hologramEnd(
+          sideOf(piece), *state.endAge - arrival, cellSeed(c), fxIntensity);
       fx.opacity = h.opacity;
       fx.scanJitter = h.scanJitter;
       fx.gain = h.gain;
@@ -110,7 +111,8 @@ void applyBoardFx(InstanceSet& set, const app::Session& session, const BoardFxSt
   if (state.rippleAge && state.rippleOrigin != kInvalidCell) {
     const std::vector<int>& dist = session.distancesFrom(state.rippleOrigin);
     for (CellId c = 0; c < count; ++c) {
-      const view::RippleCell r = view::checkRipple(dist[c], *state.rippleAge, fxIntensity);
+      const view::RippleCell r =
+          view::checkRipple(dist[c], *state.rippleAge, fxIntensity);
       view::CellFx& fx = set.cellFx[c + 1];
       fx.rippleAmp = r.amp;
       fx.ripplePhase = r.phase;

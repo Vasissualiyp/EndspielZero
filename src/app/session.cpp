@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "app/captured.hpp"
 #include "audio/audio.hpp"
 #include "io/fen.hpp"
 #include "io/game_file.hpp"
@@ -73,6 +74,76 @@ ResultText resultText(EndReason reason, GameResult result, std::size_t plies) {
   return text;
 }
 
+bool Session::canReview() const {
+  if (watching_ || game_->plyCount() == 0 || game_->isTemporal()) return false;
+  const ReplayCache key{presentationEpoch_, game_->currentHash(), game_->plyCount(),
+                        false};
+  if (replayCache_.epoch != key.epoch || replayCache_.hash != key.hash ||
+      replayCache_.ply != key.ply) {
+    replayCache_ = key;
+    replayCache_.ok = replayable(*game_);
+  }
+  return replayCache_.ok;
+}
+
+std::optional<std::pair<CellId, CellId>> Session::shownLastMove() const {
+  const std::size_t ply = reviewPly_.value_or(game_->plyCount());
+  if (ply == 0 || ply > game_->plyCount()) return std::nullopt;
+  const Move& m = game_->moveHistory()[ply - 1];
+  return std::make_pair(m.from, m.to);
+}
+
+Result<void> Session::reviewTo(std::size_t ply, bool animate) {
+  if (!canReview())
+    return fail(ErrorCode::ValidationError, "this game cannot be reviewed");
+  if (ply > game_->plyCount()) {
+    return fail(ErrorCode::ValidationError,
+                "ply " + std::to_string(ply) + " is past the end of the game");
+  }
+  auto next = positionAtPly(*game_, ply);
+  if (!next) return fail(ErrorCode::Internal, "the history cannot be replayed");
+  // One step forward plays the move on the board; anything else is a cut.
+  const bool forward = animate && reviewPly_ && ply == *reviewPly_ + 1 && reviewPos_;
+  view::MovePath path;
+  bool animating = false;
+  if (forward && animSeconds_ > 0.0f) {
+    const Move& m = game_->moveHistory()[*reviewPly_];
+    const Piece mover = reviewPos_->at(m.from);
+    if (!mover.empty()) {
+      path = view::tracePath(*variant_, *reviewPos_, mover.type, mover.orientation(), m);
+      animating = true;
+    }
+  }
+  if (!reviewPly_) resultCollapsed_ = true;  // the panel gives way to the RESULT tab
+  reviewPly_ = ply;
+  reviewPos_ = std::move(next);
+  selected_ = kInvalidCell;
+  pending_ = PendingPromotion{};
+  pendingMove_ = PendingMove{};
+  if (animating) {
+    anim_.start(viewCfg_, placements_, seams_, theme_, path, animSeconds_);
+    lastPath_ = path;
+    pathValid_ = true;
+  } else {
+    anim_.clear();
+    pathValid_ = false;
+  }
+  message_ =
+      "review: ply " + std::to_string(ply) + " of " + std::to_string(game_->plyCount());
+  refreshSnapshot();
+  return {};
+}
+
+void Session::endReview() {
+  if (!reviewPly_) return;
+  reviewPly_.reset();
+  reviewPos_.reset();
+  anim_.clear();
+  pathValid_ = false;
+  message_ = "review ended";
+  refreshSnapshot();
+}
+
 bool Session::showResult() noexcept {
   if (game_->result() == GameResult::InProgress) return false;
   resultRequested_ = true;
@@ -115,6 +186,23 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
   }
   if (verb == "engine") {
     a.kind = ActionKind::EngineMove;
+    return a;
+  }
+  if (verb == "review") {
+    // review | review <ply> | review next | review prev | review off
+    std::string arg;
+    in >> arg;
+    if (arg.empty()) {
+      a.kind = ActionKind::ReviewStart;
+    } else if (arg == "off") {
+      a.kind = ActionKind::ReviewEnd;
+    } else if (arg == "next" || arg == "prev") {
+      a.kind = ActionKind::ReviewStep;
+      a.dx = arg == "next" ? 1.0f : -1.0f;
+    } else {
+      a.kind = ActionKind::ReviewJump;
+      a.text = arg;
+    }
     return a;
   }
   if (verb == "reset") {
@@ -560,7 +648,11 @@ void Session::refreshSnapshot() {
   // comes back: the tint would otherwise sit on the piece that just landed.
   Piece before{};
   if (hoverCell_ < snapshot_.cellCount()) before = snapshot_.at(hoverCell_);
-  snapshot_ = view::PositionView::capture(game_->position());
+  if (reviewPly_ && (!canReview() || *reviewPly_ > game_->plyCount())) {
+    reviewPly_.reset();  // the history it browsed has gone (a load, a watch)
+    reviewPos_.reset();
+  }
+  snapshot_ = view::PositionView::capture(reviewPos_ ? *reviewPos_ : game_->position());
   if (hoverCell_ < snapshot_.cellCount()) {
     const Piece after = snapshot_.at(hoverCell_);
     if (!after.empty() &&
@@ -571,7 +663,7 @@ void Session::refreshSnapshot() {
   snapshot_.setSelected(selected_);
 
   std::vector<CellId> targets;
-  if (selected_ != kInvalidCell) {
+  if (selected_ != kInvalidCell && !reviewPly_) {
     for (const Move& m : game_->legalMoves()) {
       if (m.from == selected_) targets.push_back(m.to);
     }
@@ -696,7 +788,7 @@ void Session::refreshHints() {
   snapshot_.setHover(kInvalidCell);
   const CellId cell = hoverCell_;
   if (cell >= variant_->dims.cellCount()) return;
-  if (shotInFlight() || watching_ || cell == suppressedHover_) return;
+  if (shotInFlight() || watching_ || reviewPly_ || cell == suppressedHover_) return;
   // The hovered square is always marked, whatever the options say.
   snapshot_.setHover(cell);
   // The attack, defence and peek hints are Ctrl-only.
@@ -791,9 +883,54 @@ Result<void> Session::apply(const Action& a) {
       (a.kind == ActionKind::ClickCell || a.kind == ActionKind::Confirm)) {
     return {};
   }
+  // From the past nothing can be played: review is a read-only view of the history. A
+  // rematch is the one way out besides leaving review itself.
+  if (reviewPly_) {
+    switch (a.kind) {
+      case ActionKind::ClickCell:
+      case ActionKind::Undo:
+      case ActionKind::Resign:
+      case ActionKind::AgreeDraw:
+      case ActionKind::Confirm:
+      case ActionKind::EngineMove:
+        return {};
+      case ActionKind::Reset:
+        reviewPly_.reset();
+        reviewPos_.reset();
+        break;
+      default:
+        break;
+    }
+  }
   switch (a.kind) {
     case ActionKind::None:
       return {};
+
+    case ActionKind::ReviewStart:
+    case ActionKind::ReviewJump: {
+      std::size_t ply = game_->plyCount();
+      if (!a.text.empty()) {
+        std::size_t used = 0;
+        try {
+          ply = static_cast<std::size_t>(std::stoul(a.text, &used));
+        } catch (...) {
+          used = 0;
+        }
+        if (used != a.text.size())
+          return fail(ErrorCode::ParseError, "'" + a.text + "' is not a ply number");
+      }
+      return reviewTo(ply, false);
+    }
+    case ActionKind::ReviewEnd:
+      endReview();
+      return {};
+    case ActionKind::ReviewStep: {
+      if (!reviewPly_) return {};
+      const long target = static_cast<long>(*reviewPly_) + (a.dx < 0 ? -1 : 1);
+      const long clamped = std::clamp(target, 0L, static_cast<long>(game_->plyCount()));
+      if (static_cast<std::size_t>(clamped) == *reviewPly_) return {};
+      return reviewTo(static_cast<std::size_t>(clamped), true);
+    }
 
     case ActionKind::Hover:
       setHover(a.cell, a.ctrl);
@@ -995,6 +1132,8 @@ Result<void> Session::loadFen(std::string_view fen) {
   game_ = std::make_unique<Game>(*variant_);
   game_->position() = std::move(*p);
   ++presentationEpoch_;
+  reviewPly_.reset();
+  reviewPos_.reset();
   selected_ = kInvalidCell;
   eventsPrimed_ = false;  // the new position is the baseline for the next events
   if (endEvent_) {
@@ -1026,6 +1165,8 @@ Result<void> Session::loadGame(const GameFile& file) {
   }
   // applyGameFile can replace the start and play several moves before failing.
   ++presentationEpoch_;
+  reviewPly_.reset();
+  reviewPos_.reset();
   if (auto ok = applyGameFile(file, *game_); !ok.has_value()) return ok;
   selected_ = kInvalidCell;
   pending_ = PendingPromotion{};

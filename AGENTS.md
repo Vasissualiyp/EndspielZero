@@ -174,6 +174,9 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/endspielzero_gui standard --script "$MATE" --result --end-t 9 --shot result.ppm
                                  # the finished result panel; console `result` opens it immediately,
                                  # Esc collapses to RESULT, REMATCH resets/boots, MENU leaves
+./build/dev/src/gui/endspielzero_gui standard --script "$MATE" --review 2 --end-t 9 --shot review.ppm
+                                 # review frame: the position after ply 2 (console `review [<ply>|off]`;
+                                 # REVIEW on the result panel; Left/Right/Home/End, Esc leaves)
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --visual-time 0.75 --shot holo.ppm
                                  # explicit presentation seconds for hologram capture
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --matte          # material-free A/B capture

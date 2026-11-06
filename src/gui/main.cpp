@@ -68,6 +68,8 @@ float gBootT = -1.0f;
 float gCheckT = -1.0f;
 float gEndT = -1.0f;
 bool gResult = false;
+/// `--review <ply>`: the capture browses to that ply of the scripted game (empty: off).
+std::string gReview;
 
 float resolveUiScale(const app::Settings& settings, int height, bool capture) {
   return render::effectiveUiScale(settings.guiScale, settings.guiScaleAuto, height,
@@ -612,14 +614,14 @@ void syncMarks(render::BoardRenderer& renderer, const app::Session& session) {
   if (auto ok = renderer.syncBodies(session.variant()); !ok.has_value()) {
     std::fprintf(stderr, "%s\n", ok.error().format().c_str());
   }
-  const auto& history = session.game().moveHistory();
-  if (history.empty()) {
-    renderer.setLastMove(kInvalidCell, kInvalidCell);
+  // The move at the review cursor while reviewing, else the game's last.
+  if (const auto last = session.shownLastMove()) {
+    renderer.setLastMove(last->first, last->second);
   } else {
-    renderer.setLastMove(history.back().from, history.back().to);
+    renderer.setLastMove(kInvalidCell, kInvalidCell);
   }
   renderer.setCheckCell(
-      session.game().inCheck()
+      session.game().inCheck() && !session.reviewPly()
           ? session.game().position().findRoyal(session.game().position().sideToMove())
           : kInvalidCell);
 }
@@ -700,6 +702,15 @@ int captureFrame(const std::string& variantName, const std::string& path,
   if (!playing && !script.empty()) {
     if (auto ok = shell->session()->applyScript(script); !ok.has_value()) {
       std::fprintf(stderr, "script: %s\n", ok.error().format().c_str());
+      return 1;
+    }
+  }
+  if (!playing && !gReview.empty() && shell->session() != nullptr) {
+    app::Action review;
+    review.kind = app::ActionKind::ReviewJump;
+    review.text = gReview;
+    if (auto ok = shell->session()->apply(review); !ok.has_value()) {
+      std::fprintf(stderr, "review: %s\n", ok.error().format().c_str());
       return 1;
     }
   }
@@ -1446,6 +1457,7 @@ int main(int argc, char** argv) {
           "--variants-dir DIR reads and saves the player's own variants there.\n"
           "--piece NAME opens the designer captures on that piece.\n"
           "--result shows a decided result panel; --end-t pins its event age.\n"
+          "--review PLY browses the scripted game to that ply (0 = the start).\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -1455,6 +1467,8 @@ int main(int argc, char** argv) {
       clipDir = argv[++i];
     else if (arg == "--result")
       gResult = true;
+    else if (arg == "--review" && i + 1 < argc)
+      gReview = argv[++i];
     else if (arg == "--script" && i + 1 < argc)
       script = argv[++i];
     else if (arg == "--screen" && i + 1 < argc)
@@ -2004,6 +2018,12 @@ int main(int argc, char** argv) {
             // removes the one under the playhead, Space pauses and resumes.
             case SDLK_LEFT:
             case SDLK_RIGHT:
+              if (inGame && !shell->attracting() && shell->session()->reviewPly()) {
+                a.kind = app::ActionKind::ReviewStep;
+                a.dx = e.key.key == SDLK_RIGHT ? 1.0f : -1.0f;
+                (void)shell->session()->apply(a);
+                break;
+              }
               if (inGame && shell->attracting()) {
                 const int dir = e.key.key == SDLK_RIGHT ? 1 : -1;
                 if ((e.key.mod & SDL_KMOD_SHIFT) != 0) {
@@ -2012,6 +2032,17 @@ int main(int argc, char** argv) {
                 } else {
                   (void)shell->requestTrailerSeekKey(dir);
                 }
+              }
+              break;
+            case SDLK_HOME:
+            case SDLK_END:
+              // Review's ends: the start position and the final one.
+              if (inGame && !shell->attracting() && shell->session()->reviewPly()) {
+                a.kind = app::ActionKind::ReviewJump;
+                a.text = e.key.key == SDLK_HOME
+                             ? "0"
+                             : std::to_string(shell->session()->game().plyCount());
+                (void)shell->session()->apply(a);
               }
               break;
             case SDLK_RETURN:

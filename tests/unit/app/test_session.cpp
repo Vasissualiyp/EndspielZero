@@ -527,3 +527,114 @@ TEST_CASE("result labels cover every reason without assuming a royal",
       resultText(EndReason::Repetition, GameResult::Draw, 12).detail.find("repetition") !=
       std::string::npos);
 }
+
+namespace {
+constexpr const char* kFoolsMate =
+    "click f2\nclick f3\nclick e7\nclick e5\nclick g2\nclick g4\nclick d8\nclick h4";
+}
+
+TEST_CASE("review shows the position after k moves and never touches the game",
+          "[unit][app][review]") {
+  auto s = open("standard");
+  REQUIRE(s->applyScript(kFoolsMate).has_value());
+  REQUIRE(s->canReview());
+  const auto finalHash = s->game().currentHash();
+  const auto fen = toFen(s->game().position());
+  for (std::size_t k = 0; k <= 4; ++k) {
+    auto fresh = open("standard");
+    for (std::size_t i = 0; i < k; ++i) {
+      REQUIRE(fresh->playMoveText(moveText(fresh->variant(), s->game().moveHistory()[i]))
+                  .has_value());
+    }
+    Action a;
+    a.kind = ActionKind::ReviewJump;
+    a.text = std::to_string(k);
+    REQUIRE(s->apply(a).has_value());
+    REQUIRE(s->reviewPly());
+    CHECK(*s->reviewPly() == k);
+    CHECK(s->snapshot().hash() == fresh->snapshot().hash());
+    CHECK(s->game().currentHash() == finalHash);
+    CHECK(toFen(s->game().position()) == fen);
+    CHECK(s->game().plyCount() == 4);
+    if (k == 0) {
+      CHECK_FALSE(s->shownLastMove());
+    } else {
+      REQUIRE(s->shownLastMove());
+      CHECK(s->shownLastMove()->second == s->game().moveHistory()[k - 1].to);
+    }
+  }
+}
+
+TEST_CASE("review steps, jumps, ends and refuses every move", "[unit][app][review]") {
+  auto s = open("standard");
+  REQUIRE(s->applyScript(kFoolsMate).has_value());
+  Action start;
+  start.kind = ActionKind::ReviewStart;
+  REQUIRE(s->apply(start).has_value());
+  CHECK(s->reviewPly() == std::optional<std::size_t>(4));  // begins at the final position
+  Action step;
+  step.kind = ActionKind::ReviewStep;
+  step.dx = 1;
+  REQUIRE(s->apply(step).has_value());
+  CHECK(s->reviewPly() == std::optional<std::size_t>(4));  // clamped
+  step.dx = -1;
+  REQUIRE(s->apply(step).has_value());
+  REQUIRE(s->apply(step).has_value());
+  CHECK(s->reviewPly() == std::optional<std::size_t>(2));
+  Action jump;
+  jump.kind = ActionKind::ReviewJump;
+  jump.text = "9";
+  CHECK_FALSE(s->apply(jump).has_value());
+  CHECK(s->reviewPly() == std::optional<std::size_t>(2));
+  // No move, undo, resign or draw can happen from the past.
+  const auto hash = s->game().currentHash();
+  const auto board = s->snapshot().hash();
+  CHECK(s->boardLocked());
+  REQUIRE(s->applyScript("click e2\nclick e4\nundo\nresign\ndraw").has_value());
+  CHECK(s->game().plyCount() == 4);
+  CHECK(s->game().currentHash() == hash);
+  CHECK(s->snapshot().hash() == board);
+  CHECK(s->game().result() == GameResult::BlackWins);
+  // A ledger click is a jump; Home and End are jumps to the ends.
+  REQUIRE(s->applyScript("review 1").has_value());
+  CHECK(s->reviewPly() == std::optional<std::size_t>(1));
+  REQUIRE(s->applyScript("review off").has_value());
+  CHECK_FALSE(s->reviewPly());
+  CHECK(s->snapshot().hash() == hash);
+  CHECK_FALSE(s->boardLocked());
+  REQUIRE(s->applyScript("review").has_value());
+  CHECK(s->reviewPly() == std::optional<std::size_t>(4));
+  // A rematch leaves review.
+  REQUIRE(s->applyScript("reset").has_value());
+  CHECK_FALSE(s->reviewPly());
+  CHECK(s->game().plyCount() == 0);
+}
+
+TEST_CASE("a single forward review step animates and a jump does not",
+          "[unit][app][review]") {
+  auto s = open("standard");
+  REQUIRE(s->applyScript(kFoolsMate).has_value());
+  s->advanceAnimation(10.0f);
+  REQUIRE(s->applyScript("review 2").has_value());
+  CHECK_FALSE(s->animation().active());
+  REQUIRE(s->applyScript("review next").has_value());
+  CHECK(s->animation().active());
+  REQUIRE(s->applyScript("review 0").has_value());
+  CHECK_FALSE(s->animation().active());
+  REQUIRE(s->applyScript("review prev").has_value());
+  CHECK_FALSE(s->animation().active());
+}
+
+TEST_CASE("review is refused where it cannot be rebuilt", "[unit][app][review]") {
+  auto s = open("standard");
+  CHECK_FALSE(s->canReview());  // nothing played
+  REQUIRE(s->applyScript("click e2\nclick e4").has_value());
+  const std::string fen = toFen(s->game().position());
+  REQUIRE(s->loadFen(fen).has_value());  // a position entry keeps no start
+  REQUIRE(s->applyScript("click d7\nclick d5").has_value());
+  CHECK_FALSE(s->canReview());
+  Action a;
+  a.kind = ActionKind::ReviewStart;
+  CHECK_FALSE(s->apply(a).has_value());
+  CHECK_FALSE(s->reviewPly());
+}

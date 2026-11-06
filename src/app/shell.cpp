@@ -272,6 +272,13 @@ void Shell::back() {
       screen_ = Screen::Game;
       break;
     case Screen::Game:
+      // Esc leaves review before it collapses the result or pauses (M23.11 3b).
+      if (session_ && session_->reviewPly() && !watching()) {
+        Action end;
+        end.kind = ActionKind::ReviewEnd;
+        (void)session_->apply(end);
+        break;
+      }
       if (session_ && session_->game().result() != GameResult::InProgress &&
           !session_->resultCollapsed() && !watching()) {
         session_->collapseResult();
