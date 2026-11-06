@@ -28,6 +28,7 @@
 #include "render/post_process.hpp"
 #include "render/ui_widgets.hpp"
 #include "shaders.hpp"
+#include "view/hud_fx.hpp"
 #include "view/piece_tint.hpp"
 #include "view/seams.hpp"
 
@@ -89,6 +90,19 @@ struct HudTextRow {
   ImFont* font;
   view::Rgba colour;
   std::function<void()> clicked{};
+  // Live feedback (M23.11 section 4). Any of these draws the row through the draw list.
+  std::string from{};         ///< cross-fade from this text...
+  view::Rgba fromColour{};    ///< ...in this colour
+  float mix{1.0f};            ///< 0 shows `from`, 1 shows `text`
+  float reveal{1.0f};         ///< left-to-right reveal with a bright leading edge
+  float shift{0.0f};          ///< fraction of a row to ease up from, in a scrolled list
+  float alpha{1.0f};          ///< row opacity
+  float trailing{0.0f};       ///< extra width reserved after the text
+  /// Draws beside the text: (draw list, the text's top-left, row size, panel content left).
+  std::function<void(ImDrawList*, ImVec2, ImVec2, float)> after{};
+  [[nodiscard]] bool animated() const {
+    return mix < 1.0f || reveal < 1.0f || shift != 0.0f || alpha != 1.0f || bool(after);
+  }
 };
 
 /// How a block of HUD text is framed (M23.10 section 7): an instrument panel behind it.
@@ -104,8 +118,51 @@ struct HudPanelSpec {
   const char* header{nullptr};  ///< small accent label above the rows
   ImFont* headerFont{nullptr};
   const view::Rgba* led{nullptr};  ///< a lit dot before the first row, in this colour
+  float ledLevel{1.0f};            ///< its brightness (the turn flip's flicker)
   int focusRow{-1};  ///< scrolling rows: centre this row when it changes (review cursor)
 };
+
+/// An animated HUD row (M23.11 section 4): cross-fade, left-to-right reveal and an eased
+/// shift, drawn through the window's draw list. Reserves exactly the row's extent.
+void drawAnimatedRow(const HudTextRow& row, ImVec2 extent, float spacing, float wrapWidth,
+                     bool scrolled, const view::Theme* theme, float s, bool leftAlign,
+                     float contentLeft) {
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  ImGui::Dummy(extent);
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  ImFont* font = ImGui::GetFont();
+  const float size = ImGui::GetFontSize();
+  const float styleAlpha = ImGui::GetStyle().Alpha;
+  const auto colourOf = [&](const view::Rgba& c, float a) {
+    return ImGui::ColorConvertFloat4ToU32(col(c, a * row.alpha * styleAlpha));
+  };
+  ImVec2 at = p;
+  if (scrolled) at.y += row.shift * (extent.y + spacing);
+  const float textW = extent.x - row.trailing;
+  if (row.mix < 1.0f && !row.from.empty()) {
+    const float fromW = font->CalcTextSizeA(size, FLT_MAX, 0.0f, row.from.c_str()).x;
+    const float dx = leftAlign ? 0.0f : textW - fromW;
+    dl->AddText(font, size, ImVec2(at.x + dx, at.y), colourOf(row.fromColour, 1.0f - row.mix),
+                row.from.c_str());
+  }
+  const float a = row.mix < 1.0f ? row.mix : 1.0f;
+  if (row.reveal < 1.0f) {
+    dl->PushClipRect(at, ImVec2(at.x + extent.x * row.reveal, at.y + extent.y), true);
+    dl->AddText(font, size, at, colourOf(row.colour, a), row.text.c_str(), nullptr,
+                wrapWidth);
+    dl->PopClipRect();
+    if (theme != nullptr && row.reveal > 0.0f) {
+      const float edge = at.x + extent.x * row.reveal;
+      dl->AddRectFilled(ImVec2(edge - std::max(1.0f, s), at.y),
+                        ImVec2(edge, at.y + extent.y),
+                        colourOf(theme->bone, 1.0f - row.reveal * 0.5f));
+    }
+  } else {
+    dl->AddText(font, size, at, colourOf(row.colour, a), row.text.c_str(), nullptr,
+                wrapWidth);
+  }
+  if (row.after) row.after(dl, at, ImVec2(textW, extent.y), contentLeft);
+}
 
 // Right/bottom pivots must use this frame's measured content, including a window's
 // first appearance. Auto-fit otherwise anchors against the previous frame's size.
@@ -125,6 +182,7 @@ HudRect drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anc
   for (const auto& row : rows) {
     if (row.font != nullptr) ImGui::PushFont(row.font);
     ImVec2 size = ImGui::CalcTextSize(row.text.c_str(), nullptr, false, wrapWidth);
+    size.x += row.trailing;
     size.y = std::max(size.y, ImGui::GetTextLineHeight());
     if (row.font != nullptr) ImGui::PopFont();
     extents.push_back(size);
@@ -211,6 +269,8 @@ HudRect drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anc
     ImGui::PopStyleVar();
     left = ImGui::GetCursorPosX();
   }
+  const bool scrolled =
+      scroll && rowsHeight > std::max(1.0f, height - headerSize.y - spacing) + 0.5f;
   for (std::size_t i = 0; i < rows.size(); ++i) {
     const auto& row = rows[i];
     if (row.font != nullptr) ImGui::PushFont(row.font);
@@ -221,9 +281,17 @@ HudRect drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anc
       const float r = 4.0f * s;
       const ImVec2 centre(c.x - 8.0f * s, c.y + extents[i].y * 0.5f);
       ImDrawList* dl = ImGui::GetWindowDrawList();
-      dl->AddCircleFilled(centre, r * 1.8f, u32(*panel->led, 0.18f), 16);
-      dl->AddCircleFilled(centre, r, u32(*panel->led), 16);
+      const float lv = panel->ledLevel;
+      dl->AddCircleFilled(centre, r * 1.8f, u32(*panel->led, 0.18f * lv), 16);
+      dl->AddCircleFilled(centre, r, u32(*panel->led, lv), 16);
       dl->AddCircle(centre, r, u32(panel->theme->boneFaint, 0.8f), 16, std::max(1.0f, s));
+    }
+    if (row.animated() && !row.clicked) {
+      drawAnimatedRow(row, extents[i], spacing, wrapWidth, scrolled,
+                      panel ? panel->theme : nullptr, s, panel && panel->leftAlign,
+                      ImGui::GetWindowPos().x + left);
+      if (row.font != nullptr) ImGui::PopFont();
+      continue;
     }
     ImGui::PushStyleColor(ImGuiCol_Text, col(row.colour));
     if (scroll) ImGui::PushTextWrapPos(left + wrapWidth);
@@ -2056,10 +2124,20 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
 
   // ------------------------------------------------------------ status, top right
   const GameResult result = game.result();
+  const float fxIntensity = shell.settings().presentationIntensity;
+  const bool whiteMoves = game.position().sideToMove() == Color::White;
   std::vector<HudTextRow> status;
+  view::TurnFlip flip{1.0f, 1.0f};
   if (result == GameResult::InProgress) {
-    const bool white = game.position().sideToMove() == Color::White;
-    status.push_back({white ? "WHITE TO MOVE" : "BLACK TO MOVE", display, t.ember});
+    HudTextRow turn{whiteMoves ? "WHITE TO MOVE" : "BLACK TO MOVE", display, t.ember};
+    // The turn flip: the other side's text fades out as this one fades in.
+    if (hudEvents_.turn) {
+      flip = view::turnFlip(*hudEvents_.turn, fxIntensity);
+      turn.from = whiteMoves ? "BLACK TO MOVE" : "WHITE TO MOVE";
+      turn.fromColour = t.ember;
+      turn.mix = flip.mix;
+    }
+    status.push_back(std::move(turn));
   } else {
     status.push_back({upper(std::string(toString(result))), display, t.blood});
   }
@@ -2071,13 +2149,46 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     status.push_back(
         {"by " + std::string(toString(game.endReason())), small, t.boneFaint});
   } else if (game.inCheck()) {
-    status.push_back({"IN CHECK", small, t.blood});
+    // The brightness spike is timed to the ripple's start.
+    const float spike =
+        hudEvents_.check ? view::checkSpike(*hudEvents_.check, fxIntensity) : 0.0f;
+    view::Rgba c = t.blood;
+    c.r += (t.bone.r - c.r) * spike;
+    c.g += (t.bone.g - c.g) * spike;
+    c.b += (t.bone.b - c.b) * spike;
+    status.push_back({"CHECK", small, c});
   }
   const auto reviewing = session.reviewPly();
   if (reviewing) {
     status.push_back(
         {"REVIEW " + std::to_string(*reviewing) + " / " + std::to_string(game.plyCount()),
          small, t.ember});
+  }
+  // The computer's thinking indicator lives in the free left of the "ply" row, so the
+  // panel (and the ledger anchored below it) never changes height when a search starts.
+  if (hudEvents_.think && result == GameResult::InProgress && !reviewing) {
+    auto* thinkFont = static_cast<ImFont*>(fontLabel_);
+    const float age = *hudEvents_.think;
+    const view::Rgba ember = t.ember;
+    const float dotR = px(2.5f), dotStep = px(8.0f), dotGap = px(6.0f);
+    status[1].after = [=](ImDrawList* dl, ImVec2 at, ImVec2 size, float leftX) {
+      const float styleAlpha = ImGui::GetStyle().Alpha;
+      const float label = thinkFont->CalcTextSizeA(thinkFont->FontSize, FLT_MAX, 0, "THINKING").x;
+      const float dots = 3 * dotStep;
+      const bool room = leftX + label + dotGap + dots + dotGap < at.x;
+      float x = leftX;
+      if (room) {
+        dl->AddText(thinkFont, thinkFont->FontSize, ImVec2(x, at.y + (size.y - thinkFont->FontSize) * 0.5f),
+                    u32(ember, styleAlpha), "THINKING");
+        x += label + dotGap;
+      }
+      for (int d = 0; d < 3; ++d) {
+        const float level = view::thinkingDot(age, d, fxIntensity);
+        const ImVec2 c(x + dotStep * (static_cast<float>(d) + 0.5f), at.y + size.y * 0.5f);
+        dl->AddCircleFilled(c, dotR * 1.8f, u32(ember, 0.18f * level * styleAlpha), 12);
+        dl->AddCircleFilled(c, dotR, u32(ember, level * styleAlpha), 12);
+      }
+    };
   }
   if (session.resultCollapsed() && result != GameResult::InProgress)
     status.push_back({"RESULT", small, t.ember, [&] { (void)session.showResult(); }});
@@ -2087,8 +2198,26 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   statusPanel.scale = px(1.0f);
   statusPanel.draw = hudDraw_;
   statusPanel.content = hudContent_;
-  const view::Rgba turnLed =
-      game.position().sideToMove() == Color::White ? t.whitePiece : t.blackPiece;
+  const auto sideLed = [&](bool w) { return w ? t.whitePiece : t.blackPiece; };
+  view::Rgba turnLed = sideLed(whiteMoves);
+  if (hudEvents_.turn) {
+    const view::Rgba from = sideLed(!whiteMoves);
+    turnLed.r = from.r + (turnLed.r - from.r) * flip.mix;
+    turnLed.g = from.g + (turnLed.g - from.g) * flip.mix;
+    turnLed.b = from.b + (turnLed.b - from.b) * flip.mix;
+  }
+  statusPanel.ledLevel = flip.led;
+  // Against the computer the panel is wide enough for "THINKING" and its dots beside the
+  // ply line, so it does not change size when a search starts.
+  if (session.engineSide() || hudEvents_.think) {
+    auto* thinkFont = static_cast<ImFont*>(fontLabel_);
+    ImGui::PushFont(small);
+    const float plyW = ImGui::CalcTextSize(statusLine).x;
+    ImGui::PopFont();
+    const float labelW =
+        thinkFont->CalcTextSizeA(thinkFont->FontSize, FLT_MAX, 0, "THINKING").x;
+    statusPanel.size.x = plyW + labelW + px(8.0f) * 3 + px(6.0f) * 3 + px(20.0f);
+  }
   if (result == GameResult::InProgress) statusPanel.led = &turnLed;
   const HudRect statusRect = drawHudText(
       "##status", status,
@@ -2497,6 +2626,14 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       view::Rgba c = last ? t.ember : t.boneDim;
       c.a *= last ? 1.0f : 1.0f - 0.7f * age;
       HudTextRow entry{row, readout, c};
+      // The newest row reveals left to right while the older ones ease up to meet it.
+      if (hudEvents_.move && !session.reviewPly()) {
+        const view::LedgerRowFx fx = view::ledgerRowFx(*hudEvents_.move, fxIntensity);
+        if (i + 1 == moves.size())
+          entry.reveal = fx.reveal;
+        else
+          entry.shift = fx.shift;
+      }
       // While reviewing, a row is a jump to the position after it.
       if (session.reviewPly()) {
         entry.clicked = [&session, i] {

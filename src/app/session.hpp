@@ -125,6 +125,17 @@ class Session {
   [[nodiscard]] const std::optional<view::EndFx>& endEvent() const noexcept {
     return endEvent_;
   }
+  /// Live HUD feedback (M23.11 section 4). `turnSerial` is bumped when the side to move
+  /// changes (a move or an undo, never a load), `moveSerial` by every new move (never
+  /// undo). The computer "thinking" is its running search, or a console preview.
+  [[nodiscard]] std::uint64_t turnSerial() const noexcept { return turnSerial_; }
+  [[nodiscard]] std::uint64_t moveSerial() const noexcept { return moveSerial_; }
+  void requestTurnFlip() noexcept { ++turnSerial_; }
+  void requestMoveFx() noexcept { ++moveSerial_; }
+  [[nodiscard]] bool thinkingShown() const noexcept {
+    return engineThinking() || thinkingPreview_;
+  }
+  void setThinkingPreview(bool on) noexcept { thinkingPreview_ = on; }
   /// Console `endfx`: preview an end (or clear it) without changing the game.
   void requestEndFx(std::optional<view::EndFx> fx) noexcept {
     endEvent_ = fx;
@@ -461,6 +472,10 @@ class Session {
   bool endDecided_{false};
   bool endEventDirty_{false};
   std::uint64_t checkSerial_{0};
+  std::uint64_t turnSerial_{0};
+  std::uint64_t moveSerial_{0};
+  Color lastSide_{Color::White};
+  bool thinkingPreview_{false};
   std::optional<CellId> checkEvent_;
   std::uint64_t endSerial_{0};
   std::uint64_t powerUpSerial_{0};

@@ -246,6 +246,19 @@ std::string execute(Shell& shell, const std::string& line) {
     session->requestRipple(from);
     return "rippling from " + cellText(v, from);
   }
+  if (cmd == "hudfx") {
+    // Preview the live HUD feedback (M23.11 section 4); the game is not touched.
+    const std::string what = w.size() > 1 ? w[1] : "all";
+    if (what == "think" || what == "thinking") {
+      session->setThinkingPreview(!session->thinkingShown());
+      return session->thinkingShown() ? "thinking shown" : "thinking hidden";
+    }
+    if (what != "turn" && what != "move" && what != "all")
+      return "usage: hudfx [turn|move|think|all]";
+    if (what != "move") session->requestTurnFlip();
+    if (what != "turn") session->requestMoveFx();
+    return "hud feedback: " + what;
+  }
   if (cmd == "endfx") {
     // Preview the game-end power-down (or clear it) without changing the game.
     if (w.size() < 2) return "usage: endfx win|draw|off [white|black]";
@@ -404,6 +417,8 @@ std::string DebugConsole::help() {
          "result                     show the decided game result now\n"
          "review [<ply>|off]       browse the game's history (no ply: the end); off "
          "leaves\n"
+         "hudfx [turn|move|think|all]  preview the HUD turn flip, new ledger row, or "
+         "toggle the thinking indicator\n"
          "endfx win|draw|off [<side>]  preview the game-end power-down; off clears it\n"
          "info                     variant summary: pieces, moves, marks, compounds\n"
          "fen | setfen <fen>       show or replace the position\n"

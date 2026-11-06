@@ -30,6 +30,14 @@ class FxTimeline {
   /// A newly captured tray icon scans on for 0.35 s; absent for settled captures.
   [[nodiscard]] std::optional<float> captureAge(double now) const;
 
+  /// Live HUD feedback (M23.11 section 4). Seconds since the side to move changed (the
+  /// turn flip), since a new move was made (the ledger row), and since the computer
+  /// started thinking (no end: it lasts while it thinks). Nullopt when not running; the
+  /// check text is timed by `ripple`.
+  [[nodiscard]] std::optional<float> turnAge(double now) const;
+  [[nodiscard]] std::optional<float> moveAge(double now) const;
+  [[nodiscard]] std::optional<float> thinkingAge(double now) const;
+
   /// The check ripple (M23.10 section 4): seconds since the check, and where it started.
   /// Nullopt before it and once it has died out.
   struct Ripple {
@@ -55,6 +63,11 @@ class FxTimeline {
   std::optional<double> bootStart_;
   std::uint64_t captureSeen_{0};
   std::optional<double> captureStart_;
+  std::uint64_t turnSeen_{0};
+  std::uint64_t moveSeen_{0};
+  std::optional<double> turnStart_;
+  std::optional<double> moveStart_;
+  std::optional<double> thinkingStart_;
   std::uint64_t checkSeen_{0};
   std::uint64_t endSeen_{0};
   std::uint64_t powerUpSeen_{0};

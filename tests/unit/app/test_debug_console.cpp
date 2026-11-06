@@ -172,6 +172,30 @@ TEST_CASE("the console previews the check ripple and the end effect without movi
   CHECK(s.game().plyCount() == 0);
 }
 
+TEST_CASE("the console previews the live HUD feedback without moving",
+          "[unit][app][fx][hud-fx]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  CHECK(has(DebugConsole::help(), "hudfx"));
+  CHECK(console.run(*shell, "load standard") == "started standard");
+  Session& s = *shell->session();
+  const auto turns = s.turnSerial();
+  const auto moves = s.moveSerial();
+  CHECK(has(console.run(*shell, "hudfx turn"), "turn"));
+  CHECK(s.turnSerial() == turns + 1);
+  CHECK(s.moveSerial() == moves);
+  CHECK(has(console.run(*shell, "hudfx move"), "move"));
+  CHECK(s.moveSerial() == moves + 1);
+  CHECK(has(console.run(*shell, "hudfx"), "all"));
+  CHECK(s.turnSerial() == turns + 2);
+  CHECK(has(console.run(*shell, "hudfx think"), "shown"));
+  CHECK(s.thinkingShown());
+  CHECK(has(console.run(*shell, "hudfx think"), "hidden"));
+  CHECK_FALSE(s.thinkingShown());
+  CHECK(has(console.run(*shell, "hudfx sideways"), "usage"));
+  CHECK(s.game().plyCount() == 0);
+}
+
 TEST_CASE("automatic interface sizing is reachable by short and file names",
           "[unit][app][hud-layout]") {
   auto shell = makeShell();

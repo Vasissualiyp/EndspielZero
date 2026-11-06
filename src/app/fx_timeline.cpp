@@ -4,6 +4,7 @@
 #include "app/session.hpp"
 #include "view/board_boot.hpp"
 #include "view/check_ripple.hpp"
+#include "view/hud_fx.hpp"
 
 namespace cb::app {
 
@@ -32,6 +33,10 @@ void FxTimeline::observe(const Session* session, double now, bool eligible,
       powerUpFx_.reset();
       captureSeen_ = session->captureSerial();
       captureStart_.reset();
+      turnSeen_ = session->turnSerial();
+      moveSeen_ = session->moveSerial();
+      turnStart_.reset();
+      moveStart_.reset();
       checkSeen_ = session->checkSerial();
       endSeen_ = session->endSerial();
       powerUpSeen_ = session->powerUpSerial();
@@ -43,6 +48,19 @@ void FxTimeline::observe(const Session* session, double now, bool eligible,
     captureSeen_ = session->captureSerial();
     captureStart_ =
         !swallow && session->capturePly() ? std::optional<double>(now) : std::nullopt;
+  }
+  if (session->turnSerial() != turnSeen_) {
+    turnSeen_ = session->turnSerial();
+    turnStart_ = swallow ? std::nullopt : std::optional<double>(now);
+  }
+  if (session->moveSerial() != moveSeen_) {
+    moveSeen_ = session->moveSerial();
+    moveStart_ = swallow ? std::nullopt : std::optional<double>(now);
+  }
+  if (swallow || !session->thinkingShown()) {
+    thinkingStart_.reset();
+  } else if (!thinkingStart_) {
+    thinkingStart_ = now;
   }
   if (session->checkSerial() != checkSeen_) {
     checkSeen_ = session->checkSerial();
@@ -81,6 +99,25 @@ std::optional<float> FxTimeline::captureAge(double now) const {
   return static_cast<float>(now - *captureStart_);
 }
 
+std::optional<float> FxTimeline::turnAge(double now) const {
+  if (!turnStart_ || now < *turnStart_ ||
+      now - *turnStart_ >= static_cast<double>(view::kTurnFlipSeconds))
+    return std::nullopt;
+  return static_cast<float>(now - *turnStart_);
+}
+
+std::optional<float> FxTimeline::moveAge(double now) const {
+  if (!moveStart_ || now < *moveStart_ ||
+      now - *moveStart_ >= static_cast<double>(view::kRowRevealSeconds))
+    return std::nullopt;
+  return static_cast<float>(now - *moveStart_);
+}
+
+std::optional<float> FxTimeline::thinkingAge(double now) const {
+  if (!thinkingStart_ || now < *thinkingStart_) return std::nullopt;
+  return static_cast<float>(now - *thinkingStart_);
+}
+
 std::optional<float> FxTimeline::bootAge(double now) const {
   if (!bootStart_ || now < *bootStart_) return std::nullopt;
   const double age = now - *bootStart_;
@@ -108,7 +145,8 @@ std::optional<FxTimeline::End> FxTimeline::powerUp(double now) const {
 }
 
 bool FxTimeline::animating(double now) const {
-  return captureAge(now) || booting(now) || ripple(now) || end(now) || powerUp(now);
+  return captureAge(now) || booting(now) || ripple(now) || end(now) || powerUp(now) ||
+         turnAge(now) || moveAge(now) || thinkingAge(now);
 }
 
 }  // namespace cb::app

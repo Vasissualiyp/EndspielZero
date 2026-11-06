@@ -194,6 +194,12 @@ class Ui {
   /// dims the panels (the end power-down). All 1 is the settled HUD; status stays lit.
   void setResultAge(std::optional<float> age) noexcept { resultAge_ = age; }
   void setCaptureAge(std::optional<float> age) noexcept { captureAge_ = age; }
+  /// Ages of the live HUD feedback (M23.11 section 4); empty is the settled HUD. `check`
+  /// is the check ripple's age, which times the status panel's CHECK spike.
+  struct HudEvents {
+    std::optional<float> turn, move, think, check;
+  };
+  void setHudEvents(const HudEvents& events) noexcept { hudEvents_ = events; }
   void setHudFx(float draw, float content, float level) noexcept {
     hudDraw_ = draw;
     hudContent_ = content;
@@ -223,6 +229,7 @@ class Ui {
   Ui() = default;
   bool forceDevOverlay_{false};
   std::optional<float> captureAge_;
+  HudEvents hudEvents_;
   std::optional<float> resultAge_;
   float hudDraw_{1.0f}, hudContent_{1.0f}, hudLevel_{1.0f};
   /// The captured trays are replayed from the history only when it changes (section 7).

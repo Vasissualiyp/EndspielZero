@@ -681,6 +681,10 @@ void Session::trackEvents() {
   const bool moved = eventsPrimed_ && ply > lastPly_;
   const bool changed = !eventsPrimed_ || ply != lastPly_ || endEventDirty_;
   lastPly_ = ply;
+  const Color side = game_->position().sideToMove();
+  if (eventsPrimed_ && side != lastSide_) ++turnSerial_;
+  lastSide_ = side;
+  if (moved) ++moveSerial_;
   if (capturePly_ && ply < *capturePly_) capturePly_.reset();
   if (moved && !game_->moveHistory().empty() && game_->moveHistory().back().isCapture()) {
     ++captureSerial_;

@@ -29,6 +29,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
 | `ripple [<cell>]` | Play the check ripple (M23.10 section 4) from `<cell>` (default: the royal of the side to move) without touching the game. It wraps through glued seams. Calm intensity and non-LED themes have none |
+| `hudfx [turn\|move\|think\|all]` | Preview the live HUD feedback (M23.11 section 4) without touching the game: `turn` replays the status panel's turn flip, `move` the new ledger row, `all` (default) both; `think` toggles the engine-thinking indicator on and off. The check text is timed by `ripple`. At calm intensity (below one half) these change instantly |
 | `endfx win\|draw\|off [white\|black]` | Preview the game-end power-down (section 5): `win` is a decisive end with `<side>` (default white) as the loser, `draw` a draw, `off` clears it. Ages count from the decision: nothing moves for the first 3 s, then a slow power-down. The game itself is untouched; a real end plays by itself, and an undo out of one powers the board back up |
 | `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
 | `fen` / `setfen <fen>` | Show or replace the position |
@@ -105,6 +106,10 @@ groups:
     `--script` gave (or from the side to move's royal when it never gave one); `--end-t <s>`
     renders the game-end power-down at age `s` counted from the decision (the board is untouched
     for the first 3 s; the hold is reached by about 9). Example: `--theme manifold --script "..." --end-t 0.7`.
+  - `--event-t <s>` renders the HUD turn flip (0 to 0.25) and the newest ledger row's reveal (0 to
+    0.2) at age `s`; `--think-t <s>` shows the engine-thinking indicator at age `s` (the capture has
+    no search to wait for); `--check-t` also times the status panel's CHECK spike (0 to 0.3).
+    Example: `--script $'click e2\nclick e4' --event-t 0.1`.
   - `--theme <name>` picks the palette.
   - `--matte` turns materials off.
   - `--ui-auto` enables framebuffer-height scaling for captures (off by default for

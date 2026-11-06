@@ -6,6 +6,7 @@
 #include "app/fx_timeline.hpp"
 #include "app/session.hpp"
 #include "support/variants.hpp"
+#include "view/hud_fx.hpp"
 #include "view/check_ripple.hpp"
 #include "view/game_end_fx.hpp"
 
@@ -251,4 +252,77 @@ TEST_CASE("framing keeps bounds inside the centred HUD clearance", "[app][hud-la
   s->easeFrameOn(b, 1.4f, 1);
   CHECK(s->camera().distance == safe);
   CHECK_FALSE(s->setFramingArea(.5f, .45f));
+}
+
+TEST_CASE("moves count turn and new-move events; loads, captures of nothing and undo behave",
+          "[app][fx][hud-fx]") {
+  auto s = open();
+  CHECK(s->turnSerial() == 0);
+  CHECK(s->moveSerial() == 0);
+  play(*s, "e2e4");
+  CHECK(s->turnSerial() == 1);
+  CHECK(s->moveSerial() == 1);
+  play(*s, "e7e5");
+  CHECK(s->turnSerial() == 2);
+  CHECK(s->moveSerial() == 2);
+  // Undo flips the turn back but is not a new move.
+  act(*s, ActionKind::Undo);
+  CHECK(s->turnSerial() == 3);
+  CHECK(s->moveSerial() == 2);
+  // Selecting changes neither.
+  Action sel;
+  sel.kind = ActionKind::ClickCell;
+  sel.cell = cellOf(*s, 4, 6);
+  REQUIRE(s->apply(sel).has_value());
+  CHECK(s->turnSerial() == 3);
+  s->requestTurnFlip();
+  s->requestMoveFx();
+  CHECK(s->turnSerial() == 4);
+  CHECK(s->moveSerial() == 3);
+}
+
+TEST_CASE("the timeline stamps turn, move and thinking events and swallows them",
+          "[app][fx][hud-fx]") {
+  auto s = open();
+  FxTimeline t;
+  t.observe(s.get(), 0.0, true, false);
+  t.skipBoot();
+  CHECK_FALSE(t.turnAge(0.1));
+  CHECK_FALSE(t.moveAge(0.1));
+  play(*s, "e2e4");
+  t.observe(s.get(), 1.0, true, false);
+  REQUIRE(t.turnAge(1.1));
+  CHECK(*t.turnAge(1.1) == 0.1f);
+  CHECK_FALSE(t.turnAge(1.0 + static_cast<double>(view::kTurnFlipSeconds) + .01));
+  REQUIRE(t.moveAge(1.1));
+  CHECK_FALSE(t.moveAge(1.3));
+  CHECK(t.animating(1.1));
+  // Thinking runs for as long as the session shows it, and stops at once.
+  CHECK_FALSE(t.thinkingAge(2.0));
+  s->setThinkingPreview(true);
+  t.observe(s.get(), 2.0, true, false);
+  REQUIRE(t.thinkingAge(2.5));
+  CHECK(*t.thinkingAge(2.5) == 0.5f);
+  CHECK(t.animating(9.0));
+  s->setThinkingPreview(false);
+  t.observe(s.get(), 3.0, true, false);
+  CHECK_FALSE(t.thinkingAge(3.0));
+  // An ineligible frame waits; the trailer swallows.
+  play(*s, "e7e5");
+  t.observe(s.get(), 4.0, false, false);
+  CHECK_FALSE(t.turnAge(4.05));
+  t.observe(s.get(), 5.0, true, false);
+  CHECK(t.turnAge(5.05));
+  auto s2 = open();
+  FxTimeline t2;
+  t2.observe(s2.get(), 0.0, true, true);
+  play(*s2, "e2e4");
+  t2.observe(s2.get(), 1.0, true, true);
+  CHECK_FALSE(t2.turnAge(1.05));
+  CHECK_FALSE(t2.moveAge(1.05));
+  // A reset boots and forgets pending hud events.
+  t.observe(s.get(), 6.0, true, false);
+  act(*s, ActionKind::Reset);
+  t.observe(s.get(), 6.05, true, false);
+  CHECK_FALSE(t.turnAge(6.06));
 }

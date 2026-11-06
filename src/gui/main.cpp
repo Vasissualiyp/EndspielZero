@@ -67,6 +67,10 @@ float gBootT = -1.0f;
 /// age for the session's current check / ended game. Negative means no override.
 float gCheckT = -1.0f;
 float gEndT = -1.0f;
+/// --event-t / --think-t <s>: the HUD turn flip and newest ledger row, and the engine
+/// thinking dots, at that age (M23.11 section 4). Negative means settled.
+float gEventT = -1.0f;
+float gThinkT = -1.0f;
 bool gResult = false;
 /// `--review <ply>`: the capture browses to that ply of the scripted game (empty: off).
 std::string gReview;
@@ -912,6 +916,10 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                               : std::nullopt);
     if (gResult && gEndT < 0) (void)shell->session()->showResult();
     (*ui)->setCaptureAge(gCaptureT >= 0 ? std::optional<float>(gCaptureT) : std::nullopt);
+    {
+      const auto age = [](float t) { return t >= 0 ? std::optional<float>(t) : std::nullopt; };
+      (*ui)->setHudEvents({age(gEventT), age(gEventT), age(gThinkT), age(gCheckT)});
+    }
     (*ui)->tick(dt);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
@@ -1451,6 +1459,8 @@ int main(int argc, char** argv) {
           "scaling.\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
+          "--event-t SECONDS pins the HUD turn flip and newest ledger row; --think-t "
+          "SECONDS shows the engine thinking dots.\n"
           "--ui-click \"x,y;x,y,button;drag:x1,y1,x2,y2,button\" replays pointer clicks "
           "and\n"
           "drags (pixels; button 0 left, 1 right, 2 middle) before the capture.\n"
@@ -1526,10 +1536,15 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--boot-t requires seconds >= 0\n");
         return 1;
       }
-    } else if ((arg == "--check-t" || arg == "--end-t" || arg == "--capture-t") &&
+    } else if ((arg == "--check-t" || arg == "--end-t" || arg == "--capture-t" ||
+                arg == "--event-t" || arg == "--think-t") &&
                i + 1 < argc) {
       char* end = nullptr;
-      float& target = arg == "--check-t" ? gCheckT : arg == "--end-t" ? gEndT : gCaptureT;
+      float& target = arg == "--check-t"     ? gCheckT
+                      : arg == "--end-t"     ? gEndT
+                      : arg == "--event-t"   ? gEventT
+                      : arg == "--think-t"   ? gThinkT
+                                             : gCaptureT;
       target = std::strtof(argv[++i], &end);
       if (*end != '\0' || !std::isfinite(target) || target < 0.0f) {
         std::fprintf(stderr, "%s requires seconds >= 0\n", arg.c_str());
@@ -2255,6 +2270,13 @@ int main(int argc, char** argv) {
     const auto resultEnd = fxTimeline.end(visualSeconds);
     (*ui)->setResultAge(resultEnd ? std::optional<float>(resultEnd->age) : std::nullopt);
     (*ui)->setCaptureAge(fxTimeline.captureAge(visualSeconds));
+    {
+      const auto ripple = fxTimeline.ripple(visualSeconds);
+      (*ui)->setHudEvents({fxTimeline.turnAge(visualSeconds),
+                           fxTimeline.moveAge(visualSeconds),
+                           fxTimeline.thinkingAge(visualSeconds),
+                           ripple ? std::optional<float>(ripple->age) : std::nullopt});
+    }
     (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);
     (*ui)->newFrame();
