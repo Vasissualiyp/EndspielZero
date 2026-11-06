@@ -192,6 +192,7 @@ class Ui {
   /// The HUD panels' share of the board's presentation (M23.10 section 7): `draw` traces
   /// the panel edges on (boot, 0..1), `content` fades what is inside them in, `level`
   /// dims the panels (the end power-down). All 1 is the settled HUD; status stays lit.
+  void setResultAge(std::optional<float> age) noexcept { resultAge_ = age; }
   void setCaptureAge(std::optional<float> age) noexcept { captureAge_ = age; }
   void setHudFx(float draw, float content, float level) noexcept {
     hudDraw_ = draw;
@@ -222,6 +223,7 @@ class Ui {
   Ui() = default;
   bool forceDevOverlay_{false};
   std::optional<float> captureAge_;
+  std::optional<float> resultAge_;
   float hudDraw_{1.0f}, hudContent_{1.0f}, hudLevel_{1.0f};
   /// The captured trays are replayed from the history only when it changes (section 7).
   struct CapturedCache {

@@ -479,3 +479,51 @@ TEST_CASE("the computer's level sets how hard it looks, from the next move on",
   s->setEngineLevel(-3);
   CHECK(s->engineOptions().level == ai::kMinLevel);
 }
+
+TEST_CASE("a finished result can reopen collapse undo and rematch",
+          "[unit][app][result]") {
+  auto s = open("standard");
+  CHECK_FALSE(s->showResult());
+  REQUIRE(s->applyScript("click f2\nclick f3\nclick e7\nclick e5\nclick g2\nclick "
+                         "g4\nclick d8\nclick h4")
+              .has_value());
+  REQUIRE(s->showResult());
+  CHECK(s->resultText().title == "CHECKMATE");
+  CHECK(s->resultText().subtitle == "BLACK WINS");
+  CHECK(s->resultText().detail == "in 2 moves");
+  s->collapseResult();
+  CHECK(s->resultCollapsed());
+  REQUIRE(s->showResult());
+  CHECK_FALSE(s->resultCollapsed());
+  REQUIRE(s->applyScript("undo").has_value());
+  CHECK_FALSE(s->resultRequested());
+  CHECK_FALSE(s->resultCollapsed());
+  CHECK_FALSE(s->endEvent());
+  REQUIRE(s->applyScript("click d8\nclick h4").has_value());
+  REQUIRE(s->showResult());
+  const auto boot = s->bootSerial();
+  REQUIRE(s->applyScript("reset").has_value());
+  CHECK(s->bootSerial() == boot + 1);
+  CHECK(s->game().plyCount() == 0);
+  CHECK_FALSE(s->resultRequested());
+}
+TEST_CASE("result labels cover every reason without assuming a royal",
+          "[unit][app][result]") {
+  const EndReason reasons[] = {
+      EndReason::None,         EndReason::Checkmate,   EndReason::Stalemate,
+      EndReason::DrawClock,    EndReason::Repetition,  EndReason::NoLegalMoves,
+      EndReason::RuleDeclared, EndReason::Resignation, EndReason::Agreement};
+  const char* titles[] = {"",     "CHECKMATE",   "STALEMATE",
+                          "DRAW", "DRAW",        "NO LEGAL MOVES",
+                          "RULE", "RESIGNATION", "DRAW"};
+  for (std::size_t i = 0; i < std::size(reasons); ++i) {
+    const auto text = resultText(reasons[i], GameResult::WhiteWins, 45);
+    CHECK(text.title == titles[i]);
+    CHECK(text.subtitle == "WHITE WINS");
+    CHECK(text.detail.find("in 23 moves") == 0);
+  }
+  CHECK(resultText(EndReason::Repetition, GameResult::Draw, 12).subtitle == "DRAWN");
+  CHECK(
+      resultText(EndReason::Repetition, GameResult::Draw, 12).detail.find("repetition") !=
+      std::string::npos);
+}

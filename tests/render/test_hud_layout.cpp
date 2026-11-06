@@ -100,3 +100,35 @@ TEST_CASE("the dock fits its button groups without an empty middle",
   CHECK(l.buttons.back().x + l.buttons.back().width == l.width);
 }
 #endif
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("result placement stays in the stage and avoids the king", "[render][result]") {
+  const HudRect stage{300, 100, 1100, 700};
+  for (const auto king : {HudPoint{850, 450}, HudPoint{600, 250}, HudPoint{1100, 650}}) {
+    const auto p = resultPanelPos(stage, king, {420, 200});
+    CHECK(p.x >= stage.x);
+    CHECK(p.y >= stage.y);
+    CHECK(p.x + 420 <= stage.x + stage.width);
+    CHECK(p.y + 200 <= stage.y + stage.height);
+    CHECK_FALSE((king.x >= p.x - 24 && king.x <= p.x + 444 && king.y >= p.y - 24 &&
+                 king.y <= p.y + 224));
+  }
+  const auto p = resultPanelPos(stage, std::nullopt, {420, 200});
+  CHECK(p.x == Approx(640));
+  CHECK(p.y == Approx(350));
+}
+TEST_CASE("result panel traces after the end hold and calm only fades",
+          "[render][result]") {
+  const float hold = view::kEndDelaySeconds + 7 / view::kPowerDownCellsPerSecond +
+                     view::kPowerDownFallSeconds;
+  CHECK(resultPanelFx(hold - .01f, view::EndKind::Decisive, 7, 1).draw == 0);
+  CHECK(resultPanelFx(hold + .2f, view::EndKind::Decisive, 7, 1).draw == Approx(.5f));
+  CHECK(resultPanelFx(hold + .2f, view::EndKind::Decisive, 7, 1).content == 0);
+  CHECK(resultPanelFx(hold + .8f, view::EndKind::Decisive, 7, 1).content == 1);
+  const auto calm = resultPanelFx(view::kEndDelaySeconds + view::kCalmFadeSeconds + .2f,
+                                  view::EndKind::Decisive, 7, 0);
+  CHECK(calm.draw == 1);
+  CHECK(calm.content == Approx(.5f));
+  CHECK(calm.level == Approx(.5f));
+}
+#endif

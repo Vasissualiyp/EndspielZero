@@ -67,6 +67,7 @@ float gBootT = -1.0f;
 /// age for the session's current check / ended game. Negative means no override.
 float gCheckT = -1.0f;
 float gEndT = -1.0f;
+bool gResult = false;
 
 float resolveUiScale(const app::Settings& settings, int height, bool capture) {
   return render::effectiveUiScale(settings.guiScale, settings.guiScaleAuto, height,
@@ -896,6 +897,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     }
     // A fixed step rather than a real clock: the shell animates, and a capture has to be
     // the same picture every time it is taken.
+    (*ui)->setResultAge(gResult && gEndT >= 0 ? std::optional<float>(gEndT)
+                                              : std::nullopt);
+    if (gResult && gEndT < 0) (void)shell->session()->showResult();
     (*ui)->setCaptureAge(gCaptureT >= 0 ? std::optional<float>(gCaptureT) : std::nullopt);
     (*ui)->tick(dt);
     (*ui)->newFrame();
@@ -1441,6 +1445,7 @@ int main(int argc, char** argv) {
           "drags (pixels; button 0 left, 1 right, 2 middle) before the capture.\n"
           "--variants-dir DIR reads and saves the player's own variants there.\n"
           "--piece NAME opens the designer captures on that piece.\n"
+          "--result shows a decided result panel; --end-t pins its event age.\n"
           "--dims 2..4 is how many dimensions the designer's move preview shows.\n");
       return 0;
     }
@@ -1448,6 +1453,8 @@ int main(int argc, char** argv) {
       shotPath = argv[++i];
     else if (arg == "--clip" && i + 1 < argc)
       clipDir = argv[++i];
+    else if (arg == "--result")
+      gResult = true;
     else if (arg == "--script" && i + 1 < argc)
       script = argv[++i];
     else if (arg == "--screen" && i + 1 < argc)
@@ -2214,6 +2221,8 @@ int main(int argc, char** argv) {
           if (const auto over = fxTimeline.end(visualSeconds)) return over->age;
           return std::nullopt;
         }());
+    const auto resultEnd = fxTimeline.end(visualSeconds);
+    (*ui)->setResultAge(resultEnd ? std::optional<float>(resultEnd->age) : std::nullopt);
     (*ui)->setCaptureAge(fxTimeline.captureAge(visualSeconds));
     (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);

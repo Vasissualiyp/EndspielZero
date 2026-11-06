@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -87,6 +88,7 @@ struct HudTextRow {
   std::string text;
   ImFont* font;
   view::Rgba colour;
+  std::function<void()> clicked{};
 };
 
 /// How a block of HUD text is framed (M23.10 section 7): an instrument panel behind it.
@@ -207,7 +209,13 @@ HudRect drawHudText(const char* id, std::span<const HudTextRow> rows, ImVec2 anc
     }
     ImGui::PushStyleColor(ImGuiCol_Text, col(row.colour));
     if (scroll) ImGui::PushTextWrapPos(left + wrapWidth);
-    ImGui::TextUnformatted(row.text.c_str());
+    if (row.clicked) {
+      ImGui::PushID(static_cast<int>(i));
+      if (ImGui::Selectable(row.text.c_str(), false, 0, extents[i])) row.clicked();
+      ImGui::PopID();
+    } else {
+      ImGui::TextUnformatted(row.text.c_str());
+    }
     if (scroll) ImGui::PopTextWrapPos();
     ImGui::PopStyleColor();
     if (row.font != nullptr) ImGui::PopFont();
@@ -2047,6 +2055,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   } else if (game.inCheck()) {
     status.push_back({"IN CHECK", small, t.blood});
   }
+  if (session.resultCollapsed() && result != GameResult::InProgress)
+    status.push_back({"RESULT", small, t.ember, [&] { (void)session.showResult(); }});
   // The status panel is exempt from the end power-down: it shows the result lit.
   HudPanelSpec statusPanel;
   statusPanel.theme = &t;
@@ -2600,6 +2610,82 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     request.stageRect[1] = stage.y;
     request.stageRect[2] = stage.width;
     request.stageRect[3] = stage.height;
+  }
+
+  // Result shares the end event's age; ordinary captures stay panel-free unless asked.
+  if (game.result() != GameResult::InProgress && !session.resultCollapsed() &&
+      !shell.watching() && !shell.attracting() &&
+      (resultAge_ || session.resultRequested())) {
+    const auto end = session.endEvent().value_or(view::EndFx{});
+    int maxDistance = 0;
+    if (end.origin != kInvalidCell)
+      for (int d : session.distancesFrom(end.origin))
+        maxDistance = std::max(maxDistance, d);
+    const auto fx =
+        resultPanelFx(session.resultRequested() ? 1000 : resultAge_.value_or(1000),
+                      end.kind, maxDistance, shell.settings().presentationIntensity);
+    if (fx.draw > 0) {
+      const auto text = session.resultText();
+      const ImVec2 size(std::min(stage.width, px(350)), px(190));
+      std::optional<HudPoint> king;
+      if (end.mated) {
+        for (const auto& pl : session.placements()) {
+          if (pl.cell != end.origin) continue;
+          const auto at = session.camera().project(
+              {pl.x, pl.y, pl.z}, vp->Size.x / vp->Size.y, vp->Size.x, vp->Size.y);
+          if (at.visible) king = HudPoint{at.x, at.y};
+        }
+      }
+      const auto pos = resultPanelPos(stage, king, {size.x, size.y});
+      ImGui::SetNextWindowPos(ImVec2(pos.x, pos.y));
+      ImGui::SetNextWindowSize(size);
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(16), px(12)));
+      ImGui::Begin("##result", nullptr,
+                   overlayFlags & ~ImGuiWindowFlags_AlwaysAutoResize);
+      auto* dl = ImGui::GetWindowDrawList();
+      const auto wp = ImGui::GetWindowPos();
+      widgets::hudPanel(dl, wp, ImVec2(wp.x + size.x, wp.y + size.y), t, px(1), fx.draw,
+                        fx.level);
+      const int first = dl->VtxBuffer.Size;
+      ImGui::BeginDisabled(fx.content < 1);
+      ImGui::PushFont(display);
+      ImGui::PushStyleColor(ImGuiCol_Text, col(t.ember));
+      ImGui::TextUnformatted(text.title.c_str());
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+      ImGui::SameLine();
+      ImGui::SetCursorPosX(size.x - px(40));
+      if (button("X", t, px(24), false, false, true, actionFont(), true))
+        session.collapseResult();
+      const auto winner = game.result() == GameResult::WhiteWins   ? t.whitePiece
+                          : game.result() == GameResult::BlackWins ? t.blackPiece
+                                                                   : t.bone;
+      // A piece's dark pigment needs light mixed in to read as text on a dark panel.
+      ImGui::PushStyleColor(ImGuiCol_Text, col(widgets::mix(winner, t.bone, .65f)));
+      ImGui::TextUnformatted(text.subtitle.c_str());
+      ImGui::PopStyleColor();
+      ImGui::PushFont(small);
+      ImGui::TextUnformatted(text.detail.c_str());
+      ImGui::PopFont();
+      ImGui::Dummy(ImVec2(0, px(10)));
+      if (button("REMATCH", t, px(132), true, false, true, actionFont())) {
+        app::Action reset;
+        reset.kind = app::ActionKind::Reset;
+        (void)session.apply(reset);
+      }
+      ImGui::SameLine();
+      if (button("MENU", t, px(110), false, false, true, actionFont()))
+        shell.go(app::Screen::MainMenu);
+      ImGui::EndDisabled();
+      for (int i = first; i < dl->VtxBuffer.Size; ++i) {
+        auto& c = dl->VtxBuffer[i].col;
+        const auto alpha = static_cast<ImU32>(
+            static_cast<float>((c >> IM_COL32_A_SHIFT) & 255) * fx.content);
+        c = (c & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
+      }
+      ImGui::End();
+      ImGui::PopStyleVar();
+    }
   }
 
   // --------------------------------------------------------------------- frame rate

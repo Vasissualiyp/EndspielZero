@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
 #include "position/piece.hpp"
+#include "view/game_end_fx.hpp"
 
 namespace cb::render {
 
@@ -18,6 +20,17 @@ namespace cb::render {
 struct HudRect {
   float x{}, y{}, width{}, height{};
 };
+struct HudPoint {
+  float x{}, y{};
+};
+/// Centre where possible; choose the nearest clear position with a king-cell margin.
+[[nodiscard]] HudPoint resultPanelPos(HudRect stage, std::optional<HudPoint> king,
+                                      HudPoint size) noexcept;
+struct ResultPanelFx {
+  float draw{}, content{}, level{1};
+};
+[[nodiscard]] ResultPanelFx resultPanelFx(float age, view::EndKind kind, int maxDistance,
+                                          float intensity) noexcept;
 enum class StageEdge { Left, Right, Top, Bottom };
 struct StagePanel {
   HudRect rect;

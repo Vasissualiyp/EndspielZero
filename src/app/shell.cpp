@@ -272,6 +272,11 @@ void Shell::back() {
       screen_ = Screen::Game;
       break;
     case Screen::Game:
+      if (session_ && session_->game().result() != GameResult::InProgress &&
+          !session_->resultCollapsed() && !watching()) {
+        session_->collapseResult();
+        break;
+      }
       screen_ = Screen::Paused;
       break;
     case Screen::MainMenu:
@@ -898,8 +903,9 @@ bool Shell::advanceAttract(float dt) {
     updateMovePhase(0.0f, step);
     return false;
   }
-  // The first board powers on before its beat begins: the schedule, the watch and the pose
-  // all wait, so the boot costs the trailer exactly `kBootSeconds` and nothing else moves.
+  // The first board powers on before its beat begins: the schedule, the watch and the
+  // pose all wait, so the boot costs the trailer exactly `kBootSeconds` and nothing else
+  // moves.
   if (trailerBootClock_ < view::kBootSeconds) {
     trailerBootClock_ += dt;
     if (trailerBootClock_ >= view::kBootSeconds) (void)session_->releaseWatch();
@@ -912,8 +918,8 @@ bool Shell::advanceAttract(float dt) {
   // With keyframes in charge the spline owns the morph, so the beat's own easing stands
   // down - and must not hold the beat open waiting for a pose the spline will never
   // reach.
-  // The beat's own pose always plays and always converges, so the spline can no longer hold
-  // a beat open; the keyframe spline is blended over it by `applySplineAt` (M21).
+  // The beat's own pose always plays and always converges, so the spline can no longer
+  // hold a beat open; the keyframe spline is blended over it by `applySplineAt` (M21).
   const TrailerPose want{step.formedTarget, trailerGhost_.value_or(step.ghostTarget),
                          step.spreadTarget};
   easeBeatPose(want, dt, formSpeed);
@@ -973,8 +979,8 @@ void Shell::easePose(const TrailerPose& want, float dt, float formSpeed) {
 }
 
 void Shell::easeBeatPose(const TrailerPose& want, float dt, float formSpeed) {
-  beatPose_.formed =
-      view::advanceEasedMorph(beatFormedEase_, beatPose_.formed, want.formed, dt, formSpeed);
+  beatPose_.formed = view::advanceEasedMorph(beatFormedEase_, beatPose_.formed,
+                                             want.formed, dt, formSpeed);
   beatPose_.ghost =
       view::advanceEasedMorph(beatGhostEase_, beatPose_.ghost, want.ghost, dt, formSpeed);
   beatPose_.shellSpread = view::advanceEasedMorph(beatSpreadEase_, beatPose_.shellSpread,
@@ -1040,10 +1046,10 @@ void Shell::recordCameraKeyframe(float speed) {
   kf.formed = fromEdit ? editPose_.formed : settings_.geometryFormed;
   kf.ghost = fromEdit ? editPose_.ghost : settings_.geometryGhost;
   kf.shellSpread = fromEdit ? editPose_.shellSpread : settings_.geometryShellSpread;
-  kf.slideU = view::nearestLap(settings_.geometrySlideU, 0.0f,
-                               slideLap(session_->variant(), 0));
-  kf.slideV = view::nearestLap(settings_.geometrySlideV, 0.0f,
-                               slideLap(session_->variant(), 1));
+  kf.slideU =
+      view::nearestLap(settings_.geometrySlideU, 0.0f, slideLap(session_->variant(), 0));
+  kf.slideV =
+      view::nearestLap(settings_.geometrySlideV, 0.0f, slideLap(session_->variant(), 1));
   kf.flatPieces = settings_.shapePieceCylinders;
   kf.invert = settings_.geometryInvert;
   kf.morphSpeed = speed;
@@ -1123,14 +1129,16 @@ void Shell::advanceCameraTrack(float dt) {
       cameraTrackFromGhost_ + (kf->ghost - cameraTrackFromGhost_) * t;
   settings_.geometryShellSpread =
       cameraTrackFromShellSpread_ + (kf->shellSpread - cameraTrackFromShellSpread_) * t;
-  // The slide's target is the key's equivalent nearest where the blend started, so a key at
-  // 0 reached from 30 cells on an 8-cell ring is a short turn, not almost four laps.
+  // The slide's target is the key's equivalent nearest where the blend started, so a key
+  // at 0 reached from 30 cells on an 8-cell ring is a short turn, not almost four laps.
   const float targetU = view::nearestLap(kf->slideU, cameraTrackFromSlideU_,
                                          slideLap(session_->variant(), 0));
   const float targetV = view::nearestLap(kf->slideV, cameraTrackFromSlideV_,
                                          slideLap(session_->variant(), 1));
-  settings_.geometrySlideU = cameraTrackFromSlideU_ + (targetU - cameraTrackFromSlideU_) * t;
-  settings_.geometrySlideV = cameraTrackFromSlideV_ + (targetV - cameraTrackFromSlideV_) * t;
+  settings_.geometrySlideU =
+      cameraTrackFromSlideU_ + (targetU - cameraTrackFromSlideU_) * t;
+  settings_.geometrySlideV =
+      cameraTrackFromSlideV_ + (targetV - cameraTrackFromSlideV_) * t;
   settings_.shapePieceCylinders = kf->flatPieces;
 }
 
@@ -1184,8 +1192,8 @@ TrailerCue Shell::trailerCueAt(float g, int grid) const {
       ++ply;
     } else {
       // The last move of a beat has no next move to round up into: stay on its last grid
-      // slot rather than wrapping back to its start, which is where a key placed at the very
-      // end of the beat used to land (and so replaced the key already there).
+      // slot rather than wrapping back to its start, which is where a key placed at the
+      // very end of the beat used to land (and so replaced the key already there).
       sub = static_cast<std::size_t>(8.0f - unit);
     }
   }
@@ -1240,12 +1248,14 @@ void Shell::applySplineAt(float g, bool toEditPose) {
   if (keys.empty() || session_ == nullptr) return;
   std::vector<view::CameraWaypoint> path;
   std::vector<std::pair<float, float>> formed, ghost, spread, slideU, slideV;
-  // A slide is periodic, so the keys' slides are unwrapped against each key's own beat's lap
-  // before they are interpolated: two keys a lap apart are the same picture, not a spin.
+  // A slide is periodic, so the keys' slides are unwrapped against each key's own beat's
+  // lap before they are interpolated: two keys a lap apart are the same picture, not a
+  // spin.
   const auto lapOf = [&](const CameraKeyframe* kf, int axis) {
     const std::size_t b = kf->cue.beat;
-    return b >= 1 && b <= beatLaps_.size() ? beatLaps_[b - 1][static_cast<std::size_t>(axis)]
-                                           : 0.0f;
+    return b >= 1 && b <= beatLaps_.size()
+               ? beatLaps_[b - 1][static_cast<std::size_t>(axis)]
+               : 0.0f;
   };
   std::vector<float> rawU, rawV, lapsU, lapsV;
   for (const auto& [time, kf] : keys) {
@@ -1283,12 +1293,14 @@ void Shell::applySplineAt(float g, bool toEditPose) {
         (g - trailerShift_ - start) / std::max(0.25f, firstKey - start), 0.0f, 1.0f);
     slideRamp = t * t * (3.0f - 2.0f * t);  // smoothstep, arriving exactly at the key
   }
-  // A slide only matters modulo one lap round the shape, so only the remainder is eased in:
-  // easing the whole of a slide of several laps would spin the board round and round. The
-  // laps are taken from the beat's first keyframe, once, so the remainder never flips sign
-  // as the spline passes a half-lap.
-  const float lapU = attractIndex_ < beatLaps_.size() ? beatLaps_[attractIndex_][0] : 0.0f;
-  const float lapV = attractIndex_ < beatLaps_.size() ? beatLaps_[attractIndex_][1] : 0.0f;
+  // A slide only matters modulo one lap round the shape, so only the remainder is eased
+  // in: easing the whole of a slide of several laps would spin the board round and round.
+  // The laps are taken from the beat's first keyframe, once, so the remainder never flips
+  // sign as the spline passes a half-lap.
+  const float lapU =
+      attractIndex_ < beatLaps_.size() ? beatLaps_[attractIndex_][0] : 0.0f;
+  const float lapV =
+      attractIndex_ < beatLaps_.size() ? beatLaps_[attractIndex_][1] : 0.0f;
   const float rawSU = view::splineScalar(slideU, g);
   const float rawSV = view::splineScalar(slideV, g);
   float anchorU = rawSU;

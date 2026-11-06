@@ -36,6 +36,49 @@ HudRect stageRect(HudRect vp, std::span<const StagePanel> panels, float gutter) 
   }
   return {left, top, std::max(1.0f, right - left), std::max(1.0f, bottom - top)};
 }
+HudPoint resultPanelPos(HudRect stage, std::optional<HudPoint> king,
+                        HudPoint size) noexcept {
+  const float right = stage.x + std::max(0.0f, stage.width - size.x);
+  const float bottom = stage.y + std::max(0.0f, stage.height - size.y);
+  const HudPoint centre{(stage.x + right) * .5f, (stage.y + bottom) * .5f};
+  if (!king) return centre;
+  const auto clear = [&](HudPoint p) {
+    return king->x < p.x - 24 || king->x > p.x + size.x + 24 || king->y < p.y - 24 ||
+           king->y > p.y + size.y + 24;
+  };
+  if (clear(centre)) return centre;
+  HudPoint best = centre;
+  float distance = 1e30f;
+  const HudPoint candidates[] = {
+      {centre.x, std::clamp(king->y - size.y - 25, stage.y, bottom)},
+      {centre.x, std::clamp(king->y + 25, stage.y, bottom)},
+      {std::clamp(king->x - size.x - 25, stage.x, right), centre.y},
+      {std::clamp(king->x + 25, stage.x, right), centre.y}};
+  for (const auto p : candidates) {
+    const float d = std::hypot(p.x - centre.x, p.y - centre.y);
+    if (clear(p) && d < distance) {
+      best = p;
+      distance = d;
+    }
+  }
+  return best;
+}
+ResultPanelFx resultPanelFx(float age, view::EndKind kind, int maxDistance,
+                            float intensity) noexcept {
+  const bool calm = intensity < .5f;
+  const float duration = calm ? view::kCalmFadeSeconds
+                         : kind == view::EndKind::Draw
+                             ? view::kDrawDimSeconds
+                             : static_cast<float>(std::max(maxDistance, 0)) /
+                                       view::kPowerDownCellsPerSecond +
+                                   view::kPowerDownFallSeconds;
+  const float t = age - view::kEndDelaySeconds - duration;
+  if (t < 0) return {};
+  const float content = std::clamp((t - (calm ? 0 : .4f)) / .4f, 0.0f, 1.0f);
+  return {calm ? 1 : std::clamp(t / .4f, 0.0f, 1.0f),
+          content * content * (3 - 2 * content),
+          calm ? content * content * (3 - 2 * content) : 1};
+}
 DockLayout dockLayout(std::span<const float> widths, std::size_t viewStart,
                       float available, float height, float gap, float groupGap) {
   DockLayout l;

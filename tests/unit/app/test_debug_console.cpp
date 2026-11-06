@@ -185,3 +185,14 @@ TEST_CASE("automatic interface sizing is reachable by short and file names",
   CHECK(shell->settings().guiScale == 1.25f);
   CHECK(has(DebugConsole::help(), "guiScaleAuto"));
 }
+
+TEST_CASE("result console opens only an adjudicated game", "[unit][app][result]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK(c.run(*shell, "result") == "the game is not decided");
+  REQUIRE(shell->session()->applyScript("resign").has_value());
+  CHECK(c.run(*shell, "result") == "result panel opened");
+  CHECK(shell->session()->resultRequested());
+  CHECK(has(DebugConsole::help(), "result"));
+}

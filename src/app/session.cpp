@@ -35,6 +35,51 @@ const view::Vec3 kPickHalfExtent{0.505f, 0.505f, 0.06f};
 
 }  // namespace
 
+ResultText resultText(EndReason reason, GameResult result, std::size_t plies) {
+  ResultText text;
+  switch (reason) {
+    case EndReason::None:
+      break;
+    case EndReason::Checkmate:
+      text.title = "CHECKMATE";
+      break;
+    case EndReason::Stalemate:
+      text.title = "STALEMATE";
+      break;
+    case EndReason::DrawClock:
+    case EndReason::Repetition:
+    case EndReason::Agreement:
+      text.title = "DRAW";
+      break;
+    case EndReason::NoLegalMoves:
+      text.title = "NO LEGAL MOVES";
+      break;
+    case EndReason::RuleDeclared:
+      text.title = "RULE";
+      break;
+    case EndReason::Resignation:
+      text.title = "RESIGNATION";
+      break;
+  }
+  text.subtitle = result == GameResult::WhiteWins   ? "WHITE WINS"
+                  : result == GameResult::BlackWins ? "BLACK WINS"
+                                                    : "DRAWN";
+  const auto moves = (plies + 1) / 2;
+  text.detail = "in " + std::to_string(moves) + (moves == 1 ? " move" : " moves");
+  if (reason == EndReason::DrawClock || reason == EndReason::Repetition ||
+      reason == EndReason::Agreement || reason == EndReason::RuleDeclared ||
+      reason == EndReason::NoLegalMoves)
+    text.detail += " · " + std::string(toString(reason));
+  return text;
+}
+
+bool Session::showResult() noexcept {
+  if (game_->result() == GameResult::InProgress) return false;
+  resultRequested_ = true;
+  resultCollapsed_ = false;
+  return true;
+}
+
 Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
   std::istringstream in{std::string(line)};
   std::string verb;
@@ -561,6 +606,10 @@ void Session::trackEvents() {
   }
   const GameResult r = game_->result();
   const bool decided = r != GameResult::InProgress;
+  if (!decided) {
+    resultRequested_ = false;
+    resultCollapsed_ = false;
+  }
   if (decided && !endDecided_ && eventsPrimed_) {
     view::EndFx fx;
     if (r == GameResult::Draw) {

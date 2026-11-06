@@ -133,3 +133,9 @@ AGENTS.md "Commands" has worked examples.
 Running the binary directly can fail with a `GLIBC_2.43` error that comes from the alsa
 entry in `LD_LIBRARY_PATH`. Run it under `nix develop .#gfx` with that entry removed. On a
 machine with no GPU, also point `VK_DRIVER_FILES` at the Nix Mesa lavapipe ICD.
+
+M23.11 result panel: `result` opens the current decided game's result immediately.
+Esc or the close button collapses it to RESULT in the status panel; RESULT reopens it.
+REMATCH uses Reset and boots the board; MENU returns to the main menu. Undo removes
+an ended result. For a deterministic capture use `--result --end-t 9` (or 12) after a
+mating script. Without `--result`, existing captures retain their panel-free conditions.

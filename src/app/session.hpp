@@ -62,6 +62,12 @@ struct HintOptions {
   bool attackHints{true};
 };
 
+struct ResultText {
+  std::string title, subtitle, detail;
+};
+[[nodiscard]] ResultText resultText(EndReason reason, GameResult result,
+                                    std::size_t plies);
+
 /// Everything a front end needs, with no front end in it.
 ///
 /// Input arrives as actions and the result is a snapshot; nothing here knows about SDL,
@@ -119,6 +125,14 @@ class Session {
   void requestEndFx(std::optional<view::EndFx> fx) noexcept {
     endEvent_ = fx;
     ++endSerial_;
+  }
+  /// Result presentation never changes the adjudicated game.
+  bool showResult() noexcept;
+  void collapseResult() noexcept { resultCollapsed_ = true; }
+  [[nodiscard]] bool resultCollapsed() const noexcept { return resultCollapsed_; }
+  [[nodiscard]] bool resultRequested() const noexcept { return resultRequested_; }
+  [[nodiscard]] ResultText resultText() const {
+    return app::resultText(game_->endReason(), game_->result(), game_->plyCount());
   }
   /// King-step distances from `origin` to every cell, cached for the last few origins so
   /// an event's flood is computed once rather than per frame.
@@ -479,6 +493,8 @@ class Session {
   bool watching_{false};
   float watchDwell_{0.0f};
   float watchClock_{0.0f};
+  bool resultCollapsed_{false};
+  bool resultRequested_{false};
   float watchPreview_{0.0f};
   float previewClock_{0.0f};
   bool previewing_{false};

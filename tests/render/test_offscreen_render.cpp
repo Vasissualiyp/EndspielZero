@@ -3416,6 +3416,74 @@ TEST_CASE("the board screen's real ambient field is submitted behind the board",
   REQUIRE(writePpm(bestLate, capturePath("field-over")).has_value());
 }
 
+TEST_CASE("result panel rematches, returns to menu and collapses without pausing",
+          "[render][gpu][result]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  auto* window = SDL_CreateWindow("result", 1920, 1080, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct WindowGuard {
+    SDL_Window* w;
+    ~WindowGuard() { SDL_DestroyWindow(w); }
+  } guard{window};
+  auto shell = app::Shell::create(
+      {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "result-panel.conf");
+  shell->settings() = app::Settings{};
+  shell->setVariantLoader(
+      [](const std::string& n) -> Result<VariantSpec> { return test::loadVariant(n); });
+  REQUIRE(shell->startGame("standard").has_value());
+  auto& session = *shell->session();
+  const auto mate = [&] {
+    REQUIRE(session
+                .applyScript("click f2\nclick f3\nclick e7\nclick e5\nclick g2\nclick "
+                             "g4\nclick d8\nclick h4")
+                .has_value());
+    REQUIRE(session.showResult());
+  };
+  mate();
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  REQUIRE(ui);
+  const auto frame = [&] {
+    (*ui)->newFrame();
+    (void)(*ui)->build(*shell, 60);
+    (*ui)->endFrame();
+  };
+  frame();
+  frame();
+  REQUIRE(ImGui::FindWindowByName("##result")->Active);
+  shell->back();
+  frame();
+  CHECK(shell->screen() == app::Screen::Game);
+  CHECK(session.resultCollapsed());
+  CHECK_FALSE(ImGui::FindWindowByName("##result")->Active);
+  REQUIRE(session.showResult());
+  frame();
+  frame();
+  // The controls use measured panel coordinates; existing dock fixtures stay untouched.
+  auto* result = ImGui::FindWindowByName("##result");
+  const auto click = [&](ImVec2 p) {
+    (*ui)->injectMouse(p.x, p.y, true);
+    frame();
+    (*ui)->injectMouse(p.x, p.y, false);
+    frame();
+  };
+  const auto boot = session.bootSerial();
+  click(ImVec2(result->Pos.x + 70, result->Pos.y + 140));
+  CHECK(session.game().plyCount() == 0);
+  CHECK(session.bootSerial() == boot + 1);
+  mate();
+  frame();
+  frame();
+  result = ImGui::FindWindowByName("##result");
+  click(ImVec2(result->Pos.x + 210, result->Pos.y + 140));
+  CHECK(shell->screen() == app::Screen::MainMenu);
+  CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN
