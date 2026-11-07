@@ -55,6 +55,7 @@ bool gDevOverlay = false;
 float gUiScaleOverride = -1.0f;
 bool gUiAuto = false;
 int gHudFraming = -1;
+float gIntensity = -1.0f;  ///< --presentation: presentation intensity for this run
 float gCaptureT = -1.0f;
 /// --post 0|1 and --bloom <scale>: this run only, never saved. Negative means "use the
 /// setting".
@@ -71,6 +72,9 @@ float gEndT = -1.0f;
 /// thinking dots, at that age (M23.11 section 4). Negative means settled.
 float gEventT = -1.0f;
 float gThinkT = -1.0f;
+float gTransitionT =
+    -1.0f;          ///< --transition-t: the age a previewed screen move is pinned to
+std::string gFrom;  ///< --from: the screen that move comes from
 bool gResult = false;
 /// `--review <ply>`: the capture browses to that ply of the scripted game (empty: off).
 std::string gReview;
@@ -116,6 +120,23 @@ void applyHudFx(render::Ui& ui, std::optional<float> bootAge,
   }
   if (endAge) level = 1.0f - 0.3f * smooth((*endAge - view::kEndDelaySeconds) / 1.5f);
   ui.setHudFx(draw, content, level);
+}
+
+/// Game to menu (M23.11 section 6): the menu screen has no board, yet for 0.8 s the board
+/// stays up and powers down from its centre. True while that runs.
+bool holdsBoard(const app::Shell& shell, const render::Ui& ui) {
+  return shell.hasGame() && ui.holdsBoard();
+}
+
+/// The board's decisive power-down with no delay, compressed into the move's 0.8 s.
+void applyMoveHold(render::BoardFxState& fx, const app::Session& session,
+                   const render::Ui& ui) {
+  const CellId centre = session.game().position().cellCount() / 2;
+  const std::vector<int>& dist = session.distancesFrom(centre);
+  int far = 0;
+  for (const int d : dist) far = std::max(far, d);
+  fx.end = view::EndFx{view::EndKind::Decisive, Color::White, centre, false};
+  fx.endAge = app::endAgeAt(ui.powerDownProgress(), far);
 }
 
 /// The effects a capture asks for through --boot-t, in the renderer's own terms.
@@ -732,6 +753,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->settings().flatView = true;
     if (shell->session() != nullptr) shell->session()->setFlatView(true);
   }
+  if (gIntensity >= 0.0f) shell->settings().presentationIntensity = gIntensity;
   shell->settings().geometryEvert = evert;
   shell->settings().geometrySlideU = slideU;
   shell->settings().geometrySlideV = slideV;
@@ -776,6 +798,26 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::PauseQuitConfirm);
   } else if (screen == "watch")
     shell->go(app::Screen::Watch);
+
+  // `--from X --transition-t S`: the screen move from X to the chosen screen, S seconds
+  // in (M23.11 section 6). The preview names the source; the clock is pinned per frame.
+  if (!gFrom.empty()) {
+    static const std::pair<const char*, app::Screen> kFrom[]{
+        {"menu", app::Screen::MainMenu}, {"game", app::Screen::Game},
+        {"pause", app::Screen::Paused},  {"newgame", app::Screen::NewGame},
+        {"watch", app::Screen::Watch},   {"welcome", app::Screen::Welcome}};
+    bool known = false;
+    for (const auto& [name, from] : kFrom) {
+      if (gFrom == name) {
+        shell->previewTransition(from, shell->screen());
+        known = true;
+      }
+    }
+    if (!known) {
+      std::fprintf(stderr, "--from: unknown screen %s\n", gFrom.c_str());
+      return 1;
+    }
+  }
 
   // A capture can show the watching state itself (M12.8): start a bundled game and render
   // its board with the STOP WATCHING control, so the mode is reviewable the way every
@@ -925,6 +967,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
       };
       (*ui)->setHudEvents({age(gEventT), age(gEventT), age(gThinkT), age(gCheckT)});
     }
+    (*ui)->setPresentationIntensity(renderer->options().presentationIntensity);
+    (*ui)->pinTransitionAge(gTransitionT >= 0 ? std::optional<float>(gTransitionT)
+                                              : std::nullopt);
     (*ui)->tick(dt);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
@@ -939,9 +984,10 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                    static_cast<float>(target->height())}
                : uiRect;
     render::InstanceSet instances;
+    const bool hold = holdsBoard(*shell, **ui);
     // The geometry view builds the warped board as ordinary instances, so the same
     // render path draws it (M17); only the surface flag on the options selects it.
-    if (shell->showsBoard()) {
+    if (shell->showsBoard() || hold) {
       // A capture of a screen that sits over the board shows it exactly as a player
       // would see it - stepped back and out of focus - which is also what puts the blur
       // passes under the validation layers in `ctest -R gui-pause`. Cinema never blurs:
@@ -991,10 +1037,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
           [&](CellId c) { return shell->session()->boardVisible(c); },
           [&](CellId c) { return shell->session()->game().cellInPresent(c); },
           shell->session()->timelineLinks());
-      render::applyBoardFx(instances, *shell->session(), captureFx(*renderer, *shell));
+      render::BoardFxState fx = captureFx(*renderer, *shell);
+      if (hold) applyMoveHold(fx, *shell->session(), **ui);
+      render::applyBoardFx(instances, *shell->session(), fx);
     }
     const view::OrbitCamera camera =
-        shell->showsBoard()
+        shell->showsBoard() || hold
             ? boardCamera(*shell,
                           playSeq != nullptr ? *playSeq : render::kNoShapeSequence)
             : view::OrbitCamera{};
@@ -1463,6 +1511,11 @@ int main(int argc, char** argv) {
           "materials.\n"
           "--ui-scale 0.6..3.0 is exact; --ui-auto opts captures into automatic "
           "scaling.\n"
+          "--presentation 0..1 sets the presentation intensity for this run (not "
+          "saved).\n"
+          "--from SCREEN --transition-t SECONDS pins the screen move from SCREEN (menu, "
+          "game, "
+          "pause, newgame, watch) to --screen at that age (M23.11 section 6).\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
           "--event-t SECONDS pins the HUD turn flip and newest ledger row; --think-t "
@@ -1489,6 +1542,10 @@ int main(int argc, char** argv) {
       script = argv[++i];
     else if (arg == "--screen" && i + 1 < argc)
       screen = argv[++i];
+    else if (arg == "--from" && i + 1 < argc)
+      gFrom = argv[++i];
+    else if (arg == "--transition-t" && i + 1 < argc)
+      gTransitionT = std::strtof(argv[++i], nullptr);
     else if (arg == "--t" && i + 1 < argc) {
       overtureT = std::strtof(argv[++i], nullptr);
       overtureTGiven = true;
@@ -1558,7 +1615,9 @@ int main(int argc, char** argv) {
       }
     } else if (arg == "--matte")
       gMatteCapture = true;
-    else if (arg == "--hud-framing" && i + 1 < argc) {
+    else if (arg == "--presentation" && i + 1 < argc) {
+      gIntensity = std::clamp(std::strtof(argv[++i], nullptr), 0.0f, 1.0f);
+    } else if (arg == "--hud-framing" && i + 1 < argc) {
       const std::string value = argv[++i];
       if (value != "0" && value != "1") {
         std::fprintf(stderr, "--hud-framing requires 0 or 1\n");
@@ -1813,6 +1872,7 @@ int main(int argc, char** argv) {
       // normally (M23.10 section 3).
       if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         fxTimeline.skipBoot();
+        (*ui)->skipTransition();
       }
 
       switch (e.type) {
@@ -2276,6 +2336,7 @@ int main(int argc, char** argv) {
     const auto resultEnd = fxTimeline.end(visualSeconds);
     (*ui)->setResultAge(resultEnd ? std::optional<float>(resultEnd->age) : std::nullopt);
     (*ui)->setCaptureAge(fxTimeline.captureAge(visualSeconds));
+    (*ui)->setPresentationIntensity(renderer->options().presentationIntensity);
     {
       const auto ripple = fxTimeline.ripple(visualSeconds);
       (*ui)->setHudEvents({fxTimeline.turnAge(visualSeconds),
@@ -2428,7 +2489,8 @@ int main(int argc, char** argv) {
     const bool collectPanels = panelResponse.prepare(
         shell->showsBoard() && !shell->attracting() ? shell->session() : nullptr,
         renderer->theme(), renderer->options());
-    if (shell->showsBoard()) {
+    const bool hold = holdsBoard(*shell, **ui);
+    if (shell->showsBoard() || hold) {
       if (boardRect.valid()) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
 #ifdef CB_HAVE_IMGUI
@@ -2489,6 +2551,7 @@ int main(int argc, char** argv) {
         fx.powerUpAge = u->age;
         fx.end = u->fx;
       }
+      if (hold) applyMoveHold(fx, *shell->session(), **ui);
       render::applyBoardFx(instances, *shell->session(), fx);
       camera = boardCamera(*shell, shapeSeq);
     }

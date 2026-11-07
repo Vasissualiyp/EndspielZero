@@ -3605,6 +3605,70 @@ TEST_CASE("every screen builds cleanly and stays inside the viewport at scales 1
   }
 }
 
+TEST_CASE("a screen move runs on the shell clock, holds the board, and a skip ends it",
+          "[render][gpu][screens][transition]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  SDL_Window* window = SDL_CreateWindow("moves", 1920, 1080, SDL_WINDOW_HIDDEN);
+  REQUIRE(window != nullptr);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  auto shell = app::Shell::create({"standard"},
+                                  std::filesystem::path(CB_BINARY_DIR) / "moves.conf");
+  shell->settings().vsync = false;
+  shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+    return test::loadVariant(name);
+  });
+  REQUIRE(shell->startGame("standard").has_value());
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  REQUIRE(ui.has_value());
+  const auto frame = [&](float dt) {
+    (*ui)->tick(dt);
+    (*ui)->newFrame();
+    (void)(*ui)->build(*shell, 60);
+    (*ui)->endFrame();
+  };
+  frame(1);  // the game screen, settled
+  CHECK((*ui)->screenMove() == app::ScreenMove::Cut);
+
+  shell->pause();
+  frame(0);
+  CHECK((*ui)->screenMove() == app::ScreenMove::GameToPause);
+  frame(0.1f);   // 0.1 s of 0.3: still running, on the one clock
+  frame(0.25f);  // past the end
+  CHECK_FALSE((*ui)->holdsBoard());
+
+  shell->go(app::Screen::MainMenu);
+  frame(0);
+  CHECK((*ui)->screenMove() == app::ScreenMove::GameToMenu);
+  CHECK((*ui)->holdsBoard());
+  frame(0.3f);
+  CHECK((*ui)->holdsBoard());
+  CHECK((*ui)->powerDownProgress() > 0.3f);
+  CHECK((*ui)->powerDownProgress() < 0.5f);
+  (*ui)->skipTransition();
+  frame(0);
+  CHECK_FALSE((*ui)->holdsBoard());
+  CHECK((*ui)->powerDownProgress() == 0.0f);
+
+  // Calm: the same move is a single 0.3 s cross-fade and never holds the board.
+  (*ui)->setPresentationIntensity(0.0f);
+  shell->go(app::Screen::Game);
+  frame(0);
+  shell->pause();
+  frame(0);
+  shell->go(app::Screen::MainMenu);
+  frame(0);
+  CHECK_FALSE((*ui)->holdsBoard());
+  CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

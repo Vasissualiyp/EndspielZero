@@ -238,3 +238,19 @@ TEST_CASE("review console browses the history and leaves it", "[unit][app][revie
   CHECK(c.run(*shell, "review 1 2") == "usage: review [<ply>|off]");
   CHECK(has(DebugConsole::help(), "review [<ply>|off]"));
 }
+
+TEST_CASE("transition console previews a screen move from another screen",
+          "[unit][app][transition]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(c.run(*shell, "transition game menu") == "no game loaded");
+  CHECK(has(c.run(*shell, "transition menu"), "usage"));
+  CHECK(has(c.run(*shell, "transition menu nowhere"), "usage"));
+  REQUIRE(shell->startGame("standard").has_value());
+  const auto serial = shell->transitionSerial();
+  CHECK(c.run(*shell, "transition paused menu") == "transition paused -> menu");
+  CHECK(shell->screen() == Screen::MainMenu);
+  CHECK(shell->transitionFrom() == Screen::Paused);
+  CHECK(shell->transitionSerial() == serial + 1);
+  CHECK(has(DebugConsole::help(), "transition <from> <to>"));
+}

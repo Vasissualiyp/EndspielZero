@@ -171,6 +171,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --script "$MATE" --end-t 0.7 --shot e.ppm
                                  # the game-end power-down 0.7 s in (console `endfx win|draw|off`);
                                  # --check-t <s> likewise for the check ripple (console `ripple`)
+./build/dev/src/gui/endspielzero_gui standard --screen menu --from pause --transition-t 0.4 --shot move.ppm
+                                 # a screen move 0.4 s in (console `transition <from> <to>`; any key skips it)
 ./build/dev/src/gui/endspielzero_gui standard --script $'click e2\nclick e4' --event-t 0.1 --shot hudfx.ppm
                                  # HUD turn flip + new ledger row 0.1 s in (console `hudfx [turn|move|think]`);
                                  # --think-t <s> shows the engine-thinking dots, --check-t the CHECK spike

@@ -5,6 +5,7 @@
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 #include "app/session.hpp"
@@ -112,6 +113,28 @@ std::string execute(Shell& shell, const std::string& line) {
     if (w.size() < 2) return "usage: load <variant>";
     const auto ok = shell.startGame(w[1]);
     return ok.has_value() ? "started " + w[1] : ok.error().format();
+  }
+  if (cmd == "transition") {
+    // Preview a screen move (M23.11 section 6), as `goto` but played from `<from>`.
+    static const std::pair<const char*, Screen> kMoves[]{{"menu", Screen::MainMenu},
+                                                         {"game", Screen::Game},
+                                                         {"paused", Screen::Paused},
+                                                         {"newgame", Screen::NewGame},
+                                                         {"watch", Screen::Watch}};
+    const auto find = [&](const std::string& name) -> std::optional<Screen> {
+      for (const auto& [n, screen] : kMoves)
+        if (name == n) return screen;
+      return std::nullopt;
+    };
+    const auto from = w.size() > 2 ? find(w[1]) : std::nullopt;
+    const auto to = w.size() > 2 ? find(w[2]) : std::nullopt;
+    if (!from || !to) return "usage: transition menu|newgame|watch|game|paused <to>";
+    if ((*from == Screen::Game || *from == Screen::Paused || *to == Screen::Game ||
+         *to == Screen::Paused) &&
+        !shell.hasGame())
+      return "no game loaded";
+    shell.previewTransition(*from, *to);
+    return "transition " + w[1] + " -> " + w[2];
   }
   if (cmd == "goto") {
     if (w.size() < 2) return "usage: goto menu|game|paused|settings|editor|newgame";
@@ -403,6 +426,8 @@ std::string execute(Shell& shell, const std::string& line) {
 std::string DebugConsole::help() {
   return "load <variant>            start a variant\n"
          "goto <screen>            menu game paused settings editor newgame welcome\n"
+         "transition <from> <to>   preview a screen move: "
+         "menu|newgame|watch|game|paused\n"
          "get [<setting>]          show settings; set <setting> <value> changes one\n"
          "dev [on|off]             developer overlay; no argument toggles it\n"
          "post [on|off]            post processing; toggles if omitted; floor dither "

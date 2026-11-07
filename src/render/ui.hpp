@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "app/captured.hpp"
 #include "app/debug_console.hpp"
+#include "app/screen_transition.hpp"
 #include "app/session.hpp"
 #include "app/shell.hpp"
 #include "assets/piece_model.hpp"
@@ -200,6 +202,21 @@ class Ui {
     std::optional<float> turn, move, think, check;
   };
   void setHudEvents(const HudEvents& events) noexcept { hudEvents_ = events; }
+  /// The presentation intensity (0..1); below one half the screen moves are cross-fades.
+  void setPresentationIntensity(float v) noexcept { intensity_ = v; }
+  /// Complete the running screen move at once (a click or key). The shell's one clock
+  /// jumps to its end, which is exactly the cut's state.
+  void skipTransition() noexcept { enter_ = 1.0f; }
+  /// Pin the running move to `seconds` of its own age (captures and tests); nullopt frees
+  /// it.
+  void pinTransitionAge(std::optional<float> seconds) noexcept {
+    pinnedMoveAge_ = seconds;
+  }
+  /// The board powers down on a screen that has no board of its own (game to menu): the
+  /// front end keeps drawing it, at this progress 0..1 of its compressed power-down.
+  [[nodiscard]] bool holdsBoard() const noexcept { return moveFx().holdsBoard; }
+  [[nodiscard]] float powerDownProgress() const noexcept { return moveFx().powerDown; }
+  [[nodiscard]] app::ScreenMove screenMove() const noexcept { return move_; }
   void setHudFx(float draw, float content, float level) noexcept {
     hudDraw_ = draw;
     hudContent_ = content;
@@ -301,6 +318,7 @@ class Ui {
   struct PaneMove {
     float scale{1.0f};
     float alpha{1.0f};
+    float trace{1.0f};  ///< how much of the panel's edge is drawn (M23.11 section 6)
   };
   [[nodiscard]] PaneMove paneMove() const noexcept;
   /// The two halves of the transition clock. The departing screen runs first and is
@@ -398,6 +416,13 @@ class Ui {
   /// that knows about time, and the overture is advanced where the shell is to hand.
   float lastDt_{0.0f};
   float enter_{1.0f};
+  /// Which kind of move the clock is running, and the presentation intensity it reads.
+  /// `enter_` stays 0..1; a move's age in seconds is `enter_ * moveSeconds`.
+  app::ScreenMove move_{app::ScreenMove::Cut};
+  float intensity_{1.0f};
+  std::optional<float> pinnedMoveAge_;
+  std::uint32_t lastTransitionSerial_{0};
+  [[nodiscard]] app::MoveFx moveFx() const noexcept;
   int lastScreen_{-1};
   /// Which piece the piece designer has selected. Editor state, not shell state: the
   /// document is what matters and it lives in the shell; which row is highlighted is a

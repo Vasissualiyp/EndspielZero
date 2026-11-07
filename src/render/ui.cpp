@@ -892,7 +892,18 @@ void Ui::tick(float dt) {
   boardField_.advance(dt);
   // Ease the arrival rather than run it linearly: a screen that stops dead has not
   // travelled anywhere.
-  if (enter_ < 1.0f) enter_ = std::min(1.0f, enter_ + dt * 2.2f);
+  // The new screen moves (section 6) run on the same clock at their own rate: their
+  // length in seconds is the whole clock.
+  const float seconds = app::moveSeconds(move_, intensity_);
+  if (pinnedMoveAge_ && seconds > 0.0f) {
+    enter_ = std::clamp(*pinnedMoveAge_ / seconds, 0.0f, 1.0f);
+  } else if (enter_ < 1.0f) {
+    enter_ = std::min(1.0f, enter_ + dt * (seconds > 0.0f ? 1.0f / seconds : 2.2f));
+  }
+}
+
+app::MoveFx Ui::moveFx() const noexcept {
+  return app::moveFx(move_, enter_ * app::moveSeconds(move_, intensity_), intensity_);
 }
 
 void Ui::newFrame() {
@@ -1404,14 +1415,24 @@ void Ui::drawCinemaLook() {
 }
 
 float Ui::outEase() const noexcept {
+  if (move_ != app::ScreenMove::Cut)
+    return 1.0f;  // the move has its own fx; no ghost deco
   return smoothstep(enter_ / kOutEnd);
 }
 
 float Ui::inEase() const noexcept {
+  if (move_ != app::ScreenMove::Cut) return moveFx().arriveAlpha;
   return smoothstep((enter_ - kInStart) / (1.0f - kInStart));
 }
 
 Ui::PaneMove Ui::paneMove() const noexcept {
+  if (move_ != app::ScreenMove::Cut) {
+    // A move into or out of the game (section 6): the panel traces on or off in place,
+    // with no grow or swell. Calm moves cross-fade with the edge complete.
+    const app::MoveFx fx = moveFx();
+    return ghosting_ ? PaneMove{1.0f, fx.leaveAlpha, fx.leaveTrace}
+                     : PaneMove{1.0f, fx.arriveAlpha, fx.arriveTrace};
+  }
   // Pause and the reference panels sit over the board and do not travel as panes; they
   // keep the old grow-in, which rides only the arriving half of the clock.
   const int which = ghosting_ ? leavingScreen_ : currentScreen_;
@@ -1432,10 +1453,17 @@ Ui::PaneMove Ui::paneMove() const noexcept {
 }
 
 void Ui::drawGhost(app::Shell& shell) {
-  if (leavingScreen_ < 0 || outEase() >= 1.0f) return;
+  if (leavingScreen_ < 0) return;
   const auto leaving = static_cast<app::Screen>(leavingScreen_);
-  if (!isMenuScreen(leaving) || !isMenuScreen(static_cast<app::Screen>(currentScreen_))) {
-    return;
+  if (move_ == app::ScreenMove::Cut) {
+    if (outEase() >= 1.0f) return;
+    if (!isMenuScreen(leaving) || !isMenuScreen(static_cast<app::Screen>(currentScreen_)))
+      return;
+  } else {
+    // Only the moves that take a panel away leave one to draw: the menu off to the game,
+    // the pause panel off to the game.
+    const app::MoveFx fx = moveFx();
+    if (fx.done || fx.leaveAlpha <= 0.0f || !isMenuScreen(leaving)) return;
   }
   // Disabled while it is drawn: a departing screen must be seen but not touched. Its
   // request is discarded too, so re-running its build can neither start a game nor
@@ -1552,7 +1580,17 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   drawDebugConsole(shell);
   const int screen = static_cast<int>(shell.screen());
   currentScreen_ = screen;
-  if (screen != lastScreen_) {
+  // A console preview names the screen it pretends to come from; a real change comes from
+  // the one drawn last.
+  const bool previewed = shell.transitionSerial() != lastTransitionSerial_;
+  if (screen != lastScreen_ || previewed) {
+    if (previewed) {
+      lastTransitionSerial_ = shell.transitionSerial();
+      lastScreen_ = static_cast<int>(shell.transitionFrom());
+    }
+    move_ = lastScreen_ < 0 ? app::ScreenMove::Cut
+                            : app::classifyMove(static_cast<app::Screen>(lastScreen_),
+                                                shell.screen());
     const bool deeper = lastScreen_ < 0 ||
                         goesDeeper(static_cast<app::Screen>(lastScreen_), shell.screen());
     // Going in, the field rushes towards and past the viewer; coming back it recedes.
@@ -1583,6 +1621,17 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
 
   // The departing menu first, so the arriving one is drawn over it.
   drawGhost(shell);
+
+  // Game to menu: for the first 0.8 s the board powers down and the menu is not there
+  // yet. Nothing is built, so nothing can be clicked; any key or click skips to the menu.
+  if (move_ == app::ScreenMove::GameToMenu && moveFx().holdsBoard) {
+    UiRequest held;
+    held.boardRect[0] = 0;
+    held.boardRect[1] = 0;
+    held.boardRect[2] = ImGui::GetMainViewport()->Size.x;
+    held.boardRect[3] = ImGui::GetMainViewport()->Size.y;
+    return held;
+  }
 
   UiRequest request;
   switch (shell.screen()) {

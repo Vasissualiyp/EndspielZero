@@ -243,6 +243,12 @@ void Shell::go(Screen s) {
   screen_ = s;
 }
 
+void Shell::previewTransition(Screen from, Screen to) {
+  go(to);
+  transitionFrom_ = from;
+  ++transitionSerial_;
+}
+
 void Shell::discardEditorChanges() {
   if (editor_ == nullptr) return;
   const std::string name = editorVariant_;

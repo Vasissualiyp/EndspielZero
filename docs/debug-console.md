@@ -22,6 +22,7 @@ walk the command history. `help` (or `?`) prints the command list from
 |---|---|
 | `load <variant>` | Start a variant from `variants/` |
 | `goto <screen>` | Switch to `menu`, `game`, `paused`, `settings`, `editor`, `newgame` or `welcome` |
+| `transition <from> <to>` | Preview a screen move (M23.11 section 6) as if arriving from `<from>`: `menu`, `newgame`, `watch`, `game` or `paused`. `menu`/`newgame`/`watch` to `game` traces the menu off, `game` to `paused` traces the pause panel on, `paused` to `game` traces it off, `game`/`paused` to `menu` powers the board down for 0.8 s then traces the menu on. Any key or click skips it; at calm intensity it is one 0.3 s cross-fade |
 | `get [<setting>]` | Print all settings, or one |
 | `set <setting> <value>` | Change one setting. The value goes through the settings-file parser, so it accepts the same syntax as the file |
 | `post [on\|off]` | Turn post-processing (HDR scene, emissive bloom, tone map, grain/dither; ADR-0025) on or off; no argument toggles it. Default on; works without a loaded game. Also `get`/`set postProcess` or `post_process`, and `bloomScale` or `bloom_scale` (finite, clamped to 0..4, multiplies the theme's bloom; 0 skips the bloom passes) |
@@ -78,7 +79,12 @@ groups:
   - `--width` and `--height` set the frame size.
   - `--trailer-clip <dir>` and `--trailer-frames` render the trailer.
 - **What to show:**
-  - `--screen <name>` picks the screen.
+  - `--screen <name>` picks the screen (`pausequit` is the pause menu's quit prompt).
+  - `--from <screen> --transition-t <s>` renders the screen move from `menu`, `newgame`, `watch`,
+    `game`, `pause` or `welcome` to `--screen`, `s` seconds into it (M23.11 section 6; past the
+    move's end it is exactly the plain frame). `--presentation <0..1>` sets the presentation
+    intensity for the run, so `--presentation 0` shows the calm cross-fade. Example:
+    `--screen menu --from pause --transition-t 0.4` (the board powering down).
   - `--script <lines>` replays clicks (`click e2`).
   - `--ui-click` presses an interface control.
   - `--play <file.cbgame>`, `--play-at S`, `--dwell S` and `--watch` replay a saved game.

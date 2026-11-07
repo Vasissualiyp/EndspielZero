@@ -201,6 +201,15 @@ class Shell {
   [[nodiscard]] float boardPullBack() const noexcept;
 
   void go(Screen s);
+  /// Preview the screen move `from` -> `to` (M23.11 section 6): the shell ends on `to`,
+  /// and the interface plays the move as if it had arrived from `from`. For the console
+  /// and for captures, where the screen has already changed by the time a frame is built.
+  void previewTransition(Screen from, Screen to);
+  [[nodiscard]] Screen transitionFrom() const noexcept { return transitionFrom_; }
+  /// Bumped by every preview, so the interface can tell a repeat of the same one.
+  [[nodiscard]] std::uint32_t transitionSerial() const noexcept {
+    return transitionSerial_;
+  }
   void back();
   void requestQuit() { quit_ = true; }
 
@@ -210,10 +219,13 @@ class Shell {
   /// name. The order can only be computed here, because a difficulty lives in the
   /// variant's own file rather than in the name list the shell is handed at startup.
   void setVariantLoader(VariantLoader loader);
-  /// The loader the attract trailer uses: the variants as they ship, whatever the player has
-  /// saved over them. The trailer is a fixed showcase - its scripted moves are only known to
-  /// be legal on the shipped rules - so a variant edited in the designer must not break it.
-  void setShippedVariantLoader(VariantLoader loader) { shippedLoader_ = std::move(loader); }
+  /// The loader the attract trailer uses: the variants as they ship, whatever the player
+  /// has saved over them. The trailer is a fixed showcase - its scripted moves are only
+  /// known to be legal on the shipped rules - so a variant edited in the designer must
+  /// not break it.
+  void setShippedVariantLoader(VariantLoader loader) {
+    shippedLoader_ = std::move(loader);
+  }
   Result<void> startGame(const std::string& variantName);
 
   /// Saved games live in a `games` folder beside the settings file.
@@ -419,10 +431,12 @@ class Shell {
   /// Write the open document back to its file. Fails when nothing is open or no path
   /// resolver is installed.
   Result<void> saveEditor();
-  /// Leaving the editor with unsaved changes asks first: `back()` stays put and raises this
-  /// request, which the editor screen answers with its own dialog (save, leave without saving,
-  /// or stay). Nothing is lost to an Esc.
-  [[nodiscard]] bool editorLeaveRequested() const noexcept { return editorLeaveRequested_; }
+  /// Leaving the editor with unsaved changes asks first: `back()` stays put and raises
+  /// this request, which the editor screen answers with its own dialog (save, leave
+  /// without saving, or stay). Nothing is lost to an Esc.
+  [[nodiscard]] bool editorLeaveRequested() const noexcept {
+    return editorLeaveRequested_;
+  }
   void clearEditorLeaveRequest() noexcept { editorLeaveRequested_ = false; }
   /// Throw away the editor's unsaved changes by reopening the file it was opened from.
   void discardEditorChanges();
@@ -534,6 +548,8 @@ class Shell {
   std::string message_;
   Screen screen_{Screen::MainMenu};
   Screen previous_{Screen::MainMenu};
+  Screen transitionFrom_{Screen::MainMenu};
+  std::uint32_t transitionSerial_{0};
   bool quit_{false};
   VariantLoader loader_;
   VariantLoader shippedLoader_;
@@ -563,7 +579,8 @@ class Shell {
   /// A beat was entered outside `advanceAttract` (a jump); the next call reports it.
   bool trailerCutPending_{false};
   float trailerClock_{0.0f};
-  /// Seconds the first board has been powering on; the trailer holds until `kBootSeconds`.
+  /// Seconds the first board has been powering on; the trailer holds until
+  /// `kBootSeconds`.
   float trailerBootClock_{0.0f};
   /// Added to the trailer timeline position so it stays continuous across a cut (a beat's
   /// first move starts at once, which would otherwise skip the clock ahead); it decays to
@@ -577,9 +594,9 @@ class Shell {
   view::EasedMorph ghostEase_;
   view::EasedMorph spreadEase_;
   /// The beat's own eased pose - the reveal the beat plays (the cylinder rolling up, the
-  /// 3-D torus's levels spreading) - never written by the keyframe spline, which is blended
-  /// over it (`view::poseHandoverWeight`) so the pose hands over to the keys instead of
-  /// snapping (M21).
+  /// 3-D torus's levels spreading) - never written by the keyframe spline, which is
+  /// blended over it (`view::poseHandoverWeight`) so the pose hands over to the keys
+  /// instead of snapping (M21).
   TrailerPose beatPose_;
   view::EasedMorph beatFormedEase_;
   view::EasedMorph beatGhostEase_;
