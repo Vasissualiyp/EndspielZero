@@ -47,6 +47,14 @@ float menuPanePadding(const view::Theme& theme, ImVec2 min, ImVec2 max, float sc
   return std::min(preferred, (width - std::min(200 * scale, width * 0.84f)) * 0.5f);
 }
 
+/// beginPane plus the screen panel behind its content (M23.11 section 5).
+void beginScreenPane(const view::Theme& theme, float scale, const char* id, ImVec2 min,
+                     ImVec2 max, float transitionScale, float alpha, float pad,
+                     bool remember) {
+  beginPane(id, min, max, transitionScale, alpha, pad, remember);
+  paneFrame(theme, scale, min, max);
+}
+
 /// The colour a difficulty is advertised with. A switch, not an array lookup, so that
 /// adding a level to the enum is a compile error here rather than a silent wrap.
 view::Rgba difficultyColor(const view::Theme& t, Difficulty d) {
@@ -185,8 +193,8 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##mainmenu", menuMin, menuMax, move.scale, move.alpha,
-            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+  beginScreenPane(t, scale_, "##mainmenu", menuMin, menuMax, move.scale, move.alpha,
+                  menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   screenTitle("ENDSPIELZERO", t, display, scale_, 2.4f);
   ImGui::Dummy(ImVec2(0, px(14)));
 
@@ -219,8 +227,8 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##watch", menuMin, menuMax, move.scale, move.alpha,
-            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+  beginScreenPane(t, scale_, "##watch", menuMin, menuMax, move.scale, move.alpha,
+                  menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow("watch", t, mono, scale_);
   screenTitle("Watch a game", t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -284,7 +292,7 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(6)));
     ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
     char line[96];
     std::snprintf(line, sizeof(line), "%zu moves",
                   static_cast<std::size_t>(sel->file.moves.size()));
@@ -314,7 +322,7 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
     request.watchGame = pickedWatch_;
   } else if (games.empty()) {
     ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
     ImGui::TextUnformatted("no bundled games are installed");
     ImGui::PopStyleColor();
     ImGui::PopFont();
@@ -346,8 +354,8 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##welcome", menuMin, menuMax, move.scale, move.alpha,
-            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+  beginScreenPane(t, scale_, "##welcome", menuMin, menuMax, move.scale, move.alpha,
+                  menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow("tutorial", t, mono, scale_);
   screenTitle("Start here", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -370,7 +378,7 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
   };
   const auto caption = [&](const char* text) {
     ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
     ImGui::TextUnformatted(text);
     ImGui::PopStyleColor();
     ImGui::PopFont();
@@ -414,8 +422,8 @@ UiRequest Ui::buildQuitConfirm(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##quitconfirm", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
-            !ghosting_);
+  beginScreenPane(t, scale_, "##quitconfirm", menuMin, menuMax, move.scale, move.alpha,
+                  px(46.0f), !ghosting_);
   eyebrow("quit", t, mono, scale_);
   screenTitle("Are you sure?", t, display, scale_, 1.9f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -448,8 +456,8 @@ UiRequest Ui::buildPauseQuitConfirm(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##pausequit", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
-            !ghosting_);
+  beginScreenPane(t, scale_, "##pausequit", menuMin, menuMax, move.scale, move.alpha,
+                  px(46.0f), !ghosting_);
   eyebrow("quit", t, mono, scale_);
   screenTitle("Leave the game?", t, display, scale_, 1.9f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -502,8 +510,8 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##newgame", menuMin, menuMax, move.scale, move.alpha,
-            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+  beginScreenPane(t, scale_, "##newgame", menuMin, menuMax, move.scale, move.alpha,
+                  menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow("new game", t, mono, scale_);
   screenTitle("Library", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -591,7 +599,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   if (const app::Session* loaded = shell.session();
       loaded != nullptr && loaded->variant().name == pickedVariant_) {
     ImGui::PushFont(small);
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
     ImGui::TextUnformatted(describeBoard(loaded->variant()).c_str());
     ImGui::PopStyleColor();
     ImGui::PopFont();
@@ -619,7 +627,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
     if (ImGui::IsItemDeactivatedAfterEdit()) request.settingsChanged = true;
   }
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("each player types their own half of the keyboard");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -659,8 +667,8 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##pause", menuMin, menuMax, move.scale, move.alpha,
-            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+  beginScreenPane(t, scale_, "##pause", menuMin, menuMax, move.scale, move.alpha,
+                  menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   eyebrow(shell.currentVariant().c_str(), t, mono, scale_);
   screenTitle("Paused", t, display, scale_, 1.8f);
   ImGui::Dummy(ImVec2(0, px(8)));
@@ -706,7 +714,7 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   // live in a `games` folder beside the settings; the list is whatever is already there.
   ImGui::Dummy(ImVec2(0, px(10)));
   ImGui::PushFont(static_cast<ImFont*>(fontSmall_));
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("GAME FILES");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -723,7 +731,7 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   }
   if (!shell.message().empty()) {
     ImGui::PushFont(static_cast<ImFont*>(fontSmall_));
-    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+    ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
     ImGui::TextUnformatted(shell.message().c_str());
     ImGui::PopStyleColor();
     ImGui::PopFont();
@@ -737,7 +745,7 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   // The keys, where a player looks for them.
   ImGui::Dummy(ImVec2(0, px(10)));
   ImGui::PushFont(static_cast<ImFont*>(fontSmall_));
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted(
       "Esc pause   U undo   R reset   F flat view   Q quit (from the menu)");
   ImGui::PopStyleColor();
@@ -1159,8 +1167,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
     drawShellFrame(shell, menuMin, menuMax);
   }
   const PaneMove move = paneMove();
-  beginPane("##settings", menuMin, menuMax, move.scale, move.alpha,
-            menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+  beginScreenPane(t, scale_, "##settings", menuMin, menuMax, move.scale, move.alpha,
+                  menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
   ImGui::PushFont(static_cast<ImFont*>(t.monoLabels ? fontLabel_ : fontBody_));
   eyebrow("settings", t, mono, scale_);
   screenTitle("Settings", t, display, scale_, 2.0f);
@@ -1202,7 +1210,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
                    s.frameCap == 0 ? "uncapped" : "%d fps");
   ImGui::Checkbox("Flat 2D view", &s.flatView);
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("look straight down, pieces as tokens: cheaper to draw");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1224,7 +1232,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
     }
   }
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextWrapped("%s", s.theme == "manifold"
                                ? "Manifold: cool glass and a circuit grid floor."
                                : "Console: warm wood and drifting shapes.");
@@ -1238,7 +1246,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Ctrl over a square shows what attacks and defends it",
                   &s.showAttackHints);
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("Ctrl hints only; the opponent's moves ignore check");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1263,7 +1271,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::SliderFloat("Near clip (nothing closer is drawn)", &s.nearClip,
                      view::kMinNearClip, view::kMaxNearClip, "%.2f cells");
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("height encodes value; 0 makes every piece the same");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1316,7 +1324,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Stop the shape clipping the followed piece", &s.geometryAlign);
   ImGui::EndDisabled();
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("how far the camera leads your own orbit while a move plays");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1325,7 +1333,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // Outside the move-camera gate: SHAPE works whether or not a camera follows a move.
   ImGui::SliderFloat("SHAPE morph speed", &s.geometryFormSpeed, 0.25f, 2.5f, "%.2fx");
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("how fast SHAPE rolls the board between flat and its shape");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1337,7 +1345,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::SliderFloat("Animation speed", &s.animationSpeed, 0.05f, 4.0f, "%.2fx");
   ImGui::EndDisabled();
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("higher is faster; a wrapping move opens a portal on the edge");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1345,7 +1353,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   // The New Game screen's overtures run on their own clock, so they get their own speed.
   ImGui::SliderFloat("Library animation speed", &s.overtureSpeed, 0.25f, 4.0f, "%.2fx");
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("the variant animations on the New Game screen");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1360,7 +1368,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
     ImGui::Checkbox("it plays White", &s.computerPlaysWhite);
   }
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted(
       "p1 types qwertasdfgzxcvb, p2 the other half; a square is one key per axis");
   ImGui::PopStyleColor();
@@ -1400,7 +1408,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::EndDisabled();
   ImGui::SliderFloat("Effects", &s.volumeEffects, 0.0f, 1.0f, "%.2f");
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("sound effects play; music is not in this build yet");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1440,7 +1448,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   }
   if (!t.liveControls) ImGui::SameLine();
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   if (t.liveControls)
     ImGui::TextWrapped("saved as you change them");
   else
@@ -1508,8 +1516,8 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   ImVec2 menuMin, menuMax;
   pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
-  beginPane("##gameinfo", menuMin, menuMax, move.scale, move.alpha, px(46.0f),
-            !ghosting_);
+  beginScreenPane(t, scale_, "##gameinfo", menuMin, menuMax, move.scale, move.alpha,
+                  px(46.0f), !ghosting_);
   eyebrow("game mode", t, mono, scale_);
   screenTitle(v.name.c_str(), t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
@@ -1659,6 +1667,10 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
                      ImGuiWindowFlags_NoBackground |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
     const PieceTypeDef& piece = v.pieces[static_cast<std::size_t>(pieceMovesPick_)];
+    // The caption and grid draw on channel 1, over the card and panel behind them.
+    ImGui::GetWindowDrawList()->ChannelsSplit(2);
+    ImGui::GetWindowDrawList()->ChannelsSetCurrent(1);
+    const float captionTop = ImGui::GetCursorScreenPos().y;
     ImGui::PushFont(display);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
     const std::string caption = upper(piece.name);
@@ -1683,11 +1695,19 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
     // A soft card just behind the grid, so the blurred board does not show through the
     // squares and turn the diagram to noise.
     const ImVec2 gridAt = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->ChannelsSetCurrent(0);
     ImGui::GetWindowDrawList()->AddRectFilled(
         ImVec2(gridAt.x - px(10.0f), gridAt.y - px(10.0f)),
         ImVec2(gridAt.x + side + px(10.0f), gridAt.y + side + px(10.0f)),
         u32(t.soot, 0.82f), px(10.0f));
+    // ... inside the same panel the panes wear, framing the caption and the grid.
+    hudPanel(ImGui::GetWindowDrawList(),
+             ImVec2(gridAt.x - px(24.0f), captionTop - px(16.0f)),
+             ImVec2(gridAt.x + side + px(24.0f), gridAt.y + side + px(24.0f)), t, scale_,
+             1.0f, 1.0f, kScreenPanelCorner);
+    ImGui::GetWindowDrawList()->ChannelsSetCurrent(1);
     drawMoveDiagram(v, piece, t, cell);
+    ImGui::GetWindowDrawList()->ChannelsMerge();
     ImGui::End();
     ImGui::PopStyleVar();
     ImGui::PopStyleColor();
@@ -1695,11 +1715,12 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
 
   // The right half is the menu: choose a piece, read its atoms.
   const PaneMove move = paneMove();
-  beginPane("##pieces", menuMin, menuMax, move.scale, move.alpha, px(46.0f), !ghosting_);
+  beginScreenPane(t, scale_, "##pieces", menuMin, menuMax, move.scale, move.alpha,
+                  px(46.0f), !ghosting_);
   eyebrow("reference", t, mono, scale_);
   screenTitle("Piece moves", t, display, scale_, 1.9f);
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::TextUnformatted("the diagram is on the left; pick a piece to read how it moves");
   ImGui::PopStyleColor();
   ImGui::PopFont();
@@ -1727,7 +1748,7 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   ImGui::Dummy(ImVec2(0, px(10)));
   heading("MOVES", t, small);
   ImGui::PushFont(small);
-  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneDim));
   ImGui::Text("symbol %c%s%s", sel.symbol, sel.royal ? "  -  royal" : "",
               sel.promotesTo.empty() ? "" : "  -  promotes");
   ImGui::Text("drawn as a %s", std::string(archetypeName(archetypeFor(sel))).c_str());

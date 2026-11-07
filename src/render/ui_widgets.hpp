@@ -62,7 +62,12 @@ void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
 /// power-down dims it). Themes with brackets (the manifold) get emissive edges and a
 /// faint scanline texture; the plate theme gets the same cut in its own ink and brass.
 void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-              float scale, float draw = 1.0f, float level = 1.0f);
+              float scale, float draw = 1.0f, float level = 1.0f, float corner = 1.0f);
+
+/// The same panel at screen size (M23.11 section 5): chamfer and brackets `corner` times
+/// the HUD's, so a pane reads as a larger sibling of the status panel rather than a
+/// different object.
+inline constexpr float kScreenPanelCorner = 1.6f;
 
 /// A section heading with a rule running out to the right, the way a plate is labelled.
 void heading(const char* text, const view::Theme& theme, ImFont* font);
@@ -179,6 +184,12 @@ bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* l
 void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
                float pad, bool remember = true);
 void endPane();
+/// Frame the pane just begun in the screen panel, around its measured content (the last
+/// frame's height; nothing on the first), kept `8 * scale` inside the limits. Call between
+/// beginPane and the content, so the content draws over it and the pane's transition
+/// scales it with the rest.
+void paneFrame(const view::Theme& theme, float scale, ImVec2 limitMin, ImVec2 limitMax,
+               float draw = 1.0f, float level = 1.0f);
 
 void beginPlate(const char* id, const view::Theme& theme, ImVec2 size,
                 float yBias = 0.5f);

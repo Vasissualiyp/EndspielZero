@@ -114,12 +114,12 @@ void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
 }
 
 void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
-              float scale, float draw, float level) {
+              float scale, float draw, float level, float corner) {
   const float width = max.x - min.x;
   const float height = max.y - min.y;
   if (width <= 0.0f || height <= 0.0f || draw <= 0.0f) return;
   const bool led = theme.panelStyle == view::PanelStyle::Brackets;
-  const float cut = std::min({6.0f * scale, width * 0.25f, height * 0.25f});
+  const float cut = std::min({6.0f * scale * corner, width * 0.25f, height * 0.25f});
   const ImVec2 outline[8] = {{min.x + cut, min.y}, {max.x - cut, min.y},
                              {max.x, min.y + cut}, {max.x, max.y - cut},
                              {max.x - cut, max.y}, {min.x + cut, max.y},
@@ -158,7 +158,7 @@ void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
     }
   }
   if (draw >= 1.0f) {
-    const float arm = std::min({10.0f * scale, width * 0.3f, height * 0.3f});
+    const float arm = std::min({10.0f * scale * corner, width * 0.3f, height * 0.3f});
     const ImU32 bracket = u32(led ? theme.ember : theme.emberDeep, level);
     for (const float x : {min.x, max.x}) {
       for (const float y : {min.y, max.y}) {
@@ -200,7 +200,7 @@ void heading(const char* text, const view::Theme& theme, ImFont* font) {
 
 void keyValue(const char* key, const std::string& value, const view::Theme& theme,
               bool cold) {
-  ImGui::PushStyleColor(ImGuiCol_Text, col(theme.boneFaint));
+  ImGui::PushStyleColor(ImGuiCol_Text, col(theme.boneDim));
   ImGui::TextUnformatted(key);
   ImGui::PopStyleColor();
   ImGui::SameLine();
@@ -915,6 +915,22 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   currentPane() = id;
   currentPaneRemember() = remember;
   currentPaneTop() = ImGui::GetCursorPosY();
+}
+
+void paneFrame(const view::Theme& theme, float scale, ImVec2 limitMin, ImVec2 limitMax,
+               float draw, float level) {
+  if (!currentPaneBuilt()) return;
+  const auto it = paneHeights().find(currentPane());
+  if (it == paneHeights().end()) return;  // first frame: nothing measured to frame yet
+  const ImVec2 wp = ImGui::GetWindowPos();
+  const ImVec2 ws = ImGui::GetWindowSize();
+  const float mx = 20.0f * scale, my = 16.0f * scale, edge = 8.0f * scale;
+  const ImVec2 min(std::max(wp.x - mx, limitMin.x + edge),
+                   std::max(wp.y - my, limitMin.y + edge));
+  const ImVec2 max(std::min(wp.x + ws.x + mx, limitMax.x - edge),
+                   std::min(wp.y + it->second + my, limitMax.y - edge));
+  hudPanel(ImGui::GetWindowDrawList(), min, max, theme, scale, draw, level,
+           kScreenPanelCorner);
 }
 
 void endPane() {

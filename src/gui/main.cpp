@@ -771,7 +771,10 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->overtures().setProgress(overtureT);
   } else if (screen == "quit")
     shell->go(app::Screen::QuitConfirm);
-  else if (screen == "watch")
+  else if (screen == "pausequit") {
+    shell->pause();
+    shell->go(app::Screen::PauseQuitConfirm);
+  } else if (screen == "watch")
     shell->go(app::Screen::Watch);
 
   // A capture can show the watching state itself (M12.8): start a bundled game and render
@@ -917,7 +920,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     if (gResult && gEndT < 0) (void)shell->session()->showResult();
     (*ui)->setCaptureAge(gCaptureT >= 0 ? std::optional<float>(gCaptureT) : std::nullopt);
     {
-      const auto age = [](float t) { return t >= 0 ? std::optional<float>(t) : std::nullopt; };
+      const auto age = [](float t) {
+        return t >= 0 ? std::optional<float>(t) : std::nullopt;
+      };
       (*ui)->setHudEvents({age(gEventT), age(gEventT), age(gThinkT), age(gCheckT)});
     }
     (*ui)->tick(dt);
@@ -1417,7 +1422,8 @@ int main(int argc, char** argv) {
           "With no variant, the game opens on the main menu.\n"
           "--shot renders one frame to a PPM and exits, with no display required;\n"
           "--screen picks which one: menu, welcome, newgame, pause, settings, editor,\n"
-          "designer, body, flat, info, pieces, or the board by default.\n"
+          "designer, body, flat, info, pieces, quit, pausequit, or the board by "
+          "default.\n"
           "--t 0..1 is where the library screen's overture is in its cycle: 0 the flat\n"
           "board every variant starts from, 1 the shape it becomes.\n"
           "--clip DIR renders a sequence of numbered PPM frames instead of one shot,\n"
@@ -1540,11 +1546,11 @@ int main(int argc, char** argv) {
                 arg == "--event-t" || arg == "--think-t") &&
                i + 1 < argc) {
       char* end = nullptr;
-      float& target = arg == "--check-t"     ? gCheckT
-                      : arg == "--end-t"     ? gEndT
-                      : arg == "--event-t"   ? gEventT
-                      : arg == "--think-t"   ? gThinkT
-                                             : gCaptureT;
+      float& target = arg == "--check-t"   ? gCheckT
+                      : arg == "--end-t"   ? gEndT
+                      : arg == "--event-t" ? gEventT
+                      : arg == "--think-t" ? gThinkT
+                                           : gCaptureT;
       target = std::strtof(argv[++i], &end);
       if (*end != '\0' || !std::isfinite(target) || target < 0.0f) {
         std::fprintf(stderr, "%s requires seconds >= 0\n", arg.c_str());

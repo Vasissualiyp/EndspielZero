@@ -3548,6 +3548,63 @@ TEST_CASE("result panel offers review, which esc leaves",
   CHECK(gpu().ctx.takeValidationMessages().empty());
 }
 
+TEST_CASE("every screen builds cleanly and stays inside the viewport at scales 1 and 3",
+          "[render][gpu][screens]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  using S = app::Screen;
+  for (const S screen :
+       {S::Welcome, S::MainMenu, S::NewGame, S::Watch, S::Game, S::Paused, S::Settings,
+        S::GameInfo, S::PieceMoves, S::QuitConfirm, S::PauseQuitConfirm}) {
+    for (const float scale : {1.0f, 3.0f}) {
+      CAPTURE(static_cast<int>(screen), scale);
+      SDL_Window* window = SDL_CreateWindow("screens", 1920, 1080, SDL_WINDOW_HIDDEN);
+      REQUIRE(window != nullptr);
+      struct WindowGuard {
+        SDL_Window* window;
+        ~WindowGuard() { SDL_DestroyWindow(window); }
+      } guard{window};
+      auto shell = app::Shell::create(
+          {"standard"}, std::filesystem::path(CB_BINARY_DIR) / "screens.conf");
+      shell->settings().guiScale = scale;
+      shell->settings().vsync = false;
+      if (screen == S::Paused || screen == S::PauseQuitConfirm) shell->pause();
+      if (screen != S::Game && screen != S::Paused) shell->go(screen);
+      auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+      REQUIRE(ui.has_value());
+      REQUIRE((*ui)->setScale(scale).has_value());
+      for (int i = 0; i < 6; ++i) {
+        (*ui)->tick(1);
+        (*ui)->newFrame();
+        (void)(*ui)->build(*shell, 60);
+        (*ui)->endFrame();
+      }
+      const ImVec2 size = ImGui::GetMainViewport()->Size;
+      int pane = 0;
+      for (const ImGuiWindow* w : GImGui->Windows) {
+        if (!w->Active || w->Name[0] != '#') continue;
+        if (std::strncmp(w->Name, "##", 2) != 0) continue;
+        // Only the menu panes are bounded; the game's HUD windows have their own tests.
+        if (screen == S::Game || w->ChildId != 0) continue;
+        ++pane;
+        // A pane is laid out centred on its content, so the window may be taller than the
+        // screen while what it holds is not: bound the content, and the width.
+        const float bottom = w->Pos.y + std::min(w->Size.y, w->ContentSize.y);
+        CHECK(w->Pos.x >= -0.5f);
+        CHECK(w->Pos.y >= -0.5f);
+        CHECK(w->Pos.x + w->Size.x <= size.x + 0.5f);
+        CHECK(bottom <= size.y + 0.5f);
+      }
+      if (screen != S::Game) CHECK(pane >= 1);
+      CHECK(gpu().ctx.takeValidationMessages().empty());
+    }
+  }
+}
+
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

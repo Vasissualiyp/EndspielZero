@@ -91,14 +91,15 @@ struct HudTextRow {
   view::Rgba colour;
   std::function<void()> clicked{};
   // Live feedback (M23.11 section 4). Any of these draws the row through the draw list.
-  std::string from{};         ///< cross-fade from this text...
-  view::Rgba fromColour{};    ///< ...in this colour
-  float mix{1.0f};            ///< 0 shows `from`, 1 shows `text`
-  float reveal{1.0f};         ///< left-to-right reveal with a bright leading edge
-  float shift{0.0f};          ///< fraction of a row to ease up from, in a scrolled list
-  float alpha{1.0f};          ///< row opacity
-  float trailing{0.0f};       ///< extra width reserved after the text
-  /// Draws beside the text: (draw list, the text's top-left, row size, panel content left).
+  std::string from{};       ///< cross-fade from this text...
+  view::Rgba fromColour{};  ///< ...in this colour
+  float mix{1.0f};          ///< 0 shows `from`, 1 shows `text`
+  float reveal{1.0f};       ///< left-to-right reveal with a bright leading edge
+  float shift{0.0f};        ///< fraction of a row to ease up from, in a scrolled list
+  float alpha{1.0f};        ///< row opacity
+  float trailing{0.0f};     ///< extra width reserved after the text
+  /// Draws beside the text: (draw list, the text's top-left, row size, panel content
+  /// left).
   std::function<void(ImDrawList*, ImVec2, ImVec2, float)> after{};
   [[nodiscard]] bool animated() const {
     return mix < 1.0f || reveal < 1.0f || shift != 0.0f || alpha != 1.0f || bool(after);
@@ -142,8 +143,8 @@ void drawAnimatedRow(const HudTextRow& row, ImVec2 extent, float spacing, float 
   if (row.mix < 1.0f && !row.from.empty()) {
     const float fromW = font->CalcTextSizeA(size, FLT_MAX, 0.0f, row.from.c_str()).x;
     const float dx = leftAlign ? 0.0f : textW - fromW;
-    dl->AddText(font, size, ImVec2(at.x + dx, at.y), colourOf(row.fromColour, 1.0f - row.mix),
-                row.from.c_str());
+    dl->AddText(font, size, ImVec2(at.x + dx, at.y),
+                colourOf(row.fromColour, 1.0f - row.mix), row.from.c_str());
   }
   const float a = row.mix < 1.0f ? row.mix : 1.0f;
   if (row.reveal < 1.0f) {
@@ -1013,7 +1014,10 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   // through where nothing else is drawn.
   dl->AddRectFilled(min, max, u32(theme_.ink));
   field_.draw(dl, min, max, theme_, iconStyle_, true, true);
-  if (theme_.panelStyle == view::PanelStyle::Brackets) {
+  // Every pane carries its own screen panel now; only the editor, which does not, keeps
+  // the open frame.
+  if (theme_.panelStyle == view::PanelStyle::Brackets &&
+      shell.screen() == app::Screen::Editor) {
     widgets::panelCorners(dl, ImVec2(menuMin.x + px(24), menuMin.y + px(24)),
                           ImVec2(menuMax.x - px(24), menuMax.y - px(24)), theme_, scale_);
   }
@@ -1341,11 +1345,6 @@ void Ui::pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax) {
   // A departing ghost must not lay the scrim a second time.
   if (ghosting_) return;
   ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(theme_.ink, 0.42f));
-  if (theme_.panelStyle == view::PanelStyle::Brackets) {
-    widgets::panelCorners(ImGui::GetBackgroundDrawList(),
-                          ImVec2(menuMin.x + px(24), menuMin.y + px(24)),
-                          ImVec2(menuMax.x - px(24), menuMax.y - px(24)), theme_, scale_);
-  }
   request.boardRect[0] = vmin.x;
   request.boardRect[1] = vmin.y;
   request.boardRect[2] = split - vmin.x;
@@ -2173,18 +2172,21 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     const float dotR = px(2.5f), dotStep = px(8.0f), dotGap = px(6.0f);
     status[1].after = [=](ImDrawList* dl, ImVec2 at, ImVec2 size, float leftX) {
       const float styleAlpha = ImGui::GetStyle().Alpha;
-      const float label = thinkFont->CalcTextSizeA(thinkFont->FontSize, FLT_MAX, 0, "THINKING").x;
+      const float label =
+          thinkFont->CalcTextSizeA(thinkFont->FontSize, FLT_MAX, 0, "THINKING").x;
       const float dots = 3 * dotStep;
       const bool room = leftX + label + dotGap + dots + dotGap < at.x;
       float x = leftX;
       if (room) {
-        dl->AddText(thinkFont, thinkFont->FontSize, ImVec2(x, at.y + (size.y - thinkFont->FontSize) * 0.5f),
+        dl->AddText(thinkFont, thinkFont->FontSize,
+                    ImVec2(x, at.y + (size.y - thinkFont->FontSize) * 0.5f),
                     u32(ember, styleAlpha), "THINKING");
         x += label + dotGap;
       }
       for (int d = 0; d < 3; ++d) {
         const float level = view::thinkingDot(age, d, fxIntensity);
-        const ImVec2 c(x + dotStep * (static_cast<float>(d) + 0.5f), at.y + size.y * 0.5f);
+        const ImVec2 c(x + dotStep * (static_cast<float>(d) + 0.5f),
+                       at.y + size.y * 0.5f);
         dl->AddCircleFilled(c, dotR * 1.8f, u32(ember, 0.18f * level * styleAlpha), 12);
         dl->AddCircleFilled(c, dotR, u32(ember, level * styleAlpha), 12);
       }
