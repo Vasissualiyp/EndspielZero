@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -68,5 +69,15 @@ struct CapturedGroup {
 };
 [[nodiscard]] std::vector<CapturedGroup> groupCaptured(std::span<const Piece> pieces);
 [[nodiscard]] float captureReveal(float age, float intensity) noexcept;
+
+/// A small vector arrow for the glyphs the HUD font lacks (M23.11 section 7): a shaft and
+/// two head strokes inside a `size` square centred on `centre`. Y grows downward, as on
+/// the screen, so Up points to smaller y.
+enum class ArrowDir { Right, Left, Up };
+struct ArrowStroke {
+  HudPoint a, b;
+};
+[[nodiscard]] std::array<ArrowStroke, 3> arrowStrokes(HudPoint centre, float size,
+                                                      ArrowDir dir) noexcept;
 
 }  // namespace cb::render

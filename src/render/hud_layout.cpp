@@ -146,4 +146,32 @@ std::vector<CapturedGroup> groupCaptured(std::span<const Piece> pieces) {
 float captureReveal(float age, float intensity) noexcept {
   return intensity < .5f ? 1.0f : std::clamp(age / .35f, 0.0f, 1.0f);
 }
+std::array<ArrowStroke, 3> arrowStrokes(HudPoint c, float size, ArrowDir dir) noexcept {
+  // Built pointing right in a local frame (x along the arrow), then rotated into place.
+  const float h = size * 0.5f;
+  const float head = size * 0.28f;
+  const HudPoint local[3][2] = {
+      {{-h, 0}, {h, 0}}, {{h, 0}, {h - head, -head}}, {{h, 0}, {h - head, head}}};
+  std::array<ArrowStroke, 3> out{};
+  for (int i = 0; i < 3; ++i) {
+    HudPoint p[2];
+    for (int k = 0; k < 2; ++k) {
+      const float x = local[i][k].x, y = local[i][k].y;
+      switch (dir) {
+        case ArrowDir::Right:
+          p[k] = {c.x + x, c.y + y};
+          break;
+        case ArrowDir::Left:
+          p[k] = {c.x - x, c.y + y};
+          break;
+        case ArrowDir::Up:
+          p[k] = {c.x + y, c.y - x};
+          break;
+      }
+    }
+    out[static_cast<std::size_t>(i)] = {p[0], p[1]};
+  }
+  return out;
+}
+
 }  // namespace cb::render

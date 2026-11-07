@@ -354,6 +354,16 @@ Result<VkShaderModule> makeShader(const VulkanContext& ctx,
   return m;
 }
 
+/// A vector arrow centred in the item rectangle `min`..`max` (see `arrowStrokes`).
+void drawArrow(ImDrawList* dl, ImVec2 min, ImVec2 max, ArrowDir dir, ImU32 colour,
+               float thickness, float fill = 0.8f) {
+  const float size = std::min(max.x - min.x, max.y - min.y);
+  const HudPoint centre{(min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f};
+  for (const ArrowStroke& s : arrowStrokes(centre, std::max(size, 4.0f) * fill, dir))
+    dl->AddLine(ImVec2(s.a.x, s.a.y), ImVec2(s.b.x, s.b.y), colour,
+                std::max(1.0f, thickness));
+}
+
 /// The shell's own screens - the main menu and the panels it opens into. They move as
 /// panes and a departing one is worth drawing again; the board screens are covered by
 /// the board's own pull-back instead.
@@ -2079,13 +2089,20 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     ImGui::End();
     ImGui::PopStyleVar();
   };
-  std::string axisLegend;
+  // The axis names with their arrows. The HUD font has no -> or up arrow, so where it
+  // lacks the glyphs each arrow is drawn as three vector strokes (M23.11 section 7).
+  struct LegendPart {
+    std::string name;
+    ArrowDir dir;
+  };
+  std::vector<LegendPart> axisLegend;
+  const bool arrowGlyphs = small->FindGlyphNoFallback(0x2192) != nullptr &&
+                           small->FindGlyphNoFallback(0x2191) != nullptr;
   if (shell.settings().showCoordinates) {
     const auto& axes = session.viewConfig().screenAxes;
     for (std::size_t i = 0; i < axes.size(); ++i) {
-      if (i) axisLegend += "   ";
-      axisLegend += v.dims.name(axes[i]);
-      axisLegend += i == 0 ? " ->" : " ^";
+      axisLegend.push_back(
+          {v.dims.name(axes[i]), i == 0 ? ArrowDir::Right : ArrowDir::Up});
     }
   }
   const char* topology = v.geom.isBox()          ? "flat board"
@@ -2097,8 +2114,20 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   const auto textWidth = [](ImFont* font, const std::string& text) {
     return font->CalcTextSizeA(font->FontSize, FLT_MAX, 0, text.c_str()).x;
   };
-  const float metaWidth = textWidth(small, topology) +
-                          (axisLegend.empty() ? 0 : px(8) + textWidth(small, axisLegend));
+  const float arrowSize = std::round(small->FontSize * 0.7f);
+  // The old single-string legend separated axes with three spaces; keep that width.
+  const float legendGap = textWidth(small, "   ");
+  float legendWidth = 0;
+  for (const auto& part : axisLegend) {
+    const std::string text =
+        arrowGlyphs ? part.name + (part.dir == ArrowDir::Right ? " \xE2\x86\x92"
+                                                               : " \xE2\x86\x91")
+                    : part.name;
+    legendWidth += textWidth(small, text) + (arrowGlyphs ? 0 : px(4) + arrowSize) +
+                   (legendWidth > 0 ? legendGap : 0);
+  }
+  const float metaWidth =
+      textWidth(small, topology) + (axisLegend.empty() ? 0 : px(8) + legendWidth);
   float seamWidth = 0;
   for (const auto& e : seamKey)
     seamWidth +=
@@ -2136,7 +2165,22 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       ImGui::SameLine(0, px(8));
       ImGui::PushFont(small);
       ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint));
-      ImGui::TextUnformatted(axisLegend.c_str());
+      for (std::size_t i = 0; i < axisLegend.size(); ++i) {
+        const auto& part = axisLegend[i];
+        if (i > 0) ImGui::SameLine(0, legendGap);
+        if (arrowGlyphs) {
+          ImGui::TextUnformatted(
+              (part.name +
+               (part.dir == ArrowDir::Right ? " \xE2\x86\x92" : " \xE2\x86\x91"))
+                  .c_str());
+        } else {
+          ImGui::TextUnformatted(part.name.c_str());
+          ImGui::SameLine(0, px(4));
+          ImGui::Dummy(ImVec2(arrowSize, small->FontSize));
+          drawArrow(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(),
+                    ImGui::GetItemRectMax(), part.dir, u32(t.boneFaint), px(1));
+        }
+      }
       ImGui::PopStyleColor();
       ImGui::PopFont();
     }
@@ -2190,8 +2234,8 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     status.push_back({upper(std::string(toString(result))), display, t.blood});
   }
   char statusLine[128];
-  std::snprintf(statusLine, sizeof(statusLine), "ply %zu   %zu legal", game.plyCount(),
-                game.legalMoves().size());
+  std::snprintf(statusLine, sizeof(statusLine), "ply %zu \xC2\xB7 %zu legal",
+                game.plyCount(), game.legalMoves().size());
   status.push_back({statusLine, small, t.boneDim});
   if (result != GameResult::InProgress) {
     status.push_back(
@@ -2449,20 +2493,30 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       // The triangles where the font has them; the plain arrows otherwise.
       const bool glyphs = actionFont()->FindGlyphNoFallback(0x25C0) != nullptr &&
                           actionFont()->FindGlyphNoFallback(0x25B6) != nullptr;
+      // Without the triangles the button is blank (distinct labels keep distinct ids)
+      // and a vector arrow is drawn over it.
+      const auto overlay = [&](ArrowDir dir, bool on) {
+        if (glyphs) return;
+        drawArrow(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(),
+                  ImGui::GetItemRectMax(), dir, u32(on ? t.bone : t.boneFaint), px(1.5f),
+                  0.5f);
+      };
       const std::size_t at = *reviewing;
       app::Action step;
       step.kind = app::ActionKind::ReviewStep;
-      if (dockButton(glyphs ? "\xE2\x97\x80" : "<", t, px(56), false, false, at > 0,
+      if (dockButton(glyphs ? "\xE2\x97\x80" : " ", t, px(56), false, false, at > 0,
                      actionFont())) {
         step.dx = -1;
         (void)session.apply(step);
       }
+      overlay(ArrowDir::Left, at > 0);
       ImGui::SameLine();
-      if (dockButton(glyphs ? "\xE2\x96\xB6" : ">", t, px(56), false, false,
+      if (dockButton(glyphs ? "\xE2\x96\xB6" : "  ", t, px(56), false, false,
                      at < game.plyCount(), actionFont())) {
         step.dx = 1;
         (void)session.apply(step);
       }
+      overlay(ArrowDir::Right, at < game.plyCount());
       ImGui::SameLine();
       if (dockButton("EXIT REVIEW", t, px(140), true, false, true, actionFont())) {
         app::Action end;

@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #ifdef CB_HAVE_IMGUI
+#include <cmath>
+
 #include "render/hud_layout.hpp"
 
 using namespace cb;
@@ -162,5 +164,33 @@ TEST_CASE("result panel traces after the end hold and calm only fades",
   CHECK(calm.draw == 1);
   CHECK(calm.content == Approx(.5f));
   CHECK(calm.level == Approx(.5f));
+}
+
+TEST_CASE("vector arrows point where they say, inside their square", "[render][arrow]") {
+  const HudPoint c{100, 50};
+  const float size = 10;
+  for (const auto dir : {ArrowDir::Right, ArrowDir::Left, ArrowDir::Up}) {
+    const auto strokes = arrowStrokes(c, size, dir);
+    for (const auto& s : strokes)
+      for (const auto& p : {s.a, s.b}) {
+        CHECK(std::fabs(p.x - c.x) <= size * 0.5f + 1e-4f);
+        CHECK(std::fabs(p.y - c.y) <= size * 0.5f + 1e-4f);
+      }
+    // The shaft runs through the centre, and both head strokes end at its tip.
+    const HudPoint tip = strokes[0].b;
+    CHECK(strokes[1].a.x == Approx(tip.x));
+    CHECK(strokes[2].a.y == Approx(tip.y));
+    CHECK(strokes[0].a.x + strokes[0].b.x == Approx(2 * c.x));
+    CHECK(strokes[0].a.y + strokes[0].b.y == Approx(2 * c.y));
+    // The head strokes lie behind the tip, along the shaft.
+    const float dx = tip.x - strokes[0].a.x, dy = tip.y - strokes[0].a.y;
+    for (int k = 1; k < 3; ++k) {
+      const auto& h = strokes[static_cast<std::size_t>(k)];
+      CHECK((h.b.x - tip.x) * dx + (h.b.y - tip.y) * dy < 0);
+    }
+  }
+  CHECK(arrowStrokes(c, size, ArrowDir::Right)[0].b.x > c.x);
+  CHECK(arrowStrokes(c, size, ArrowDir::Left)[0].b.x < c.x);
+  CHECK(arrowStrokes(c, size, ArrowDir::Up)[0].b.y < c.y);
 }
 #endif
