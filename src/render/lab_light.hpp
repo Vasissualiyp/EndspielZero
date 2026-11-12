@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <cstddef>
+#include <string_view>
 namespace cb::io {
 struct LabDoc;
 }
@@ -27,6 +28,8 @@ static_assert(offsetof(GpuLightBlock, lights) == 48);
 /// Smooth cone edge; equal bounds give a hard cut-off (soft = 0).
 [[nodiscard]] float spotFactor(float cosAngle, float cosCone, float cosSoft) noexcept;
 [[nodiscard]] GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene,
-                                          float roomLight, float keyFactor);
+                                          float roomLight, float keyFactor,
+                                          std::string_view lightName = {},
+                                          float intensityScale = 1);
 [[nodiscard]] GpuLightBlock neutralLightBlock() noexcept;
 }  // namespace cb::render

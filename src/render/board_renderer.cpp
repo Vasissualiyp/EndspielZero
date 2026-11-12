@@ -2395,7 +2395,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   const std::size_t shadowBase = scaffoldBase + set.scaffold.size();
   const std::size_t standbyBase = shadowBase + set.shadows.size();
   const std::size_t labBase = standbyBase + (set.standbyLed ? 1 : 0);
-  const std::size_t instanceCount = labBase + set.lab.size();
+  const std::size_t holoBase = labBase + set.lab.size();
+  const std::size_t holoTokenBase = holoBase + set.holo.size();
+  const std::size_t holoBeamBase = holoTokenBase + set.holoTokens.size();
+  const std::size_t instanceCount = holoBeamBase + set.holoBeam.size();
   if (auto r = ensureInstanceCapacity(frame, instanceCount); !r.has_value()) return r;
   if (instanceCount > 0) {
     void* mapped = nullptr;
@@ -2414,6 +2417,14 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     if (!set.lab.empty())
       std::memcpy(static_cast<char*>(mapped) + labBase * sizeof(Instance), set.lab.data(),
                   set.lab.size() * sizeof(Instance));
+    const auto copyHolo = [&](const std::vector<Instance>& items, std::size_t base) {
+      if (!items.empty())
+        std::memcpy(static_cast<char*>(mapped) + base * sizeof(Instance), items.data(),
+                    items.size() * sizeof(Instance));
+    };
+    copyHolo(set.holo, holoBase);
+    copyHolo(set.holoTokens, holoTokenBase);
+    copyHolo(set.holoBeam, holoBeamBase);
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
@@ -2662,7 +2673,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // and the ordinary solid board keep the sculptural meshes whatever the setting says.
     const bool cylinderPieces = options_.shapePieceCylinders && options_.surface &&
                                 !options_.flat && !set.surfaceIndices.empty();
-    if (!set.instances.empty() || set.standbyLed || !set.lab.empty()) {
+    if (!set.instances.empty() || set.standbyLed || !set.lab.empty() ||
+        !set.holo.empty() || !set.holoTokens.empty()) {
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, scenePipeline);
       vkCmdPushConstants(cmd, layout_,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -2686,6 +2698,20 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       }
       for (std::size_t s = 0; s < set.labFileBatches.size(); ++s)
         drawLab(meshes_.fileRanges.at(s), set.labFileBatches[s]);
+      if (!set.holo.empty()) {
+        const auto& mesh = meshes_.labRanges[static_cast<std::size_t>(LabShape::Box)];
+        vkCmdDrawIndexed(cmd, mesh.indexCount,
+                         static_cast<std::uint32_t>(set.holo.size()), mesh.firstIndex,
+                         mesh.vertexOffset, static_cast<std::uint32_t>(holoBase));
+      }
+      for (std::size_t s = 0; s < set.holoTokenBatches.size(); ++s) {
+        const auto& batch = set.holoTokenBatches[s];
+        const auto& mesh = meshes_.ranges[s];
+        if (batch.count)
+          vkCmdDrawIndexed(cmd, mesh.indexCount, batch.count, mesh.firstIndex,
+                           mesh.vertexOffset,
+                           static_cast<std::uint32_t>(holoTokenBase) + batch.first);
+      }
       // One draw per shape, not per piece: eight calls for any board of any size.
       for (std::size_t s = 0; s < set.batches.size(); ++s) {
         const auto& batch = set.batches[s];
@@ -2731,6 +2757,21 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
                          0, set.surfaceInstance);
       }
+    }
+    // The projector beam is translucent, depth-tested against the opaque room.
+    if (!set.holoBeam.empty()) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blendPipeline);
+      vkCmdPushConstants(cmd, layout_,
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                         sizeof(PushConstants), &push);
+      const VkDeviceSize zero = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer_, &zero);
+      vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_[frame], &zero);
+      vkCmdBindIndexBuffer(cmd, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+      const auto& mesh = meshes_.labRanges[static_cast<std::size_t>(LabShape::Cylinder)];
+      vkCmdDrawIndexed(cmd, mesh.indexCount,
+                       static_cast<std::uint32_t>(set.holoBeam.size()), mesh.firstIndex,
+                       mesh.vertexOffset, static_cast<std::uint32_t>(holoBeamBase));
     }
     // The tesseract scaffold (M17.12 part D), blended so it reads as a wire: depth-tested
     // against the board but writing no depth, so an edge behind the patches is hidden and

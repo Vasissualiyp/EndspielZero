@@ -27,6 +27,14 @@ union SDL_Event;
 
 namespace cb::render {
 
+struct HologramRequest {
+  enum Kind { None, Manifold, Overture, Tesseract } kind{None};
+  float seconds{0};
+  float yaw{0};
+  float alpha{1};
+  float scale{1};
+};
+
 /// The window of the authoring plane an outline editor shows, in permille. The body's
 /// profile uses the whole box; an element is drawn about its own origin, so its window
 /// reaches to both sides of zero.
@@ -194,6 +202,10 @@ class Ui {
   void setVisualTime(double seconds) noexcept;
   void setLabDoc(const io::LabDoc* doc) noexcept { console_.setLabDoc(doc); }
   void setLabBackdrop(bool enabled) noexcept { labBackdrop_ = enabled; }
+  [[nodiscard]] HologramRequest hologramRequest() const { return hologramRequest_; }
+  [[nodiscard]] const OvertureScene* overtureScene() const {
+    return overtureCacheValid_ ? &overtureCache_ : nullptr;
+  }
   /// The HUD panels' share of the board's presentation (M23.10 section 7): `draw` traces
   /// the panel edges on (boot, 0..1), `content` fades what is inside them in, `level`
   /// dims the panels (the end power-down). All 1 is the settled HUD; status stays lit.
@@ -247,6 +259,7 @@ class Ui {
 
  private:
   bool labBackdrop_{false};
+  HologramRequest hologramRequest_{};
   Ui() = default;
   bool forceDevOverlay_{false};
   std::optional<std::uint8_t> seamHover_;
@@ -302,6 +315,7 @@ class Ui {
   void drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& max);
   /// The library's object: the selected variant's overture, in the half the
   /// decoration would otherwise occupy.
+  void refreshOvertureCache(app::Shell& shell);
   void drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& max,
                           float zoom, float alpha);
   /// Let the player turn whatever object the screen is showing, by dragging it.

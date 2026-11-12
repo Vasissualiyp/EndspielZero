@@ -967,8 +967,7 @@ void Ui::updateObjectDrag(app::Shell& shell, const ImVec2& min, const ImVec2& ma
   objectElev_ = std::clamp(objectElev_, -1.15f, 1.15f);
 }
 
-void Ui::drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& max,
-                            float zoom, float alpha) {
+void Ui::refreshOvertureCache(app::Shell& shell) {
   const app::OverturePlayer& p = shell.overtures();
   const app::Overture which = p.current();
   const float progress = p.progress();
@@ -984,7 +983,7 @@ void Ui::drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& 
       overtureCacheT_ != progress || overtureCacheIntro_ != intro ||
       overtureCacheVariant_ != pickedVariant_ || overtureCacheDerived_ != derived) {
     overtureCache_ = derived ? derivedOvertureScene(*spec, progress, theme_)
-                             : overtureScene(which, progress, intro, theme_);
+                             : render::overtureScene(which, progress, intro, theme_);
     overtureCacheWhich_ = which;
     overtureCacheT_ = progress;
     overtureCacheIntro_ = intro;
@@ -992,6 +991,11 @@ void Ui::drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& 
     overtureCacheDerived_ = derived;
     overtureCacheValid_ = true;
   }
+}
+
+void Ui::drawOvertureObject(app::Shell& shell, const ImVec2& min, const ImVec2& max,
+                            float zoom, float alpha) {
+  refreshOvertureCache(shell);
   // A copy, because the player's turn below is this frame's camera, not the scene's.
   OvertureScene scene = overtureCache_;
   // The player's turn is added to the overture's own camera, not substituted for it, so
@@ -1058,10 +1062,11 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   const float inE = inEase();
   const float outE = outEase();
   const float inZoom = deeper_ ? 0.55f + 0.45f * inE : 1.7f - 0.7f * inE;
-  drawDeco(dl, decoForScreen(static_cast<int>(shell.screen()), shell.showsBoard()),
-           decoMin, decoMax, theme_, iconStyle_, clock_, subjectFor(shell.screen()),
-           inZoom, inE, objectYaw_, objectElev_);
-  if (leaving_ != Deco::None && outE < 1.0f) {
+  if (!labBackdrop_)
+    drawDeco(dl, decoForScreen(static_cast<int>(shell.screen()), shell.showsBoard()),
+             decoMin, decoMax, theme_, iconStyle_, clock_, subjectFor(shell.screen()),
+             inZoom, inE, objectYaw_, objectElev_);
+  if (!labBackdrop_ && leaving_ != Deco::None && outE < 1.0f) {
     const float outZoom = deeper_ ? 1.0f + 0.8f * outE : 1.0f - 0.5f * outE;
     const VariantSpec* leavingSubject =
         leavingScreen_ >= 0 ? subjectFor(static_cast<app::Screen>(leavingScreen_))
@@ -1081,7 +1086,25 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   // whatever that variant plays on, and back again. It replaces the turning lattice,
   // which said only how many boards there were.
   if (shell.screen() == app::Screen::NewGame) {
-    drawOvertureObject(shell, decoMin, decoMax, inZoom, inE);
+    refreshOvertureCache(shell);
+    if (!labBackdrop_) drawOvertureObject(shell, decoMin, decoMax, inZoom, inE);
+  }
+
+  hologramRequest_.seconds = clock_;
+  hologramRequest_.yaw = objectYaw_;
+  if (shell.screen() == app::Screen::NewGame) {
+    hologramRequest_.kind = HologramRequest::Overture;
+  } else {
+    switch (decoForScreen(static_cast<int>(shell.screen()), shell.showsBoard())) {
+      case Deco::Manifold:
+        hologramRequest_.kind = HologramRequest::Manifold;
+        break;
+      case Deco::Tesseract:
+        hologramRequest_.kind = HologramRequest::Tesseract;
+        break;
+      default:
+        break;
+    }
   }
 
   // A hairline between the object and the menu, and the depth ladder on the far left.
@@ -1577,6 +1600,7 @@ void Ui::drawDebugConsole(app::Shell& shell) {
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
   seamHover_.reset();
+  hologramRequest_ = {};
   const widgets::ScopedVisualTime visualTime(visualTime_);
   updateKeyboardNavigation(shell);
   // Start the frame with an empty field list. Only the board screen fills it; every other

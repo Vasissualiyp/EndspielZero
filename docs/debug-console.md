@@ -29,6 +29,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `get`/`set presentationIntensity` | The board's presentation intensity (`presentation_intensity`, persisted, clamped to 0..1, default 1): the glitches, the boot sweep, the check ripple and the end power-down. Below one half every effect takes its calm form |
 | `lights` | List the loaded lab lights with kind, position in metres, radius, authored intensity and group; prints `lab is off` when disabled; needs no game |
 | `get`/`set roomLight` | Practical room-light gain (`room_light`, persisted, finite 0..2, default 1); machine lights keep their authored intensity |
+| `projector [on\|off]` | Toggle the bench hologram; works without a game. Also `get`/`set projector` (persisted, default on) |
 | `lab [on\|off]` | Toggle the static lab behind menu screens (default off); works without a game. Also `get`/`set labScene` or `lab_scene` |
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
@@ -108,6 +109,12 @@ groups:
       including with saved settings; use `--lab 1` to opt in.
     - `--station <name>` requires `--lab 1` and shows the room from a named station
       regardless of screen: menu, tutorial, library, watch, settings, quit or sky (looks up through the skylight).
+    - `--projector 0|1` overrides the bench hologram for this run. The menu and
+      tutorial project the manifold; Settings projects a tesseract; Library projects
+      the selected overture. Drag on the left to turn it about vertical; lab drag
+      elevation is ignored. `projector on|off` updates the projector setting.
+      With `--lab 1`, `--screen settings` enters Settings from the menu.
+    - `--overture-t <0..1>` pins Library progress for captures (alias for `--t`).
     - `--room-light <0..2>` overrides the room practicals for this run only; machine
       lights remain unchanged. Console `get`/`set roomLight` saves the gain; `lights`
       lists the authored lights.

@@ -58,7 +58,7 @@ if(SDL3_FOUND)
   if(imgui_FOUND)
     list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp deco.cpp
                                  overture_scene.cpp play_surface.cpp ui_designer.cpp
-                                 shape_sequence.cpp)
+                                 shape_sequence.cpp projector_hologram.cpp)
   endif()
 endif()
 

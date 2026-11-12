@@ -339,3 +339,20 @@ TEST_CASE("lights console dumps the loaded lab independently of a running game",
   c.setLabDoc(nullptr);
   CHECK(c.run(*shell, "lights") == "lab is off");
 }
+
+TEST_CASE("projector can be disabled without a game and persists",
+          "[unit][app][hologram]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(shell->settings().projector);
+  CHECK(c.run(*shell, "projector off") == "projector off");
+  CHECK_FALSE(shell->settings().projector);
+  CHECK(c.run(*shell, "projector bad") == "usage: projector [on|off]");
+  CHECK_FALSE(shell->settings().projector);
+  const auto path = std::filesystem::temp_directory_path() / "cb-projector-settings.conf";
+  REQUIRE(shell->settings().save(path));
+  CHECK_FALSE(Settings::load(path).projector);
+  std::filesystem::remove(path);
+  CHECK(c.run(*shell, "projector on") == "projector on");
+  CHECK(has(DebugConsole::help(), "projector [on|off]"));
+}

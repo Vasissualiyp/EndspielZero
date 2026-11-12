@@ -76,6 +76,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.guiScale = asFloat(value, s.guiScale);
     else if (key == "lab_scene")
       s.labScene = asBool(value);
+    else if (key == "projector")
+      s.projector = asBool(value);
     else if (key == "hud_framing")
       s.hudFraming = asBool(value);
     else if (key == "gui_scale_auto")
@@ -227,6 +229,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "gui_scale = " << guiScale << '\n';
   out << "gui_scale_auto = " << boolText(guiScaleAuto) << '\n';
   out << "lab_scene = " << boolText(labScene) << '\n';
+  out << "projector = " << boolText(projector) << '\n';
   out << "hud_framing = " << boolText(hudFraming) << '\n';
   out << "fullscreen = " << boolText(fullscreen) << '\n';
   out << "dev_overlay = " << boolText(devOverlay) << '\n';

@@ -42,6 +42,7 @@
 #include "view/game_end_fx.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"
+#include "render/projector_hologram.hpp"
 #include "render/shape_sequence.hpp"
 #include "render/ui.hpp"
 #endif
@@ -59,6 +60,7 @@ float gUiScaleOverride = -1.0f;
 bool gUiAuto = false;
 int gHudFraming = -1;
 int gLab = -1;
+int gProjector = -1;
 std::string gStation;
 bool gLabCapture = false;
 std::optional<render::LabScene> gLabScene;
@@ -91,6 +93,42 @@ std::string_view stationFor(app::Screen screen) {
       return "menu";
   }
 }
+
+#ifdef CB_HAVE_IMGUI
+bool appendProjector(const render::Ui& ui, const app::Settings& settings,
+                     render::InstanceSet& instances, const view::Theme& theme) {
+  if (!(gProjector >= 0 ? gProjector == 1 : settings.projector)) return false;
+  const auto req = ui.hologramRequest();
+  auto lens = *gLabScene->doc().anchor("projector.lens");
+  const auto source = gLabScene->toWorld(lens);
+  lens[2] += .32f;
+  const render::HologramPlacement at{gLabScene->toWorld(lens),
+                                     .20f * render::kCellsPerMetre, req.yaw, req.alpha,
+                                     req.scale};
+  render::Hologram h;
+  switch (req.kind) {
+    case render::HologramRequest::Manifold:
+      h = render::manifoldHologram(req.seconds, theme, at);
+      break;
+    case render::HologramRequest::Tesseract:
+      h = render::tesseractHologram(req.seconds, theme, at);
+      break;
+    case render::HologramRequest::Overture:
+      if (const auto* scene = ui.overtureScene())
+        h = render::overtureHologram(*scene, theme, at);
+      break;
+    case render::HologramRequest::None:
+      break;
+  }
+  if (!h.any()) return false;
+  instances.holo = std::move(h.quads);
+  instances.holo.insert(instances.holo.end(), h.lines.begin(), h.lines.end());
+  instances.holoTokens = std::move(h.tokens);
+  instances.holoTokenBatches = h.tokenBatches;
+  instances.holoBeam.push_back(render::projectorBeam(source, at, theme));
+  return true;
+}
+#endif
 
 float gIntensity = -1.0f;  ///< --presentation: presentation intensity for this run
 float gCaptureT = -1.0f;
@@ -861,9 +899,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
     shell->go(app::Screen::Welcome);
   else if (screen == "pause")
     shell->pause();
-  else if (screen == "settings")
+  else if (screen == "settings") {
+    // Captures start a game first. Explicit lab Settings captures review the
+    // menu's tesseract, so enter through the menu just as the player does.
+    if (gLab == 1) shell->go(app::Screen::MainMenu);
     shell->go(app::Screen::Settings);
-  else if (screen == "editor")
+  } else if (screen == "editor")
     shell->go(app::Screen::Editor);
   else if (screen == "designer" || screen == "body" || screen == "flat" ||
            screen == "identity" || screen == "castling" || screen == "marks" ||
@@ -1160,19 +1201,23 @@ int captureFrame(const std::string& variantName, const std::string& path,
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
-    renderer->setLights(room ? render::labLightBlock(gLabScene->doc(), *gLabScene,
-                                                     gRoomLightOverride >= 0
-                                                         ? gRoomLightOverride
-                                                         : shell->settings().roomLight,
-                                                     render::kLabKey)
-                             : render::neutralLightBlock());
+    bool projected = false;
     if (room) {
       gLabScene->appendTo(instances, renderer->theme());
+#ifdef CB_HAVE_IMGUI
+      projected = appendProjector(**ui, shell->settings(), instances, renderer->theme());
+#endif
       camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())
                                                     : std::string_view(gStation));
       frame = {};
       renderer->setBlur(0);
     }
+    renderer->setLights(room ? render::labLightBlock(
+                                   gLabScene->doc(), *gLabScene,
+                                   gRoomLightOverride >= 0 ? gRoomLightOverride
+                                                           : shell->settings().roomLight,
+                                   render::kLabKey, "projector", projected ? 1.f : .5f)
+                             : render::neutralLightBlock());
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
@@ -1645,6 +1690,8 @@ int main(int argc, char** argv) {
           "game, "
           "pause, newgame, watch) to --screen at that age (M23.11 section 6).\n"
           "--room-light 0..2 scales the room practicals for this run only.\n"
+          "--projector 0|1 toggles the bench hologram; --overture-t 0..1 pins Library "
+          "progress (alias --t).\n"
           "--lab 0|1 toggles the static lab room; --station <name> requires --lab 1.\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
@@ -1780,6 +1827,28 @@ int main(int argc, char** argv) {
         return 1;
       }
       gLab = value == "1" ? 1 : 0;
+    } else if (arg == "--projector") {
+      if (i + 1 >= argc || (std::string_view(argv[i + 1]) != "0" &&
+                            std::string_view(argv[i + 1]) != "1")) {
+        std::fprintf(stderr, "--projector requires 0 or 1\n");
+        return 1;
+      }
+      gProjector = std::string_view(argv[++i]) == "1" ? 1 : 0;
+    } else if (arg == "--overture-t") {
+      char* end = nullptr;
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "--overture-t requires a finite progress in 0..1\n");
+        return 1;
+      }
+      const char* value = argv[++i];
+      const float progress = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(progress) || progress < 0 ||
+          progress > 1) {
+        std::fprintf(stderr, "--overture-t requires a finite progress in 0..1\n");
+        return 1;
+      }
+      overtureT = progress;
+      overtureTGiven = true;
     } else if (arg == "--station") {
       if (i + 1 >= argc) {
         std::fprintf(stderr, "--station requires a name\n");
@@ -2735,18 +2804,22 @@ int main(int argc, char** argv) {
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
-    renderer->setLights(room ? render::labLightBlock(gLabScene->doc(), *gLabScene,
-                                                     gRoomLightOverride >= 0
-                                                         ? gRoomLightOverride
-                                                         : shell->settings().roomLight,
-                                                     render::kLabKey)
-                             : render::neutralLightBlock());
+    bool projected = false;
     if (room) {
       gLabScene->appendTo(instances, renderer->theme());
+#ifdef CB_HAVE_IMGUI
+      projected = appendProjector(**ui, shell->settings(), instances, renderer->theme());
+#endif
       camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())
                                                     : std::string_view(gStation));
       renderer->setBlur(0);
     }
+    renderer->setLights(room ? render::labLightBlock(
+                                   gLabScene->doc(), *gLabScene,
+                                   gRoomLightOverride >= 0 ? gRoomLightOverride
+                                                           : shell->settings().roomLight,
+                                   render::kLabKey, "projector", projected ? 1.f : .5f)
+                             : render::neutralLightBlock());
     const auto overlay = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI
       (*ui)->record(cmd);

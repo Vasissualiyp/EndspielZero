@@ -159,6 +159,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --theme manifold # dark glass alternative
 ./build/dev/src/gui/endspielzero_gui --theme manifold --lab 1 --screen menu --station menu --shot lab.ppm
                                  # M24.1 static lab; captures default off, console lab [on|off]
+./build/dev/src/gui/endspielzero_gui torus --theme manifold --lab 1 --screen newgame --overture-t 0.5 --projector 1 --shot holo.ppm
+                                 # M24.3 bench hologram; console projector [on|off], left-drag yaw
 ./build/dev/src/gui/endspielzero_gui --theme manifold --lab 1 --station sky --room-light 1 --shot sky.ppm
                                  # M24.2 practical lights + night sky; console lights / set roomLight 0..2
 ./build/dev/src/gui/endspielzero_gui standard --dev --shot dev.ppm # fps + unfinished menu rows
@@ -327,6 +329,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | Keyboard ownership between the game and interface | `Ui::create`, `Ui::processEvent`/`capturesKeyboard` and `updateKeyboardNavigation` in `src/render/ui.cpp`; idle navigation passes shortcuts, active widgets/text/modal choices capture them, and hot-seat/trailer keys disable HUD navigation. See `docs/plan/M23.6-game-keyboard-shortcuts.md` | |
 | A menu control's animation | `Theme::liveControls`, `Ui::setVisualTime` and `widgets::rowControl` in `src/render/ui_widgets.cpp`; manifold plates glitch only on hover/focus, using explicit presentation seconds. `menuEntry` bounds rows and `actionPairLayout` measures responsive footers in `ui_menus.cpp`. See `docs/plan/M23.7-manifold-glitch-controls.md` | |
 | The static menu lab and its OBJ props | `assets/lab/lab.toml`, `io::parseLabDoc` / `loadLabDoc` in `src/io/lab_doc.*`, `io::parseObj` in `src/io/obj_mesh.*`, `render::LabScene` in `src/render/lab_scene.*` and `BoardRenderer::addLabMeshes`; `labScene`, console `lab [on\|off]`, `--lab 0\|1` and `--station <name>`. See `docs/plan/M24.1-lab-kit-and-room.md` | |
+| The bench projector's manifold, overture and tesseract | `render::Hologram` and builders in `src/render/projector_hologram.*`; `Ui::hologramRequest` owns the subject and `refreshOvertureCache` serves both flat and lab paths. `InstanceSet::holo` / `holoTokens` draw opaque, `holoBeam` blends. `panelSignal[2] = -1` enables material-4 instance opacity, preserving board flourishes. Console `projector [on\|off]`, CLI `--projector 0\|1` and `--overture-t 0..1`. See `docs/plan/M24.3-projector-holograms.md` | |
 | The lab's practical lights and night sky | `io::LabDoc::lights` in `assets/lab/lab.toml`, `render::labLightBlock` / `lightFalloff` / `spotFactor` in `src/render/lab_light.*`, per-frame uniform binding 1 in `BoardRenderer`, and material `sky` (id 8) in `board.frag`. `roomLight` / `--room-light` scales room lights only; `lights` dumps the loaded list; `--station sky` looks upward. See `docs/plan/M24.2-lab-lights.md` | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |

@@ -75,8 +75,9 @@ struct Instance {
   /// when the cell carries a gameplay cue: ambient glitches are suppressed there), and
   /// heat - the projector base's warm light, 0..1, its own channel so it is never clamped
   /// by the colour response (M23.9 D). On a hologram piece, `[3]` is instead its scan
-  /// dominance (0 solid .. 1 scan-only). Zero on non-panels and the sampled surface's
-  /// identity instance.
+  /// dominance (0 solid .. 1 scan-only). Projector material-4 instances instead set
+  /// [2] = -1 to use color alpha as opacity. Zero on other non-panels and the sampled
+  /// surface's identity instance.
   float panelSignal[4]{};
   /// Living colour change: previous colour (rgb) and seconds since the change, negative
   /// when settled (see `MeshVertex::panelPrev`).
@@ -184,6 +185,11 @@ struct InstanceSet {
     std::uint32_t count{0};
   };
   std::array<Batch, kShapeSlots> batches{};
+  /// Projector geometry uses material 4 and panelSignal[2] = -1 for instance alpha.
+  std::vector<Instance> holo;
+  std::vector<Instance> holoTokens;
+  std::array<Batch, kShapeSlots> holoTokenBatches{};
+  std::vector<Instance> holoBeam;  ///< Cylinder, blended after opaque passes.
   std::vector<Instance> lab;
   std::array<Batch, static_cast<std::size_t>(LabShape::Count) + 1> labBatches{};
   std::vector<Batch> labFileBatches;

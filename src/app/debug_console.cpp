@@ -101,16 +101,18 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
 
   if (cmd == "help" || cmd == "?") return DebugConsole::help();
 
-  if (cmd == "dev" || cmd == "post" || cmd == "lab") {
+  if (cmd == "dev" || cmd == "post" || cmd == "lab" || cmd == "projector") {
     if (w.size() > 2 || (w.size() == 2 && w[1] != "on" && w[1] != "off"))
       return "usage: " + cmd + " [on|off]";
-    bool& enabled = cmd == "lab"   ? shell.settings().labScene
-                    : cmd == "dev" ? shell.settings().devOverlay
-                                   : shell.settings().postProcess;
+    bool& enabled = cmd == "projector" ? shell.settings().projector
+                    : cmd == "lab"     ? shell.settings().labScene
+                    : cmd == "dev"     ? shell.settings().devOverlay
+                                       : shell.settings().postProcess;
     enabled = w.size() == 1 ? !enabled : w[1] == "on";
-    const std::string label = cmd == "lab"   ? "lab "
-                              : cmd == "dev" ? "dev overlay: "
-                                             : "post processing: ";
+    const std::string label = cmd == "projector" ? "projector "
+                              : cmd == "lab"     ? "lab "
+                              : cmd == "dev"     ? "dev overlay: "
+                                                 : "post processing: ";
     return label + (enabled ? "on" : "off");
   }
 
@@ -475,6 +477,7 @@ std::string DebugConsole::help() {
          "multiplier\n"
          "set roomLight 0..2       practical room-light gain (machine lights unchanged)\n"
          "lights       list the active lab lights (no game needed)\n"
+         "projector [on|off] toggle the bench hologram (also get/set projector)\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"

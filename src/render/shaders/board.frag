@@ -291,7 +291,10 @@ void main() {
         // has no alpha, so its raster lines drop out instead - the way a failing
         // projection fails - and what is left is dimmer. The scan jitters while it
         // destabilises. The handoff ghost below is the same kind of partial projection.
-        const float opacity = isPiece ? fx.c.x : 1.0;
+        // Projector-only flag: neutral-FX capture flourishes must keep their old blend.
+        const bool projector = fragPanelSignal.z < -0.5;
+        const float opacity = projector ? fragColor.a : (isPiece ? fx.c.x : 1.0);
+        if (projector && opacity <= 0.0) discard;
         const float jitter = isPiece ? fx.c.y : 0.0;
         float jitterStep = 0.0;
         if (jitter > 0.0) {
@@ -301,7 +304,11 @@ void main() {
         if (opacity < 0.999) {
             float raw = 0.5 + 0.5 * cos(height * 28.0 * 6.2831853);
             float k = mix(raw, bayer4(gl_FragCoord.xy), smoothstep(0.25, 1.0, fwidth(height * 28.0)));
-            if (k < (1.0 - opacity) * 0.9) discard;
+            // Tile caps have constant mesh height; use screen coverage for their
+            // opacity so a half-alpha face cannot remain completely opaque.
+            if (projector) {
+                if (bayer4(gl_FragCoord.xy) < 1.0 - opacity) discard;
+            } else if (k < (1.0 - opacity) * 0.9) discard;
         }
         vec3 viewDir = normalize(push.eyePos.xyz - fragWorld);
         vec3 coolKey = normalize(vec3(0.35, 0.6, 0.72));
