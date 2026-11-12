@@ -34,3 +34,4 @@ Template: [`template.md`](template.md).
 | [0023](0023-cell-local-led-panel-coordinates.md) | Cell-local coordinates for LED panels | Accepted |
 | [0024](0024-explicit-cell-display-response-state.md) | Explicit cell display response state | Accepted |
 | [0025](0025-frame-local-hdr-scene-composition.md) | Frame-local HDR scene composition before the interface | Accepted |
+| [0026](0026-world-is-hardware-screen-is-ar.md) | The world is hardware, the screen is AR | Accepted |
