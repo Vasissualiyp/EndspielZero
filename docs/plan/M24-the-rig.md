@@ -479,8 +479,8 @@ Every slice file repeats what it needs, but these hold throughout:
 | M24.5 | `docs/plan/M24.5-deploy-and-stow.md` | Deploy and stow: the game in the lab (gpt-6-astra) | yes |
 | M24.5b | `docs/plan/M24.5b-slab-skin.md` | The slab's skin: physical in-game morphs, stretch, ribs, seam latches, light-completed Klein (gpt-6-astra) | yes |
 | M24.6 | `docs/plan/M24.6-multi-slab-gantry.md` | Multi-slab gantry, light bridges, layout changes as gantry moves (gpt-6-astra) | yes |
-| M24.7 | to be written | Geometry view projector, the first-launch wake-up and implant handshake | yes |
-| M24.8 | to be written | Cleanup | yes |
+| M24.7 | `docs/plan/M24.7-waking-up.md` | The launch wake-up (eyelids, blinks) and implant handshake (gpt-6.1-sol); the geometry view moved to M24.5b/M24.6 | yes |
+| M24.8 | `docs/plan/M24.8-cleanup.md` | Cleanup, AO, rack fix, docs, the record (gpt-6.1-sol) | yes |
 
 **Why M24.5–M24.8 are not yet written at full detail.** They hook into code that M24.1–M24.4b
 create, such as `LabScene`, the light block, `HologramPlacement`, the Station move and
