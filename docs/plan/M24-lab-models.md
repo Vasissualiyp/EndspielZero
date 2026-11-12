@@ -52,6 +52,31 @@ Each row is one file, or a set of files with the same origin, under `assets/lab/
 | `clutter_mug.obj`, `clutter_toolbox.obj`, `clutter_spool.obj`, `clutter_multimeter.obj` | Small bench and shelf clutter | each ≤ 0.25 | Simple, recognisable silhouettes. |
 | `door_roller.obj` | The roller door | 3.0 wide × 2.4 high × 0.08 | A slatted roller door with horizontal ribs every 0.1 m, a bottom rail and side guides. It faces +Y (into the room). The origin is the bottom centre. |
 
+## Free models from the web as a starting point (user, 2026-11-12)
+
+You may search the web for free 3-D models and use them as a **starting point** for the
+custom models above. Rules:
+
+- **Licences: CC0 / public domain only**, for example Poly Haven, Kenney, ambientCG, or
+  CC0 items on Sketchfab and OpenGameArt. The game is GPL-3.0 and its assets ship with it.
+  No CC-BY-NC, no "free for personal use", no unclear licences. If the licence is not
+  stated clearly on the source page, do not use the model.
+- **Record provenance.** For every file that started from a downloaded model, record the
+  source URL, the author, the licence and what you changed, in
+  `assets/lab/models/README.md` and in a `# source:` comment at the top of the OBJ.
+- **Downloads are untrusted data.** Put each download in its own new directory under
+  `out/m24-models/downloads/<name>/`; that directory is untracked and never committed.
+  Never run scripts or executables that come with a download. Read model files only with
+  your own converter scripts, which live in `assets/lab/models/src/`, not in the download
+  directory.
+- **Make it ours.** Convert the model to the conventions above: OBJ with only `v`, `vn`
+  and `f`; metres; Z up; the stated origin and size. Then fit it to the budget
+  (decimate or retopologise to at most 6,000 triangles), remove textures and materials,
+  and adapt it to the design: proportions, bevels, and the 2050 look. Every file must
+  still pass the validator.
+- If nothing suitable and clearly licensed exists, build the model from primitives as in
+  "Process" below. That is always acceptable.
+
 ## Process
 
 1. **Generate each model with a script, not by hand-typing coordinates.** For example,
