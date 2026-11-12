@@ -32,7 +32,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `ripple [<cell>]` | Play the check ripple (M23.10 section 4) from `<cell>` (default: the royal of the side to move) without touching the game. It wraps through glued seams. Calm intensity and non-LED themes have none |
 | `seamhover <axis>\|off` | Pin the seam-legend highlight on a glued drawn axis by name (e.g. `file` or `rank`); `off` restores mouse hover. That axis brightens, other glued seams dim, and mirrors stay unchanged. Requires a game |
 | `hudfx [turn\|move\|think\|all]` | Preview the live HUD feedback (M23.11 section 4) without touching the game: `turn` replays the status panel's turn flip, `move` the new ledger row, `all` (default) both; `think` toggles the engine-thinking indicator on and off. The check text is timed by `ripple`. At calm intensity (below one half) these change instantly |
-| `endfx win\|draw\|off [white\|black]` | Preview the game-end power-down (section 5): `win` is a decisive end with `<side>` (default white) as the loser, `draw` a draw, `off` clears it. Ages count from the decision: nothing moves for the first 3 s, then a slow power-down. The game itself is untouched; a real end plays by itself, and an undo out of one powers the board back up |
+| `endfx win\|draw\|off [white\|black]` | Preview the game-end power-down (section 5): `win` is a decisive end with `<side>` (default white) as the loser, `draw` a draw, `off` clears it. Ages count from the decision: nothing moves for the first 3 s, then a slow power-down. The LEDs reach the hold by about 9 s; then the pieces shut down one by one, the winner's king last, and by about 12–14 s (more for big armies) only the standby LED is lit. The game itself is untouched; a real end plays by itself, and an undo out of one powers the board back up |
 | `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
 | `fen` / `setfen <fen>` | Show or replace the position |
 | `place <cell> <symbol>` | Put a piece on a cell (`Q` white, `q` black) |
@@ -114,7 +114,8 @@ groups:
   - `--check-t <s>` renders the check ripple at age `s` (0 to 0.9) from the last check the
     `--script` gave (or from the side to move's royal when it never gave one); `--end-t <s>`
     renders the game-end power-down at age `s` counted from the decision (the board is untouched
-    for the first 3 s; the hold is reached by about 9). Example: `--theme manifold --script "..." --end-t 0.7`.
+    for the first 3 s); the LEDs reach the hold by about 9 s; then the pieces shut down one by one, the
+    winner's king last, and by about 12–14 s (more for big armies) only the standby LED is lit. Example: `--theme manifold --script "..." --end-t 0.7`.
   - `--event-t <s>` renders the HUD turn flip (0 to 0.25) and the newest ledger row's reveal (0 to
     0.2) at age `s`; `--think-t <s>` shows the engine-thinking indicator at age `s` (the capture has
     no search to wait for); `--check-t` also times the status panel's CHECK spike (0 to 0.3).

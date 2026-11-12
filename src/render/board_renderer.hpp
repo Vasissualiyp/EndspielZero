@@ -5,6 +5,8 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -191,6 +193,9 @@ struct InstanceSet {
   /// running, which costs nothing - the renderer then binds a one-record neutral buffer.
   std::vector<view::CellFx> cellFx;
   view::FxGlobals fxGlobals;
+  /// One neutral Cell-mesh draw after board FX composition, separate from shape batches
+  /// so reapplying FX cannot leave an old standby light behind.
+  std::optional<Instance> standbyLed;
 
   /// The geometry view's board, as one mesh (M17). A square on a curved surface is a
   /// patch of that surface, not a slab turned to face it, so it cannot be an instance of
@@ -229,7 +234,9 @@ struct InstanceSet {
   std::vector<Instance> scaffold;
   std::array<Batch, kShapeSlots> scaffoldBatches{};
 
-  [[nodiscard]] std::size_t size() const noexcept { return instances.size(); }
+  [[nodiscard]] std::size_t size() const noexcept {
+    return instances.size() + (standbyLed ? 1 : 0);
+  }
 };
 
 enum class PanelDestination : std::uint8_t { Instance, Surface };
@@ -329,6 +336,9 @@ class BoardRenderer {
       const std::function<bool(CellId)>& present = {},
       const std::vector<view::TimelineLink>& links = {},
       std::vector<PanelTarget>* panelTargets = nullptr) const;
+  /// Consume the CPU standby output after applyBoardFx, on flat slabs only.
+  [[nodiscard]] static std::optional<Instance> buildStandbyLed(
+      const InstanceSet& set, std::span<const view::Placement> placements);
   /// Render one frame into `target`, leaving the colour image in TRANSFER_SRC_OPTIMAL.
   /// `overlay` records extra commands inside the same render pass, which is how the UI
   /// is drawn over the board without a second path. `background` records commands at the

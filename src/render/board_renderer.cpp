@@ -1320,7 +1320,9 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           if (options_.showCheck && inCheck) pc = mix(pc, theme_.blood, 0.65f);
           pc = view::tintedPiece(pc, p, tintCell, travelling, theme_);
           Instance body{};
-          if (tintCell != kInvalidCell) body.fxCell = fxIndex(tintCell, true);
+          const CellId fxCell =
+              travelling && anim != nullptr ? anim->travellingTo() : tintCell;
+          if (fxCell != kInvalidCell) body.fxCell = fxIndex(fxCell, true);
           // Standing on the square, not in it: the piece's foot is its own local z = 0.
           // The icon-faced puck (M17.25) is the exception - it is centred *on* the
           // surface so it protrudes on both sides, which is what lets a flipped seat show
@@ -1661,7 +1663,8 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     }
 
     Instance body{};
-    if (tintCell != kInvalidCell) body.fxCell = fxIndex(tintCell, true);
+    const CellId fxCell = travelling && anim != nullptr ? anim->travellingTo() : tintCell;
+    if (fxCell != kInvalidCell) body.fxCell = fxIndex(fxCell, true);
     body.center[0] = x;
     body.center[1] = y;
     body.center[2] = z + half.z;
@@ -2225,6 +2228,39 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
   return out;
 }
 
+std::optional<Instance> BoardRenderer::buildStandbyLed(
+    const InstanceSet& set, std::span<const view::Placement> placements) {
+  const auto& g = set.fxGlobals;
+  if (g.standbyCell == kInvalidCell || !set.surfaceIndices.empty()) return std::nullopt;
+  const auto anchor =
+      std::find_if(placements.begin(), placements.end(),
+                   [&](const auto& p) { return p.cell == g.standbyCell; });
+  if (anchor == placements.end()) return std::nullopt;
+  float minX = anchor->x, maxX = anchor->x, minY = anchor->y, maxY = anchor->y,
+        z = anchor->z;
+  for (const auto& p : placements) {
+    if (p.slice != anchor->slice) continue;
+    minX = std::min(minX, p.x);
+    maxX = std::max(maxX, p.x);
+    minY = std::min(minY, p.y);
+    maxY = std::max(maxY, p.y);
+    z = std::min(z, p.z);
+  }
+  const auto half = cellHalfExtent();
+  Instance led;
+  led.center[0] = anchor->x - minX < maxX - anchor->x ? minX - 0.5f : maxX + 0.5f;
+  led.center[1] = anchor->y - minY < maxY - anchor->y ? minY - 0.5f : maxY + 0.5f;
+  led.center[2] = z - half.z + 0.02f;
+  led.scale[0] = 0.05f / half.x;
+  led.scale[1] = 0.05f / half.y;
+  led.scale[2] = 0.02f / half.z;
+  const float gain = 0.6f + 2.4f * g.standby;
+  for (int i = 0; i < 3; ++i) led.color[i] = g.standbyColor[i] * gain;
+  led.color[3] = 1;
+  led.material = shaderMaterial(view::Material::Glow, Cut::Plank, 0.0f);
+  return led;
+}
+
 Result<void> BoardRenderer::render(const OffscreenTarget& target, const InstanceSet& set,
                                    const view::OrbitCamera& camera,
                                    const std::function<void(VkCommandBuffer)>& overlay,
@@ -2282,7 +2318,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   const std::size_t flourishBase = set.instances.size();
   const std::size_t scaffoldBase = flourishBase + set.flourish.size();
   const std::size_t shadowBase = scaffoldBase + set.scaffold.size();
-  const std::size_t instanceCount = shadowBase + set.shadows.size();
+  const std::size_t standbyBase = shadowBase + set.shadows.size();
+  const std::size_t instanceCount = standbyBase + (set.standbyLed ? 1 : 0);
   if (auto r = ensureInstanceCapacity(frame, instanceCount); !r.has_value()) return r;
   if (instanceCount > 0) {
     void* mapped = nullptr;
@@ -2295,6 +2332,9 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                 set.scaffold.data(), set.scaffold.size() * sizeof(Instance));
     std::memcpy(static_cast<char*>(mapped) + shadowBase * sizeof(Instance),
                 set.shadows.data(), set.shadows.size() * sizeof(Instance));
+    if (set.standbyLed)
+      std::memcpy(static_cast<char*>(mapped) + standbyBase * sizeof(Instance),
+                  &*set.standbyLed, sizeof(Instance));
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
@@ -2542,7 +2582,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // and the ordinary solid board keep the sculptural meshes whatever the setting says.
     const bool cylinderPieces = options_.shapePieceCylinders && options_.surface &&
                                 !options_.flat && !set.surfaceIndices.empty();
-    if (!set.instances.empty()) {
+    if (!set.instances.empty() || set.standbyLed) {
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, scenePipeline);
       vkCmdPushConstants(cmd, layout_,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -2577,6 +2617,11 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                              batch.first + discs);
           }
         }
+      }
+      if (set.standbyLed) {
+        const auto& mesh = meshes_.ranges[static_cast<std::size_t>(Archetype::Cell)];
+        vkCmdDrawIndexed(cmd, mesh.indexCount, 1, mesh.firstIndex, mesh.vertexOffset,
+                         static_cast<std::uint32_t>(standbyBase));
       }
       // And one more for the geometry view's board, which is a mesh rather than a shape
       // repeated: the same pipeline, a different vertex buffer, one identity instance.

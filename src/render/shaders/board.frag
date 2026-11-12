@@ -206,6 +206,8 @@ void main() {
     if (fxIndex >= uint(fxBuf.g1.w)) fxIndex = 0u;  // g1.w = records written
     const CellFx fx = fxBuf.cells[fxIndex];
     const bool isPiece = fragFx.y > 0.5;
+    // A completed calm shutdown must remove every fragment, on every piece material.
+    if (isPiece && fx.c.x <= 0.0) discard;
     // A piece is revealed from its foot up; whatever is above the reveal height is not
     // there yet.
     if (isPiece && fx.a.z < 1.0 && fragHeight >= fx.a.z) discard;
@@ -476,7 +478,7 @@ void main() {
         // The standing footprint belongs to the piece, so it arrives with the piece; boot
         // adds its own heat-up on top.
         float heat = clamp(fragPanelSignal.w, 0.0, 1.0);
-        heat = max(heat * smoothstep(0.0, 0.25, fx.a.z), fx.a.w);
+        heat = max(heat * smoothstep(0.0, 0.25, fx.a.z) * fx.c.x, fx.a.w);
         if (lit && heat > 0.0) {
             // A neutral warm-white glow concentrated under the piece's base - never a cell
             // fill, so it cannot be read as a move cue.

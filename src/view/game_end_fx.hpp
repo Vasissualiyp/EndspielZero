@@ -2,6 +2,8 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
+#include <vector>
 
 #include "pieces/atom.hpp"
 #include "space/dims.hpp"
@@ -81,5 +83,49 @@ struct HologramEnd {
 
 /// The same piece as an undo restabilises it: back to a solid, ungained hologram over 0.5 s.
 [[nodiscard]] HologramEnd hologramRestore(HologramSide side, float age);
+
+/// Projector failure after the panel powers down (M23.12 section 2).
+inline constexpr float kShutdownStagger = 0.12f;
+inline constexpr float kShutdownSpread = 3.0f;
+inline constexpr float kKingPause = 0.8f;
+inline constexpr float kCollapseSeconds = 0.7f;
+inline constexpr float kCalmShutdownStagger = 0.05f;
+inline constexpr float kCalmShutdownFade = 0.6f;
+inline constexpr float kRestoreRevealSeconds = 0.35f;
+
+struct ShutdownPiece {
+  Color side{Color::White};
+  bool royal{false};
+  int dist{0};
+  std::uint32_t cell{0};  ///< deterministic tie-break
+};
+
+/// Per-piece start ages, parallel to `pieces`. The winning royal goes last.
+[[nodiscard]] std::vector<float> shutdownStarts(const EndFx& end,
+                                                std::span<const ShutdownPiece> pieces,
+                                                float firstStart, float intensity);
+/// After the last cell's glitch (decisive), or the uniform dim (draw/calm).
+[[nodiscard]] float shutdownBegins(EndKind kind, int maxDist, float intensity) noexcept;
+
+struct HologramShutdown {
+  float opacity{1};
+  float reveal{1};
+  float scanJitter{0};
+  float baseHeat{0};
+  [[nodiscard]] bool gone() const noexcept { return opacity <= 0.0f || reveal <= 0.0f; }
+};
+
+/// Pure in seconds after this piece's start; negative ages are neutral.
+[[nodiscard]] HologramShutdown hologramShutdown(float age, std::uint32_t seed,
+                                                float intensity);
+/// Undo reveals every piece together, with a brief seeded dropout at full intensity.
+[[nodiscard]] HologramShutdown hologramUnshutdown(float age, std::uint32_t seed,
+                                                  float intensity);
+/// Last start plus one failure. Callers handle empty starts by using their firstStart.
+[[nodiscard]] float shutdownComplete(std::span<const float> starts,
+                                     float intensity) noexcept;
+/// Zero before complete; then 0.35..1 at 0.5 Hz (draw: 0.25 Hz), or steady 0.8 in calm.
+[[nodiscard]] float standbyLevel(EndKind kind, float age, float complete,
+                                 float intensity) noexcept;
 
 }  // namespace cb::view

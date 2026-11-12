@@ -25,6 +25,12 @@ struct BoardFxState {
   std::optional<float> endAge;
   std::optional<float> powerUpAge;
   view::EndFx end;
+  /// The game-to-menu hold collapses all pieces together, with no standby LED.
+  bool compressedShutdown{false};
+  float holdProgress{0};  ///< 0..1, only read for compressedShutdown
+  bool reviewing{false};  ///< mask the end while reading a reviewed position
+  float winnerColor[3]{1, 1, 1};
+  float drawColor[3]{1, 1, 1};
   /// The check colour the ripple tints toward (the theme's `blood`).
   float tint[3]{0.83f, 0.28f, 0.23f};
   /// The shared presentation intensity; below one half every effect is its calm form.

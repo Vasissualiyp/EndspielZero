@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
+
 namespace cb::view {
 
 /// One cell's share of a board presentation effect (M23.10): boot, check ripple and the
@@ -35,6 +37,11 @@ struct FxGlobals {
   /// them. Both 0..1; 1 is normal.
   float hudDraw{1};
   float hudLevel{1};
+  /// CPU-only standby output (M23.12 section 2); uploadFx packs the GPU header
+  /// explicitly.
+  float standby{0};
+  float standbyColor[3]{1, 1, 1};
+  std::uint32_t standbyCell{0xFFFFFFFFu};
 };
 
 }  // namespace cb::view

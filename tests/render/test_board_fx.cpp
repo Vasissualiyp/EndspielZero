@@ -20,6 +20,7 @@
 #include "view/check_ripple.hpp"
 #include "view/game_end_fx.hpp"
 #include "view/layout.hpp"
+#include "view/piece_tint.hpp"
 
 using namespace cb;
 using namespace cb::render;
@@ -37,6 +38,199 @@ CellId at(const app::Session& s, int file, int rank) {
   return s.variant().dims.toCell(c);
 }
 }  // namespace
+
+TEST_CASE("shutdown fx: pieces stay before failure, then all go and standby remains",
+          "[render][fx][endfx]") {
+  const auto s = standardSession();
+  BoardFxState st;
+  st.end = {view::EndKind::Decisive, Color::White,
+            s->game().position().findRoyal(Color::White), true};
+  st.winnerColor[0] = 0.2f;
+  st.winnerColor[1] = 0.7f;
+  st.winnerColor[2] = 0.9f;
+  InstanceSet set;
+  st.endAge = 3.5f;
+  applyBoardFx(set, *s, st);
+  for (CellId c = 0; c < s->snapshot().cellCount(); ++c) {
+    if (s->snapshot().at(c).empty()) continue;
+    CHECK(set.cellFx[c + 1].opacity > 0.5f);
+    CHECK(set.cellFx[c + 1].reveal >= 1.0f);
+  }
+  for (float intensity : {0.0f, 1.0f}) {
+    st.intensity = intensity;
+    for (float age : {60.0f, 3600.0f}) {
+      st.endAge = age;
+      applyBoardFx(set, *s, st);
+      for (CellId c = 0; c < s->snapshot().cellCount(); ++c) {
+        const auto& fx = set.cellFx[c + 1];
+        if (!s->snapshot().at(c).empty())
+          CHECK((fx.opacity == 0.0f || fx.reveal == 0.0f));
+        else
+          CHECK(fx.reveal == 1.0f);
+        if (intensity == 0.0f) CHECK(fx.heat == 0.0f);
+      }
+      CHECK(set.cellFx[st.end.origin + 1].power == Catch::Approx(view::kDecisiveHold));
+      CHECK(set.fxGlobals.standbyCell == s->game().position().findRoyal(Color::Black));
+      CHECK(set.fxGlobals.standby >= 0.35f);
+      CHECK(set.fxGlobals.standby <= 1.0f);
+      for (int i = 0; i < 3; ++i)
+        CHECK(set.fxGlobals.standbyColor[i] == st.winnerColor[i]);
+    }
+  }
+}
+
+TEST_CASE("shutdown fx: winner king collapses last after standing alone",
+          "[render][fx][endfx]") {
+  const auto s = standardSession();
+  BoardFxState st;
+  st.end = {view::EndKind::Decisive, Color::White,
+            s->game().position().findRoyal(Color::White), true};
+  const auto& dist = s->distancesFrom(st.end.origin);
+  std::vector<view::ShutdownPiece> pieces;
+  CellId farPawn = at(*s, 0, 1);
+  for (CellId c = 0; c < s->snapshot().cellCount(); ++c) {
+    const auto p = s->snapshot().at(c);
+    if (!p.empty())
+      pieces.push_back({p.colorOf(), s->variant().pieces[p.type].royal, dist[c], c});
+    if (c >= 8 && c < 16 && dist[c] > dist[farPawn]) farPawn = c;
+  }
+  const float first =
+      view::shutdownBegins(st.end.kind, *std::max_element(dist.begin(), dist.end()), 1);
+  const auto starts = view::shutdownStarts(st.end, pieces, first, 1);
+  const CellId winner = s->game().position().findRoyal(Color::Black);
+  const auto index = static_cast<std::size_t>(
+      std::find_if(pieces.begin(), pieces.end(),
+                   [&](const auto& p) { return p.cell == winner; }) -
+      pieces.begin());
+  InstanceSet set;
+  st.endAge = starts[index] - 0.05f;
+  applyBoardFx(set, *s, st);
+  for (const auto& p : pieces) {
+    const auto& fx = set.cellFx[p.cell + 1];
+    if (p.cell == winner)
+      CHECK(fx.reveal == 1.0f);
+    else
+      CHECK((fx.reveal == 0.0f || fx.opacity == 0.0f));
+  }
+  st.endAge = starts[index] + 0.3f;
+  applyBoardFx(set, *s, st);
+  CHECK(set.cellFx[winner + 1].reveal > 0.0f);
+  CHECK(set.cellFx[winner + 1].reveal < 1.0f);
+  CHECK(set.cellFx[farPawn + 1].reveal == 0.0f);
+}
+
+TEST_CASE("shutdown fx: review masks the end, leaving it returns to the current age",
+          "[render][fx][endfx]") {
+  const auto s = standardSession();
+  BoardFxState st;
+  st.end = {view::EndKind::Decisive, Color::White,
+            s->game().position().findRoyal(Color::White), true};
+  st.endAge = 60.0f;
+  st.reviewing = true;
+  InstanceSet set;
+  applyBoardFx(set, *s, st);
+  const view::CellFx neutral;
+  for (const auto& fx : set.cellFx) CHECK(std::memcmp(&fx, &neutral, sizeof(fx)) == 0);
+  CHECK(set.fxGlobals.standbyCell == kInvalidCell);
+  CHECK_FALSE(set.standbyLed.has_value());
+  st.reviewing = false;
+  applyBoardFx(set, *s, st);
+  CHECK(set.cellFx[st.end.origin + 1].reveal == 0.0f);
+  CHECK(set.fxGlobals.standbyCell != kInvalidCell);
+}
+
+TEST_CASE(
+    "shutdown fx: compressed hold collapses together without standby; undo restores",
+    "[render][fx][endfx]") {
+  const auto s = standardSession();
+  BoardFxState st;
+  st.end = {view::EndKind::Decisive, Color::White,
+            s->game().position().findRoyal(Color::White), false};
+  st.endAge = 60.0f;
+  st.compressedShutdown = true;
+  InstanceSet set;
+  for (float intensity : {0.0f, 1.0f}) {
+    st.intensity = intensity;
+    for (float progress : {0.3f, 0.97f}) {
+      st.holdProgress = progress;
+      applyBoardFx(set, *s, st);
+      CHECK(set.fxGlobals.standbyCell == kInvalidCell);
+      for (CellId c = 0; c < s->snapshot().cellCount(); ++c) {
+        if (s->snapshot().at(c).empty()) continue;
+        const auto& fx = set.cellFx[c + 1];
+        if (progress < 0.4f)
+          CHECK(fx.reveal >= 1.0f);
+        else
+          CHECK((fx.opacity == 0.0f || fx.reveal == 0.0f));
+      }
+    }
+  }
+  st.endAge.reset();
+  st.compressedShutdown = false;
+  st.intensity = 1.0f;
+  for (float age : {0.0f, 0.5f}) {
+    st.powerUpAge = age;
+    applyBoardFx(set, *s, st);
+    CHECK(set.fxGlobals.standbyCell == kInvalidCell);
+    for (CellId c = 0; c < s->snapshot().cellCount(); ++c) {
+      if (s->snapshot().at(c).empty()) continue;
+      const auto& fx = set.cellFx[c + 1];
+      CHECK(fx.reveal == (age == 0.0f ? 0.0f : 1.0f));
+      if (age == 0.5f) CHECK(fx.opacity == 1.0f);
+    }
+  }
+}
+
+TEST_CASE(
+    "shutdown standby: one neutral glow at the winner's slab corner, none on a shape",
+    "[render][gpu][fx][endfx]") {
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx.has_value());
+  auto renderer = BoardRenderer::create(*ctx);
+  auto target = OffscreenTarget::create(*ctx, 320, 200);
+  REQUIRE(renderer.has_value());
+  REQUIRE(target.has_value());
+  renderer->setTheme(view::Theme::manifold());
+  for (const char* name : {"standard", "torus"}) {
+    auto s = app::Session::create(test::loadVariant(name));
+    REQUIRE(s.has_value());
+    BoardOptions options;
+    options.surface = std::string_view(name) == "torus";
+    renderer->setOptions(options);
+    BoardFxState st;
+    st.end = {view::EndKind::Decisive, Color::White,
+              (*s)->game().position().findRoyal(Color::White), true};
+    const auto placements = view::layout((*s)->variant().dims, (*s)->viewConfig());
+    const auto cam = view::OrbitCamera::frame(view::boundsOf(placements));
+    auto set = renderer->buildInstances((*s)->snapshot(), (*s)->viewConfig());
+    const auto before = set.instances.size();
+    st.endAge = 3.5f;
+    applyBoardFx(set, **s, st);
+    CHECK_FALSE(set.standbyLed.has_value());
+    st.endAge = 60.0f;
+    applyBoardFx(set, **s, st);
+    CHECK(set.size() == before + (options.surface ? 0 : 1));
+    if (!options.surface) {
+      REQUIRE(set.standbyLed.has_value());
+      const auto& led = *set.standbyLed;
+      CHECK(led.material == 5.0f);
+      CHECK(led.fxCell == 0.0f);
+      const auto cell = set.fxGlobals.standbyCell;
+      const auto pl = std::find_if(placements.begin(), placements.end(),
+                                   [&](const auto& p) { return p.cell == cell; });
+      REQUIRE(pl != placements.end());
+      // The king is in the middle of its home rank: the nearest *corner* is 3.5 cells
+      // away in x. The specified half-cell offset pins that corner unambiguously.
+      CHECK(led.center[0] == Catch::Approx(7.5f));
+      CHECK(led.center[1] == Catch::Approx(7.5f));
+      CHECK(led.center[2] ==
+            Catch::Approx(pl->z - BoardRenderer::cellHalfExtent().z + 0.02f));
+      REQUIRE(renderer->render(*target, set, cam).has_value());
+    } else
+      CHECK_FALSE(set.standbyLed.has_value());
+  }
+  CHECK(ctx->takeValidationMessages().empty());
+}
 
 TEST_CASE("seam hover brightens one axis and dims the other", "[render][seams]") {
   auto ctx = VulkanContext::create();
@@ -86,6 +280,76 @@ TEST_CASE("seam hover brightens one axis and dims the other", "[render][seams]")
     }
   }
   CHECK(ctx->takeValidationMessages().empty());
+}
+
+TEST_CASE("shutdown calm frames: zero opacity leaves no piece fragments in either theme",
+          "[render][gpu][fx][endfx]") {
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx.has_value());
+  auto renderer = BoardRenderer::create(*ctx);
+  auto target = OffscreenTarget::create(*ctx, 320, 200);
+  REQUIRE(renderer.has_value());
+  REQUIRE(target.has_value());
+  const auto s = standardSession();
+  const auto cam = view::OrbitCamera::frame(
+      view::boundsOf(view::layout(s->variant().dims, s->viewConfig())));
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    renderer->setTheme(theme);
+    auto set = renderer->buildInstances(s->snapshot(), s->viewConfig());
+    BoardFxState st;
+    st.end = {view::EndKind::Decisive, Color::White,
+              s->game().position().findRoyal(Color::White), true};
+    st.endAge = 60;
+    st.intensity = 0;
+    applyBoardFx(set, *s, st);
+    // Isolate the projections and their footprints from the independent shadow pass.
+    set.shadows.clear();
+    for (auto& batch : set.shadowBatches) batch.count = 0;
+    REQUIRE(renderer->render(*target, set, cam).has_value());
+    const auto faded = target->readPixels();
+    REQUIRE(faded.has_value());
+    for (auto& fx : set.cellFx) fx.reveal = 0;
+    REQUIRE(renderer->render(*target, set, cam).has_value());
+    const auto absent = target->readPixels();
+    REQUIRE(absent.has_value());
+    CHECK(std::equal(faded->begin(), faded->end(), absent->begin(), absent->end()));
+  }
+  CHECK(ctx->takeValidationMessages().empty());
+}
+
+TEST_CASE("shutdown hold: travelling handoff copies share their piece's shutdown record",
+          "[render][fx][endfx]") {
+  BoardRenderer renderer;
+  renderer.setTheme(view::Theme::manifold());
+  for (const bool surface : {false, true}) {
+    auto s = app::Session::create(test::loadVariant(surface ? "torus" : "standard"));
+    REQUIRE(s.has_value());
+    REQUIRE((*s)->playMoveText(surface ? "e2e3" : "e2e4").has_value());
+    (*s)->setMoveProgress(0.3f);
+    REQUIRE((*s)->animation().active());
+    BoardOptions options;
+    options.surface = surface;
+    renderer.setOptions(options);
+    auto set = renderer.buildInstances((*s)->snapshot(), (*s)->viewConfig(),
+                                       &(*s)->seams(), &(*s)->animation());
+    BoardFxState st;
+    st.end = {view::EndKind::Decisive, Color::White, 0, false};
+    st.endAge = 60;
+    st.compressedShutdown = true;
+    st.holdProgress = 0.97f;
+    applyBoardFx(set, **s, st);
+    std::size_t projections = 0;
+    for (const auto* group : {&set.instances, &set.flourish})
+      for (const auto& in : *group) {
+        if (static_cast<int>(in.material) != 4) continue;
+        ++projections;
+        REQUIRE(in.fxCell > 0);
+        const auto index = static_cast<std::size_t>(in.fxCell) / 2;
+        REQUIRE(index < set.cellFx.size());
+        CHECK(set.cellFx[index].reveal == 0);
+      }
+    CHECK(projections >= 32);
+  }
 }
 
 TEST_CASE("boot fx: near ranks are on while far ranks are dark", "[render][fx][boot]") {
@@ -245,6 +509,9 @@ TEST_CASE("end fx: the wave, the hold and the sides of a finished game", "[rende
   InstanceSet set;
   BoardFxState st;
   st.end = *s->endEvent();
+  // Pin this wave/hold test before the new compressed collapse starts (M23.12 §2).
+  st.compressedShutdown = true;
+  st.holdProgress = 0.3f;
   st.endAge = 9.0f;
   applyBoardFx(set, *s, st);
   const CellId king = at(*s, 4, 0);
@@ -350,6 +617,9 @@ TEST_CASE("ripple and end frames: the wave reaches a near cell, not a far one; t
 
   BoardFxState end;
   end.end = *s->endEvent();
+  // Preserve this test's original wave-only picture, before the compressed collapse.
+  end.compressedShutdown = true;
+  end.holdProgress = 0.3f;
   end.endAge = 9.0f;
   const auto held = shot(end);
   const CellId king = at(*s, 4, 0), far = at(*s, 0, 4);

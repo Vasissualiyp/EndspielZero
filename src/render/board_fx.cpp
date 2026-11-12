@@ -25,6 +25,7 @@ void applyBoardFx(InstanceSet& set, const app::Session& session,
                   const BoardFxState& state) {
   set.cellFx.clear();
   set.fxGlobals = view::FxGlobals{};
+  set.standbyLed.reset();
   if (!state.any()) return;
   const view::PositionView& pos = session.snapshot();
   const std::uint32_t count = pos.cellCount();
@@ -62,7 +63,7 @@ void applyBoardFx(InstanceSet& set, const app::Session& session,
     return p.colorOf() == state.end.loser ? HologramSide::Loser : HologramSide::Winner;
   };
 
-  if (state.endAge && state.end.origin != kInvalidCell) {
+  if (state.endAge && !state.reviewing && state.end.origin != kInvalidCell) {
     const std::vector<int>& dist = session.distancesFrom(state.end.origin);
     const bool decisive = state.end.kind == EndKind::Decisive;
     // The last move's two cells stay readable in the hold, whatever the power.
@@ -91,6 +92,52 @@ void applyBoardFx(InstanceSet& set, const app::Session& session,
       fx.scanJitter = h.scanJitter;
       fx.gain = h.gain;
     }
+
+    // A second cache lookup may move the cached vectors, so finish reading dist first.
+    const int maxDist = dist.empty() ? 0 : *std::max_element(dist.begin(), dist.end());
+    const auto& shutdownDist = decisive ? dist : session.distancesFrom(count / 2);
+    std::vector<view::ShutdownPiece> pieces;
+    for (CellId c = 0; c < count; ++c) {
+      const Piece piece = pos.at(c);
+      if (!piece.empty())
+        pieces.push_back({piece.colorOf(), pos.variant().pieces[piece.type].royal,
+                          shutdownDist[c], c});
+    }
+    const float firstStart = view::shutdownBegins(state.end.kind, maxDist, fxIntensity);
+    const auto starts =
+        state.compressedShutdown
+            ? std::vector<float>{}
+            : view::shutdownStarts(state.end, pieces, firstStart, fxIntensity);
+    for (std::size_t i = 0; i < pieces.size(); ++i) {
+      const CellId c = pieces[i].cell;
+      const float age = state.compressedShutdown ? (state.holdProgress - 0.40f) / 0.55f *
+                                                       view::kCollapseSeconds
+                                                 : *state.endAge - starts[i];
+      const auto h = view::hologramShutdown(age, cellSeed(c), fxIntensity);
+      auto& fx = set.cellFx[c + 1];
+      fx.opacity *= h.opacity;
+      fx.reveal = std::min(fx.reveal, h.reveal);
+      fx.scanJitter = std::min(1.0f, fx.scanJitter + h.scanJitter);
+      fx.heat = std::max(fx.heat, h.baseHeat);
+      // The mated king's cell keeps its light only until its own projector fails.
+      if (decisive && state.end.mated && c == state.end.origin && age >= 0.0f) {
+        const float x = std::clamp(age / view::kPowerDownFallSeconds, 0.0f, 1.0f);
+        fx.power =
+            1.0f + (view::holdLevel(state.end.kind) - 1.0f) * x * x * (3.0f - 2.0f * x);
+      }
+    }
+    const float complete =
+        starts.empty() ? firstStart : view::shutdownComplete(starts, fxIntensity);
+    if (!state.compressedShutdown && !state.powerUpAge && *state.endAge >= complete) {
+      set.fxGlobals.standby =
+          view::standbyLevel(state.end.kind, *state.endAge, complete, fxIntensity);
+      const auto* color = decisive ? state.winnerColor : state.drawColor;
+      std::copy_n(color, 3, set.fxGlobals.standbyColor);
+      const CellId royal =
+          decisive ? session.game().position().findRoyal(opponent(state.end.loser))
+                   : kInvalidCell;
+      set.fxGlobals.standbyCell = royal == kInvalidCell ? state.end.origin : royal;
+    }
   }
 
   if (state.powerUpAge) {
@@ -105,6 +152,11 @@ void applyBoardFx(InstanceSet& set, const app::Session& session,
       const view::HologramEnd h = view::hologramRestore(sideOf(piece), *state.powerUpAge);
       fx.opacity = h.opacity;
       fx.gain = h.gain;
+      const auto restored =
+          view::hologramUnshutdown(*state.powerUpAge, cellSeed(c), fxIntensity);
+      fx.opacity *= restored.opacity;
+      fx.reveal = std::min(fx.reveal, restored.reveal);
+      fx.scanJitter = std::min(1.0f, fx.scanJitter + restored.scanJitter);
     }
   }
 
@@ -119,6 +171,9 @@ void applyBoardFx(InstanceSet& set, const app::Session& session,
       fx.tintMix = r.tint;
     }
   }
+  if (set.fxGlobals.standbyCell != kInvalidCell)
+    set.standbyLed = BoardRenderer::buildStandbyLed(
+        set, view::layout(pos.variant().dims, session.viewConfig()));
 }
 
 }  // namespace cb::render

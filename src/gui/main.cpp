@@ -103,6 +103,14 @@ void setFxTint(render::BoardFxState& fx, const render::BoardRenderer& renderer) 
   fx.tint[0] = blood.r;
   fx.tint[1] = blood.g;
   fx.tint[2] = blood.b;
+  const auto& t = renderer.theme();
+  const auto winner = fx.end.loser == Color::White ? t.blackPiece : t.whitePiece;
+  fx.winnerColor[0] = winner.r;
+  fx.winnerColor[1] = winner.g;
+  fx.winnerColor[2] = winner.b;
+  fx.drawColor[0] = t.bone.r;
+  fx.drawColor[1] = t.bone.g;
+  fx.drawColor[2] = t.bone.b;
 }
 
 /// The HUD panels follow the board (M23.10 section 7): their edges trace on during the
@@ -138,6 +146,8 @@ void applyMoveHold(render::BoardFxState& fx, const app::Session& session,
   for (const int d : dist) far = std::max(far, d);
   fx.end = view::EndFx{view::EndKind::Decisive, Color::White, centre, false};
   fx.endAge = app::endAgeAt(ui.powerDownProgress(), far);
+  fx.compressedShutdown = true;
+  fx.holdProgress = ui.powerDownProgress();
 }
 
 /// The effects a capture asks for through --boot-t, in the renderer's own terms.
@@ -153,10 +163,11 @@ render::BoardFxState captureFx(const render::BoardRenderer& renderer,
     fx.rippleOrigin = session.checkEvent().value_or(
         session.game().position().findRoyal(session.game().position().sideToMove()));
   }
-  if (gEndT >= 0.0f && session.endEvent()) {
+  if (gEndT >= 0.0f && session.endEvent() && !shell.attracting()) {
     fx.endAge = gEndT;
     fx.end = *session.endEvent();
   }
+  fx.reviewing = session.reviewPly().has_value();
   // The trailer's first board powers on on the trailer's own clock.
   if (shell.attracting()) fx.bootAge = shell.trailerBootAge();
   fx.intensity = renderer.options().presentationIntensity;
@@ -967,6 +978,20 @@ int captureFrame(const std::string& variantName, const std::string& path,
   const auto renderFrame = [&](float dt, VisualSample sample = {0},
                                const render::ShapeMoveSequence* playSeq =
                                    nullptr) -> std::optional<render::Image> {
+    // An explicit end age includes the final move landing. A frozen handoff copy would
+    // otherwise show the mover at its starting position in --shot/--play.
+    // Keep an explicitly requested intermediate --move-t for animation inspection.
+    if (gEndT >= 0.0f && !shell->attracting() && shell->session() != nullptr &&
+        shell->session()->endEvent() && (moveT < 0.0f || moveT >= 1.0f)) {
+      auto& session = *shell->session();
+      if (session.animation().active()) {
+        const float duration = session.animation().duration();
+        if (gEndT >= duration)
+          (void)session.advanceAnimation(gEndT);
+        else if (duration > 0.0f)
+          session.setMoveProgress(gEndT / duration);
+      }
+    }
     renderer->setVisualTime(visualOrigin + sample.seconds);
     (*ui)->setVisualTime(visualOrigin + sample.seconds);
     {
@@ -2564,7 +2589,6 @@ int main(int argc, char** argv) {
                                        : fxTimeline.bootAge(visualSeconds);
       fx.intensity = renderer->options().presentationIntensity;
       fx.ledCells = renderer->theme().materials.cells == view::Material::Led;
-      setFxTint(fx, *renderer);
       if (const auto r = fxTimeline.ripple(visualSeconds)) {
         fx.rippleAge = r->age;
         fx.rippleOrigin = r->origin;
@@ -2577,7 +2601,9 @@ int main(int argc, char** argv) {
         fx.powerUpAge = u->age;
         fx.end = u->fx;
       }
+      fx.reviewing = shell->session()->reviewPly().has_value();
       if (hold) applyMoveHold(fx, *shell->session(), **ui);
+      setFxTint(fx, *renderer);
       render::applyBoardFx(instances, *shell->session(), fx);
       camera = boardCamera(*shell, shapeSeq);
     }

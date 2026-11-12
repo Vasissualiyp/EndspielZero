@@ -170,6 +170,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
                                  # the board mid power-on (0..1.8 s); console `boot` replays it live
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --script "$MATE" --end-t 0.7 --shot e.ppm
                                  # the game-end power-down 0.7 s in (console `endfx win|draw|off`);
+                                 # LEDs hold by ~9 s, pieces shut down one by one, winner king last;
+                                 # --end-t 20 shows the standby LED; review keeps the position lit;
                                  # --check-t <s> likewise for the check ripple (console `ripple`)
 ./build/dev/src/gui/endspielzero_gui standard --screen menu --from pause --transition-t 0.4 --shot move.ppm
                                  # a screen move 0.4 s in (console `transition <from> <to>`; any key skips it)
@@ -316,6 +318,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | An authored piece body or icon | `src/assets/piece_model.cpp`; the designers are `src/render/ui_designer.cpp` | |
 | HUD scaling, panel anchors and camera safe area | `render::autoUiFactor`, `stageRect`, `dockLayout` in `src/render/hud_layout.*`; `Session::setFramingArea` feeds `frameOn` and `easeFrameOn`; the full render/picking viewport stays unchanged. See `docs/plan/M23.11-ui-finish.md` section 1 | |
 | Seam-legend hover | `view::SeamLegendEntry::screenAxis` identifies the drawn axis; `Ui::seamHover` feeds `BoardOptions::seamHighlightAxis` for flat and surface rails. `Session::seamHoverPin` is the console/CLI presentation pin. See `docs/plan/M23.12-seam-hover-and-hologram-shutdown.md` section 1 | |
+| Game-end projector shutdown and undo restore | `view::shutdownStarts`, `hologramShutdown` and `hologramUnshutdown` in `src/view/game_end_fx.*`; `render::applyBoardFx` composes them and `BoardRenderer::buildStandbyLed` places the flat slab's standby light. `endfx` / `--end-t 20` reaches the shutdown; review masks it. See `docs/plan/M23.12-seam-hover-and-hologram-shutdown.md` section 2 | |
 | Game status / recent-move text | `Ui::buildGameHud` and the measured `drawHudText` overlay in `src/render/ui.cpp` (panels via `widgets::hudPanel`, M23.10 section 7; captured trays from `app::capturedBySide`); size current rows before `Begin`, so first replay frames agree with settled frames. See `docs/plan/M23.5-capture-hud-refresh.md` | |
 | Keyboard ownership between the game and interface | `Ui::create`, `Ui::processEvent`/`capturesKeyboard` and `updateKeyboardNavigation` in `src/render/ui.cpp`; idle navigation passes shortcuts, active widgets/text/modal choices capture them, and hot-seat/trailer keys disable HUD navigation. See `docs/plan/M23.6-game-keyboard-shortcuts.md` | |
 | A menu control's animation | `Theme::liveControls`, `Ui::setVisualTime` and `widgets::rowControl` in `src/render/ui_widgets.cpp`; manifold plates glitch only on hover/focus, using explicit presentation seconds. `menuEntry` bounds rows and `actionPairLayout` measures responsive footers in `ui_menus.cpp`. See `docs/plan/M23.7-manifold-glitch-controls.md` | |
