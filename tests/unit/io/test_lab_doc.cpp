@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
@@ -107,6 +108,84 @@ TEST_CASE("the shipped lab has all stations and anchors", "[unit][io][lab]") {
     CHECK(d->station(n));
   for (auto n : {"gantry.centre", "projector.lens", "magazine.front", "door.centre"})
     CHECK(d->anchor(n).has_value());
+}
+
+TEST_CASE("the shipped lab uses the authored OBJ assemblies at their base origins",
+          "[unit][io][lab]") {
+  const auto d =
+      io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(d.has_value());
+  const auto part = [&](std::string_view name) -> const io::LabPart& {
+    const auto it = std::find_if(d->parts.begin(), d->parts.end(),
+                                 [&](const auto& p) { return p.name == name; });
+    REQUIRE(it != d->parts.end());
+    return *it;
+  };
+  struct Model {
+    const char* name;
+    const char* file;
+    io::LabMaterial material;
+  };
+  for (const auto& model :
+       {Model{"projector.body", "projector_body.obj", io::LabMaterial::Matte},
+        Model{"projector.lens", "projector_lens.obj", io::LabMaterial::Glass},
+        Model{"projector.leds", "projector_leds.obj", io::LabMaterial::Glow},
+        Model{"lamp.body", "lamp.obj", io::LabMaterial::Metal},
+        Model{"lamp.head.emitter", "lamp_head_emitter.obj", io::LabMaterial::Glow},
+        Model{"magazine.frame", "magazine.obj", io::LabMaterial::Metal},
+        Model{"magazine.bayleds", "magazine_leds.obj", io::LabMaterial::Glow},
+        Model{"gantry.carriage.0", "gantry_carriage.obj", io::LabMaterial::Metal},
+        Model{"door.panel", "door_roller.obj", io::LabMaterial::Metal},
+        Model{"screen.old", "bench_monitor.obj", io::LabMaterial::Matte},
+        Model{"tools.mug", "clutter_mug.obj", io::LabMaterial::Matte},
+        Model{"tools.toolbox", "clutter_toolbox.obj", io::LabMaterial::Matte},
+        Model{"tools.spool", "clutter_spool.obj", io::LabMaterial::Matte},
+        Model{"tools.multimeter", "clutter_multimeter.obj", io::LabMaterial::Matte}}) {
+    CAPTURE(model.name);
+    const auto& p = part(model.name);
+    CHECK(p.mesh == io::LabMesh::File);
+    CHECK(p.file.filename() == model.file);
+    CHECK(p.material == model.material);
+    CHECK(p.size == std::array<float, 3>{1, 1, 1});
+    CHECK(p.rot == std::array<float, 3>{0, 0, 0});
+  }
+  const auto& body = part("projector.body");
+  CHECK(part("projector.lens").pos == body.pos);
+  CHECK(part("projector.leds").pos == body.pos);
+  REQUIRE(d->anchor("projector.lens").has_value());
+  const auto lens = *d->anchor("projector.lens");
+  CHECK(lens == std::array<float, 3>{-.6f, 2.62f, 1.015f});
+  CHECK(body.pos[2] + .075f == Catch::Approx(lens[2]));
+  const auto& pad = part("projector.base");
+  CHECK(pad.pos[2] + pad.size[2] / 2 == Catch::Approx(body.pos[2]));
+  const auto& bench = part("bench.top");
+  const auto top = bench.pos[2] + bench.size[2] / 2;
+  CHECK(pad.pos[2] - pad.size[2] / 2 == Catch::Approx(top));
+  for (auto name : {"lamp.body", "screen.old", "tools.mug", "tools.toolbox",
+                    "tools.spool", "tools.multimeter"}) {
+    CAPTURE(name);
+    CHECK(part(name).pos[2] == Catch::Approx(top));
+  }
+  CHECK(part("lamp.body").pos == part("lamp.head.emitter").pos);
+  CHECK(part("magazine.frame").pos == part("magazine.bayleds").pos);
+  CHECK(part("magazine.frame").pos[0] == Catch::Approx(2.5f));
+  CHECK(part("door.panel").pos[2] == 0);
+  const auto& carriage = part("gantry.carriage.0");
+  // The model's bearing wheels reach 84 mm above its bottom-face origin.
+  // The parked Y bridges touch those wheels and meet the perimeter X rails.
+  for (auto name : {"gantry.bridge.a", "gantry.bridge.b"}) {
+    const auto& bridge = part(name);
+    CHECK(std::abs(bridge.pos[0] - carriage.pos[0]) == Catch::Approx(.112f));
+    CHECK(bridge.pos[1] == carriage.pos[1]);
+    CHECK(bridge.size[1] == Catch::Approx(2.4f));
+    CHECK(bridge.pos[2] - bridge.size[2] / 2 == Catch::Approx(carriage.pos[2] + .084f));
+  }
+  for (const auto& p : d->parts) {
+    CHECK_FALSE(p.name.starts_with("door.slats."));
+    CHECK_FALSE(p.name.starts_with("projector.leds."));
+    CHECK_FALSE(p.name.starts_with("magazine.bayleds."));
+    CHECK_FALSE(p.name.starts_with("magazine.frame."));
+  }
 }
 
 TEST_CASE("lab file parts resolve beside the document and diagnose broken OBJ",

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <numbers>
+#include <numeric>
 #include "render/lab_scene.hpp"
 #include "render/vulkan_context.hpp"
 #include "support/variants.hpp"
@@ -53,11 +54,19 @@ TEST_CASE("lab coordinates cameras and batches use metres", "[unit][render][lab]
   CHECK(camera->nearZ == 1);
   CHECK(camera->farZ == 600);
   CHECK_FALSE(lab->station("missing").has_value());
+  // File ranges are normally assigned by BoardRenderer::addLabMeshes at load time.
+  std::vector<std::uint32_t> ranges(lab->fileMeshes().size());
+  std::iota(ranges.begin(), ranges.end(), 0u);
+  lab->setFileRanges(ranges);
   InstanceSet set;
   lab->appendTo(set, view::Theme::manifold());
   REQUIRE(set.lab.size() == doc->parts.size());
   std::size_t count = 0;
   for (auto b : set.labBatches) {
+    CHECK(b.first == count);
+    count += b.count;
+  }
+  for (auto b : set.labFileBatches) {
     CHECK(b.first == count);
     count += b.count;
   }
@@ -147,33 +156,46 @@ TEST_CASE("lab station framing keeps the hardware visible and eyes inside the ro
     }
   }
 }
-TEST_CASE("the procedural magazine frame leaves its slab slots open",
+TEST_CASE("the magazine slabs fit inside the authored cassette and its slot guides",
           "[unit][render][lab]") {
   auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
   REQUIRE(doc.has_value());
+  const auto frame =
+      std::find_if(doc->parts.begin(), doc->parts.end(),
+                   [](const auto& p) { return p.name == "magazine.frame"; });
+  REQUIRE(frame != doc->parts.end());
+  REQUIRE(frame->mesh == io::LabMesh::File);
+  std::size_t count = 0;
   for (const auto& slab : doc->parts) {
     if (slab.mesh != io::LabMesh::Slab) continue;
-    for (const auto& frame : doc->parts) {
-      if (!frame.name.starts_with("magazine.frame")) continue;
-      CAPTURE(slab.name, frame.name);
-      bool enclosed = true;
-      for (std::size_t a = 0; a < 3; ++a)
-        enclosed = enclosed && std::abs(slab.pos[a] - frame.pos[a]) < frame.size[a] / 2;
-      CHECK_FALSE(enclosed);
-    }
+    CAPTURE(slab.name);
+    REQUIRE(slab.rot == std::array<float, 3>{90, 90, 0});
+    // Z*Y maps local (X,Y,Z) extents to world (Y,Z,X). Keep the slabs
+    // between the cassette front and back, within its 30 mm slot openings.
+    CHECK(slab.pos[0] - slab.size[1] / 2 >= frame->pos[0] - .25f);
+    CHECK(slab.pos[0] + slab.size[1] / 2 <= frame->pos[0] - .012f);
+    CHECK(slab.size[2] <= .03f);
+    CHECK(slab.pos[1] ==
+          Catch::Approx(frame->pos[1] + (static_cast<float>(count) - 3.5f) * .11f));
+    CHECK(slab.pos[2] - slab.size[0] / 2 > frame->pos[2] + .05f);
+    CHECK(slab.pos[2] + slab.size[0] / 2 < frame->pos[2] + 1.f);
+    ++count;
   }
+  CHECK(count == 8);
 }
 TEST_CASE("every lab station renders a nonuniform room", "[render][lab]") {
   auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
   REQUIRE(doc.has_value());
   auto lab = LabScene::create(*doc);
   REQUIRE(lab.has_value());
+  REQUIRE(lab->fileMeshes().size() == 14);
   auto ctx = VulkanContext::create();
   REQUIRE(ctx.has_value());
   auto renderer = BoardRenderer::create(*ctx);
   auto target = OffscreenTarget::create(*ctx, 640, 360);
   REQUIRE(renderer.has_value());
   REQUIRE(target.has_value());
+  lab->setFileRanges(renderer->addLabMeshes(lab->fileMeshes()));
   renderer->setTheme(view::Theme::manifold());
   BoardOptions options;
   options.labMode = true;

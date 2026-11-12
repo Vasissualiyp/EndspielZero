@@ -46,119 +46,14 @@ material = "matte"
 color = "#15171B"
 group = "room"
 
+# File meshes are in metres: size is a multiplier; [1, 1, 1] is as modelled.
+# Origins are the model origins (usually bottom centres), not bounding-box centres.
+# The roller door faces +Y into the room.
 [[part]]
 name = "door.panel"
-mesh = "box"
-pos = [0, -3.05, 1.2]
-size = [3, 0.06, 2.4]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.0"
-mesh = "box"
-pos = [0, -3.0, 0.1]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.1"
-mesh = "box"
-pos = [0, -3.0, 0.3]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.2"
-mesh = "box"
-pos = [0, -3.0, 0.5]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.3"
-mesh = "box"
-pos = [0, -3.0, 0.7]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.4"
-mesh = "box"
-pos = [0, -3.0, 0.9]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.5"
-mesh = "box"
-pos = [0, -3.0, 1.1]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.6"
-mesh = "box"
-pos = [0, -3.0, 1.3]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.7"
-mesh = "box"
-pos = [0, -3.0, 1.5]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.8"
-mesh = "box"
-pos = [0, -3.0, 1.7]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.9"
-mesh = "box"
-pos = [0, -3.0, 1.9]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.10"
-mesh = "box"
-pos = [0, -3.0, 2.1]
-size = [3, 0.02, 0.03]
-material = "metal"
-color = "#2A2E34"
-group = "room"
-
-[[part]]
-name = "door.slats.11"
-mesh = "box"
-pos = [0, -3.0, 2.3]
-size = [3, 0.02, 0.03]
+mesh = "file:models/door_roller.obj"
+pos = [0, -3.02, 0]
+size = [1, 1, 1]
 material = "metal"
 color = "#2A2E34"
 group = "room"
@@ -331,11 +226,13 @@ color = "#1C1F24"
 group = "bench"
 ao = 0.12
 
+# A 15 mm mounting pad seats the model on the bench while keeping the lens
+# top at the unchanged projector.lens anchor (0.94 + 0.075 = 1.015 m).
 [[part]]
 name = "projector.base"
 mesh = "cylinder"
-pos = [-0.6, 2.62, 0.95]
-size = [0.22, 0.22, 0.06]
+pos = [-0.6, 2.62, 0.9325]
+size = [0.22, 0.22, 0.015]
 material = "metal"
 color = "#3A3F47"
 group = "bench"
@@ -343,243 +240,111 @@ ao = 0.12
 
 [[part]]
 name = "projector.body"
-mesh = "cylinder"
-pos = [-0.6, 2.62, 0.99]
-size = [0.16, 0.16, 0.04]
+mesh = "file:models/projector_body.obj"
+pos = [-0.6, 2.62, 0.94]
+size = [1, 1, 1]
 material = "matte"
 color = "#1C1F24"
 group = "bench"
-ao = 0.12
 
 [[part]]
 name = "projector.lens"
-mesh = "cylinder"
-pos = [-0.6, 2.62, 1.012]
-size = [0.1, 0.1, 0.006]
+mesh = "file:models/projector_lens.obj"
+pos = [-0.6, 2.62, 0.94]
+size = [1, 1, 1]
 material = "glass"
 color = "#203040"
 group = "bench"
-ao = 0.12
 
 [[part]]
-name = "projector.leds.0"
-mesh = "box"
-pos = [-0.505, 2.62, 0.99]
-size = [0.008, 0.008, 0.008]
+name = "projector.leds"
+mesh = "file:models/projector_leds.obj"
+pos = [-0.6, 2.62, 0.94]
+size = [1, 1, 1]
 material = "glow"
 color = "#6FE3FF"
 group = "bench"
-ao = 0.12
 
 [[part]]
-name = "projector.leds.1"
-mesh = "box"
-pos = [-0.5525, 2.7022724, 0.99]
-size = [0.008, 0.008, 0.008]
-material = "glow"
-color = "#6FE3FF"
-group = "bench"
-ao = 0.12
-
-[[part]]
-name = "projector.leds.2"
-mesh = "box"
-pos = [-0.6475, 2.7022724, 0.99]
-size = [0.008, 0.008, 0.008]
-material = "glow"
-color = "#6FE3FF"
-group = "bench"
-ao = 0.12
-
-[[part]]
-name = "projector.leds.3"
-mesh = "box"
-pos = [-0.695, 2.62, 0.99]
-size = [0.008, 0.008, 0.008]
-material = "glow"
-color = "#6FE3FF"
-group = "bench"
-ao = 0.12
-
-[[part]]
-name = "projector.leds.4"
-mesh = "box"
-pos = [-0.6475, 2.5377276, 0.99]
-size = [0.008, 0.008, 0.008]
-material = "glow"
-color = "#6FE3FF"
-group = "bench"
-ao = 0.12
-
-[[part]]
-name = "projector.leds.5"
-mesh = "box"
-pos = [-0.5525, 2.5377276, 0.99]
-size = [0.008, 0.008, 0.008]
-material = "glow"
-color = "#6FE3FF"
-group = "bench"
-ao = 0.12
-
-[[part]]
-name = "lamp.base"
-mesh = "cylinder"
-pos = [0.7, 2.75, 0.94]
-size = [0.16, 0.16, 0.03]
+name = "lamp.body"
+mesh = "file:models/lamp.obj"
+pos = [0.7, 2.75, 0.925]
+size = [1, 1, 1]
 material = "metal"
 color = "#3A3F47"
 group = "bench"
-ao = 0.12
 
 [[part]]
-name = "lamp.arm1"
-mesh = "box"
-pos = [0.7, 2.75, 1.12]
-size = [0.025, 0.025, 0.35]
-material = "metal"
-color = "#3A3F47"
+name = "lamp.head.emitter"
+mesh = "file:models/lamp_head_emitter.obj"
+pos = [0.7, 2.75, 0.925]
+size = [1, 1, 1]
+material = "glow"
+color = "#6FE3FF"
 group = "bench"
-rot = [0, 15, 0]
-ao = 0.12
-
-[[part]]
-name = "lamp.arm2"
-mesh = "box"
-pos = [0.62, 2.68, 1.38]
-size = [0.025, 0.025, 0.24]
-material = "metal"
-color = "#3A3F47"
-group = "bench"
-rot = [0, -35, 0]
-ao = 0.12
-
-[[part]]
-name = "lamp.head"
-mesh = "bevel"
-pos = [0.5, 2.6, 1.46]
-size = [0.18, 0.1, 0.04]
-material = "metal"
-color = "#3A3F47"
-group = "bench"
-ao = 0.12
 
 [[part]]
 name = "screen.old"
-mesh = "bevel"
-pos = [0.35, 2.85, 1.12]
-size = [0.5, 0.04, 0.32]
+mesh = "file:models/bench_monitor.obj"
+pos = [0.35, 2.85, 0.925]
+size = [1, 1, 1]
 material = "matte"
 color = "#0E0F11"
 group = "bench"
-rot = [0, -8, 0]
-ao = 0.12
 
 [[part]]
-name = "tools.0"
-mesh = "cylinder"
-pos = [-1.4, 2.7, 0.96]
-size = [0.08, 0.09, 0.07]
+name = "tools.mug"
+mesh = "file:models/clutter_mug.obj"
+pos = [-1.5, 2.7, 0.925]
+size = [1, 1, 1]
 material = "matte"
 color = "#24272C"
 group = "bench"
-ao = 0.12
 
 [[part]]
-name = "tools.1"
-mesh = "box"
-pos = [-1.24, 2.7, 0.96]
-size = [0.08, 0.09, 0.07]
+name = "tools.toolbox"
+mesh = "file:models/clutter_toolbox.obj"
+pos = [-1.22, 2.73, 0.925]
+size = [1, 1, 1]
 material = "matte"
 color = "#292B30"
 group = "bench"
-ao = 0.12
 
 [[part]]
-name = "tools.2"
-mesh = "box"
-pos = [-1.08, 2.7, 0.96]
-size = [0.08, 0.09, 0.07]
+name = "tools.spool"
+mesh = "file:models/clutter_spool.obj"
+pos = [-0.96, 2.73, 0.925]
+size = [1, 1, 1]
 material = "matte"
 color = "#202329"
 group = "bench"
-ao = 0.12
 
 [[part]]
-name = "tools.3"
-mesh = "box"
-pos = [-0.92, 2.7, 0.96]
-size = [0.08, 0.09, 0.07]
+name = "tools.multimeter"
+mesh = "file:models/clutter_multimeter.obj"
+pos = [-0.96, 2.46, 0.925]
+size = [1, 1, 1]
 material = "matte"
 color = "#282A30"
 group = "bench"
-ao = 0.12
 
-[[part]]
-name = "tools.4"
-mesh = "box"
-pos = [-0.76, 2.7, 0.96]
-size = [0.08, 0.09, 0.07]
-material = "matte"
-color = "#1A1C21"
-group = "bench"
-ao = 0.12
-
+# The cassette back is flush to the right wall, front toward -X.
 [[part]]
 name = "magazine.frame"
-mesh = "bevel"
-pos = [2.49, 1.8, 1.3]
-size = [0.03, 1, 1.1]
+mesh = "file:models/magazine.obj"
+pos = [2.5, 1.8, 0.75]
+size = [1, 1, 1]
 material = "metal"
 color = "#3A3F47"
 group = "rig"
-ao = 0.1
 
-# Open cassette frame: the parked slabs remain visible between the rails.
-[[part]]
-name = "magazine.frame.top"
-mesh = "bevel"
-pos = [2.38, 1.8, 1.825]
-size = [0.25, 1, 0.05]
-material = "metal"
-color = "#3A3F47"
-group = "rig"
-ao = 0.1
-
-[[part]]
-name = "magazine.frame.bottom"
-mesh = "bevel"
-pos = [2.38, 1.8, 0.775]
-size = [0.25, 1, 0.05]
-material = "metal"
-color = "#3A3F47"
-group = "rig"
-ao = 0.1
-
-[[part]]
-name = "magazine.frame.near"
-mesh = "bevel"
-pos = [2.38, 1.325, 1.3]
-size = [0.25, 0.05, 1]
-material = "metal"
-color = "#3A3F47"
-group = "rig"
-ao = 0.1
-
-[[part]]
-name = "magazine.frame.far"
-mesh = "bevel"
-pos = [2.38, 2.275, 1.3]
-size = [0.25, 0.05, 1]
-material = "metal"
-color = "#3A3F47"
-group = "rig"
-ao = 0.1
-
+# Procedural parked slabs remain until M24.5. After rotation, their 0.22 m
+# depth fits the cassette; their 0.03 m thickness fits the authored slot guides.
 [[part]]
 name = "magazine.slab.0"
 mesh = "slab"
-pos = [2.35, 1.415, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 1.415, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
@@ -587,160 +352,89 @@ rot = [90, 90, 0]
 ao = 0.1
 
 [[part]]
-name = "magazine.bayleds.0"
-mesh = "box"
-pos = [2.245, 1.415, 0.83]
-size = [0.01, 0.01, 0.01]
+name = "magazine.bayleds"
+mesh = "file:models/magazine_leds.obj"
+pos = [2.5, 1.8, 0.75]
+size = [1, 1, 1]
 material = "glow"
 color = "#6FE3FF"
 group = "rig"
-ao = 0.1
 
 [[part]]
 name = "magazine.slab.1"
 mesh = "slab"
-pos = [2.35, 1.525, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 1.525, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
 rot = [90, 90, 0]
-ao = 0.1
-
-[[part]]
-name = "magazine.bayleds.1"
-mesh = "box"
-pos = [2.245, 1.525, 0.83]
-size = [0.01, 0.01, 0.01]
-material = "glow"
-color = "#6FE3FF"
-group = "rig"
 ao = 0.1
 
 [[part]]
 name = "magazine.slab.2"
 mesh = "slab"
-pos = [2.35, 1.635, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 1.635, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
 rot = [90, 90, 0]
-ao = 0.1
-
-[[part]]
-name = "magazine.bayleds.2"
-mesh = "box"
-pos = [2.245, 1.635, 0.83]
-size = [0.01, 0.01, 0.01]
-material = "glow"
-color = "#6FE3FF"
-group = "rig"
 ao = 0.1
 
 [[part]]
 name = "magazine.slab.3"
 mesh = "slab"
-pos = [2.35, 1.745, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 1.745, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
 rot = [90, 90, 0]
-ao = 0.1
-
-[[part]]
-name = "magazine.bayleds.3"
-mesh = "box"
-pos = [2.245, 1.745, 0.83]
-size = [0.01, 0.01, 0.01]
-material = "glow"
-color = "#6FE3FF"
-group = "rig"
 ao = 0.1
 
 [[part]]
 name = "magazine.slab.4"
 mesh = "slab"
-pos = [2.35, 1.855, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 1.855, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
 rot = [90, 90, 0]
-ao = 0.1
-
-[[part]]
-name = "magazine.bayleds.4"
-mesh = "box"
-pos = [2.245, 1.855, 0.83]
-size = [0.01, 0.01, 0.01]
-material = "glow"
-color = "#6FE3FF"
-group = "rig"
 ao = 0.1
 
 [[part]]
 name = "magazine.slab.5"
 mesh = "slab"
-pos = [2.35, 1.965, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 1.965, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
 rot = [90, 90, 0]
-ao = 0.1
-
-[[part]]
-name = "magazine.bayleds.5"
-mesh = "box"
-pos = [2.245, 1.965, 0.83]
-size = [0.01, 0.01, 0.01]
-material = "glow"
-color = "#6FE3FF"
-group = "rig"
 ao = 0.1
 
 [[part]]
 name = "magazine.slab.6"
 mesh = "slab"
-pos = [2.35, 2.075, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 2.075, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
 rot = [90, 90, 0]
-ao = 0.1
-
-[[part]]
-name = "magazine.bayleds.6"
-mesh = "box"
-pos = [2.245, 2.075, 0.83]
-size = [0.01, 0.01, 0.01]
-material = "glow"
-color = "#6FE3FF"
-group = "rig"
 ao = 0.1
 
 [[part]]
 name = "magazine.slab.7"
 mesh = "slab"
-pos = [2.35, 2.185, 1.3]
-size = [0.42, 0.42, 0.03]
+pos = [2.37, 2.185, 1.3]
+size = [0.42, 0.22, 0.03]
 material = "led"
 color = "#090C10"
 group = "rig"
 rot = [90, 90, 0]
-ao = 0.1
-
-[[part]]
-name = "magazine.bayleds.7"
-mesh = "box"
-pos = [2.245, 2.185, 0.83]
-size = [0.01, 0.01, 0.01]
-material = "glow"
-color = "#6FE3FF"
-group = "rig"
 ao = 0.1
 
 [[part]]
@@ -783,15 +477,35 @@ color = "#3A3F47"
 group = "rig"
 ao = 0.1
 
+# The parked carriage hangs from two Y bridges joining the perimeter X rails.
+# Their undersides touch the model bearing wheels at local z = 0.084 m.
 [[part]]
-name = "gantry.carriage.0"
-mesh = "bevel"
-pos = [0, 0.6, 2.5]
-size = [0.3, 0.3, 0.08]
+name = "gantry.bridge.a"
+mesh = "box"
+pos = [-0.112, 0.6, 2.574]
+size = [0.04, 2.4, 0.06]
 material = "metal"
 color = "#3A3F47"
 group = "rig"
-ao = 0.1
+
+[[part]]
+name = "gantry.bridge.b"
+mesh = "box"
+pos = [0.112, 0.6, 2.574]
+size = [0.04, 2.4, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+
+# Bottom-face origin; the parked carriage motor reaches the 2.55 m rail height.
+[[part]]
+name = "gantry.carriage.0"
+mesh = "file:models/gantry_carriage.obj"
+pos = [0, 0.6, 2.46]
+size = [1, 1, 1]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
 
 [[part]]
 name = "cable.tray"
