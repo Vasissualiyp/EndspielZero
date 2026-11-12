@@ -7,6 +7,7 @@
 #ifdef CB_HAVE_VULKAN
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "app/fx_timeline.hpp"
 #include "app/session.hpp"
@@ -36,6 +37,56 @@ CellId at(const app::Session& s, int file, int rank) {
   return s.variant().dims.toCell(c);
 }
 }  // namespace
+
+TEST_CASE("seam hover brightens one axis and dims the other", "[render][seams]") {
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx.has_value());
+  auto renderer = BoardRenderer::create(*ctx);
+  REQUIRE(renderer.has_value());
+  for (const auto& theme : {view::Theme::console(), view::Theme::manifold()}) {
+    renderer->setTheme(theme);
+    for (const char* name : {"klein", "mirrorbox"}) {
+      CAPTURE(name);
+      auto s = app::Session::create(test::loadVariant(name));
+      REQUIRE(s.has_value());
+      const auto build = [&](int axis) {
+        BoardOptions options;
+        options.seamHighlightAxis = axis;
+        renderer->setOptions(options);
+        return renderer->buildInstances((*s)->snapshot(), (*s)->viewConfig(),
+                                        &(*s)->seams());
+      };
+      const auto base = build(-1);
+      for (int axis : {0, 1}) {
+        const auto hover = build(axis);
+        REQUIRE(base.instances.size() == hover.instances.size());
+        std::size_t changed = 0;
+        for (std::size_t i = 0; i < base.instances.size(); ++i) {
+          const auto& a = base.instances[i];
+          const auto& b = hover.instances[i];
+          Instance restored = b;
+          std::copy_n(a.color, 4, restored.color);
+          CHECK(std::memcmp(&a, &restored, sizeof(Instance)) == 0);
+          if (std::memcmp(a.color, b.color, sizeof(a.color)) == 0) continue;
+          ++changed;
+          const int railAxis = a.scale[0] < a.scale[1] ? 0 : 1;
+          const float gain = railAxis == axis ? kSeamHoverGain : kSeamHoverDim;
+          for (int c = 0; c < 3; ++c)
+            CHECK(b.color[c] == Catch::Approx(a.color[c] * gain));
+          CHECK(b.color[3] == a.color[3]);
+        }
+        if (std::string_view(name) == "mirrorbox") {
+          CHECK(changed == 0);
+          CHECK(std::memcmp(base.instances.data(), hover.instances.data(),
+                            base.instances.size() * sizeof(Instance)) == 0);
+        } else {
+          CHECK(changed == (*s)->seams().faces().size());
+        }
+      }
+    }
+  }
+  CHECK(ctx->takeValidationMessages().empty());
+}
 
 TEST_CASE("boot fx: near ranks are on while far ranks are dark", "[render][fx][boot]") {
   const auto s = standardSession();

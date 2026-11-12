@@ -134,3 +134,27 @@ TEST_CASE("the legend names the axis of each glued edge, and hides mirrors",
   // A mirror leads nowhere, so a colour that promised a destination would be a lie.
   CHECK(legendFor("mirrorbox").empty());
 }
+
+TEST_CASE("seamLegend: each entry names its drawn axis", "[unit][view][seams]") {
+  for (const char* name : {"cylinder", "torus", "klein", "mirrorbox"}) {
+    CAPTURE(name);
+    const VariantSpec v = test::loadVariant(name);
+    const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+    const SeamMap m = SeamMap::build(v, cfg, theme());
+    const auto legend = seamLegend(m, cfg, v.dims);
+    if (std::string_view(name) == "mirrorbox") {
+      CHECK(legend.empty());
+    } else if (std::string_view(name) == "cylinder") {
+      REQUIRE(legend.size() == 1);
+      for (const SeamFace& f : m.faces()) {
+        if (f.kind == SeamKind::Glued) CHECK(legend[0].screenAxis == f.screenAxis);
+      }
+    } else {
+      REQUIRE(legend.size() == 2);
+      for (std::size_t i = 0; i < legend.size(); ++i) {
+        CHECK(legend[i].screenAxis == i);
+        CHECK(legend[i].axis == v.dims.name(cfg.screenAxes[i]));
+      }
+    }
+  }
+}

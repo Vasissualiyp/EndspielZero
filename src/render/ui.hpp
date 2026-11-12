@@ -142,6 +142,7 @@ class Ui {
 
   /// Build whichever screen the shell says the player is on.
   UiRequest build(app::Shell& shell, float fps);
+  [[nodiscard]] int seamHover() const noexcept { return seamHover_ ? *seamHover_ : -1; }
 
   /// Rebuild the fonts at a new interface scale.
   ///
@@ -245,6 +246,8 @@ class Ui {
  private:
   Ui() = default;
   bool forceDevOverlay_{false};
+  std::optional<std::uint8_t> seamHover_;
+  std::optional<std::uint8_t> pinnedSeam_;
   std::optional<float> captureAge_;
   HudEvents hudEvents_;
   std::optional<float> resultAge_;

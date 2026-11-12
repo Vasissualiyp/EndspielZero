@@ -187,6 +187,25 @@ std::string execute(Shell& shell, const std::string& line) {
   const Game& game = session->game();
   const Position& pos = game.position();
 
+  if (cmd == "seamhover") {
+    if (w.size() != 2) return "usage: seamhover <axis>|off";
+    if (w[1] == "off") {
+      session->setSeamHoverPin(std::nullopt);
+      return "seam highlight off";
+    }
+    const auto legend = view::seamLegend(session->seams(), session->viewConfig(), v.dims);
+    std::string axes;
+    for (const auto& entry : legend) {
+      if (entry.axis == w[1]) {
+        session->setSeamHoverPin(entry.screenAxis);
+        return "highlighting " + entry.axis + " edges";
+      }
+      if (!axes.empty()) axes += ", ";
+      axes += entry.axis;
+    }
+    return "no glued axis named " + w[1] + "; this board has: " + axes;
+  }
+
   if (cmd == "info") {
     std::ostringstream out;
     out << v.name << ": " << static_cast<int>(v.dims.dims()) << " axes, "
@@ -439,6 +458,7 @@ std::string DebugConsole::help() {
          "boot                     replay the board's power-on sequence\n"
          "ripple [<cell>]          play the check ripple from a cell (default: the "
          "royal)\n"
+         "seamhover <axis>|off     pin the seam-legend highlight on one axis\n"
          "result                     show the decided game result now\n"
          "review [<ply>|off]       browse the game's history (no ply: the end); off "
          "leaves\n"

@@ -1573,6 +1573,7 @@ void Ui::drawDebugConsole(app::Shell& shell) {
 }
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
+  seamHover_.reset();
   const widgets::ScopedVisualTime visualTime(visualTime_);
   updateKeyboardNavigation(shell);
   // Start the frame with an empty field list. Only the board screen fills it; every other
@@ -1926,6 +1927,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   UiRequest request;
   const view::Theme& t = theme_;
   app::Session& session = *shell.session();
+  pinnedSeam_ = session.seamHoverPin();
   const VariantSpec& v = session.variant();
   const Game& game = session.game();
   auto* display = static_cast<ImFont*>(fontDisplay_);
@@ -2192,9 +2194,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (shell.settings().showSeams && shell.settings().showSeamLegend &&
         !v.geom.isBox() && !session.seams().empty()) {
       bool firstSeam = true;
+      std::optional<std::uint8_t> hovered;
       for (const view::SeamLegendEntry& e : seamKey) {
         if (!firstSeam) ImGui::SameLine(0, px(8));
         firstSeam = false;
+        ImGui::BeginGroup();
         const ImVec2 p = ImGui::GetCursorScreenPos();
         ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + px(2)),
                                                   ImVec2(p.x + px(11), p.y + px(13)),
@@ -2207,7 +2211,10 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         ImGui::TextUnformatted(label.c_str());
         ImGui::PopStyleColor();
         ImGui::PopFont();
+        ImGui::EndGroup();
+        if (ImGui::IsItemHovered()) hovered = e.screenAxis;
       }
+      seamHover_ = pinnedSeam_ ? pinnedSeam_ : hovered;
     }
     ImGui::PopStyleVar();
   }

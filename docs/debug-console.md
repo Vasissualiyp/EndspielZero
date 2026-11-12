@@ -30,6 +30,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
 | `ripple [<cell>]` | Play the check ripple (M23.10 section 4) from `<cell>` (default: the royal of the side to move) without touching the game. It wraps through glued seams. Calm intensity and non-LED themes have none |
+| `seamhover <axis>\|off` | Pin the seam-legend highlight on a glued drawn axis by name (e.g. `file` or `rank`); `off` restores mouse hover. That axis brightens, other glued seams dim, and mirrors stay unchanged. Requires a game |
 | `hudfx [turn\|move\|think\|all]` | Preview the live HUD feedback (M23.11 section 4) without touching the game: `turn` replays the status panel's turn flip, `move` the new ledger row, `all` (default) both; `think` toggles the engine-thinking indicator on and off. The check text is timed by `ripple`. At calm intensity (below one half) these change instantly |
 | `endfx win\|draw\|off [white\|black]` | Preview the game-end power-down (section 5): `win` is a decisive end with `<side>` (default white) as the loser, `draw` a draw, `off` clears it. Ages count from the decision: nothing moves for the first 3 s, then a slow power-down. The game itself is untouched; a real end plays by itself, and an undo out of one powers the board back up |
 | `info` | Variant summary: axes, cells, pieces and their atoms, mark tags, compounds, castles |
@@ -99,6 +100,8 @@ groups:
     `--piece-cylinders` and `--dims`.
 - **Camera:** `--cinema`, `--follow <mode>` and `--shape-follow chase|turntable`.
 - **Look:**
+  - `--seam-hover <axis>` pins the seam-legend highlight by axis name for this run (e.g.
+    `klein --seam-hover file`). An unknown or unglued axis exits with an error.
   - `--dev` forces developer presentation on for this run without saving it.
   - `--post 0|1` forces post-processing off or on and `--bloom <0..4>` scales its bloom, for
     this run only. Use `--post 0` for A/B captures and as the recovery path if the device

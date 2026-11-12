@@ -71,6 +71,9 @@ Rgba seamRampColor(const Theme& theme, float t);
 struct SeamLegendEntry {
   std::string axis;  ///< the axis's own name, e.g. "file"
   Rgba color;
+  /// Index into ViewConfig::screenAxes of the faces this entry stands for. The
+  /// hover highlight (M23.12 section 1) selects faces by it.
+  std::uint8_t screenAxis{0};
 };
 
 /// One entry per glued drawn axis, or empty when nothing is glued. Mirrors are excluded -

@@ -156,7 +156,7 @@ std::vector<SeamLegendEntry> seamLegend(const SeamMap& seams, const ViewConfig& 
         break;
       }
     }
-    if (!seen) out.push_back({axis, f.color});
+    if (!seen) out.push_back({axis, f.color, f.screenAxis});
   }
   return out;
 }

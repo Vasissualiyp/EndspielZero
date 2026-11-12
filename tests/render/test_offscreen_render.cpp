@@ -3669,6 +3669,81 @@ TEST_CASE("a screen move runs on the shell clock, holds the board, and a skip en
   CHECK(gpu().ctx.takeValidationMessages().empty());
 }
 
+TEST_CASE("seam legend hover covers swatches and labels and clears each frame",
+          "[render][gpu][seams]") {
+  if (!gpu().available) SKIP("no Vulkan device: " + gpu().reason);
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  auto* window = SDL_CreateWindow("seam hover", 1280, 720, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct WindowGuard {
+    SDL_Window* w;
+    ~WindowGuard() { SDL_DestroyWindow(w); }
+  } guard{window};
+  auto shell = app::Shell::create({"torus"}, {});
+  shell->setVariantLoader(
+      [](const std::string& n) -> Result<VariantSpec> { return test::loadVariant(n); });
+  REQUIRE(shell->startGame("torus").has_value());
+  auto ui = Ui::create(gpu().ctx, window, view::Theme::manifold());
+  REQUIRE(ui);
+  const auto frame = [&](ImVec2 pos) {
+    (*ui)->injectMouse(pos.x, pos.y, false);
+    (*ui)->tick(1);
+    (*ui)->newFrame();
+    (void)(*ui)->build(*shell, 60);
+    (*ui)->endFrame();
+  };
+  frame({-100, -100});
+  frame({-100, -100});
+  CHECK((*ui)->seamHover() == -1);
+  const auto* plate = ImGui::FindWindowByName("##variant");
+  REQUIRE(plate);
+  const auto legend =
+      view::seamLegend(shell->session()->seams(), shell->session()->viewConfig(),
+                       shell->session()->variant().dims);
+  REQUIRE(legend.size() == 2);
+  std::vector<ImVec2> swatches;
+  for (const auto& entry : legend) {
+    ImVec2 lo(FLT_MAX, FLT_MAX), hi(-FLT_MAX, -FLT_MAX);
+    for (const auto& vertex : plate->DrawList->VtxBuffer) {
+      if (vertex.col != widgets::u32(entry.color)) continue;
+      lo.x = std::min(lo.x, vertex.pos.x);
+      lo.y = std::min(lo.y, vertex.pos.y);
+      hi.x = std::max(hi.x, vertex.pos.x);
+      hi.y = std::max(hi.y, vertex.pos.y);
+    }
+    REQUIRE(lo.x < hi.x);
+    swatches.push_back({(lo.x + hi.x) * .5f, (lo.y + hi.y) * .5f});
+  }
+  for (std::size_t i = 0; i < swatches.size(); ++i) {
+    frame(swatches[i]);
+    CHECK((*ui)->seamHover() == legend[i].screenAxis);
+    frame({swatches[i].x + 26, swatches[i].y});
+    CHECK((*ui)->seamHover() == legend[i].screenAxis);
+  }
+  shell->session()->setSeamHoverPin(legend[0].screenAxis);
+  frame(swatches[1]);
+  CHECK((*ui)->seamHover() == legend[0].screenAxis);
+  shell->session()->setSeamHoverPin(std::nullopt);
+  frame({-100, -100});
+  CHECK((*ui)->seamHover() == -1);
+  frame(swatches[0]);
+  CHECK((*ui)->seamHover() == legend[0].screenAxis);
+  shell->pause();
+  frame({-100, -100});
+  CHECK((*ui)->seamHover() == -1);
+  shell->go(app::Screen::MainMenu);
+  frame({-100, -100});
+  CHECK((*ui)->seamHover() == -1);
+  REQUIRE(shell->startGame("mirrorbox").has_value());
+  frame(swatches[0]);
+  CHECK((*ui)->seamHover() == -1);
+  CHECK(gpu().ctx.takeValidationMessages().empty());
+}
+
 #endif  // CB_HAVE_IMGUI
 
 #endif  // CB_HAVE_VULKAN

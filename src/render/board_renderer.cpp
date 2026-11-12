@@ -19,6 +19,14 @@
 namespace cb::render {
 namespace {
 
+/// Mirrors never change; without a hover the colour is untouched, bit for bit.
+view::Rgba hoveredSeam(view::Rgba c, std::uint8_t axis, view::SeamKind kind,
+                       int highlight) {
+  if (highlight < 0 || kind == view::SeamKind::Mirror) return c;
+  const float k = axis == highlight ? kSeamHoverGain : kSeamHoverDim;
+  return view::Rgba{c.r * k, c.g * k, c.b * k, c.a};
+}
+
 struct PushConstants {
   view::Mat4 viewProj{};
   float lightDir[4]{-0.42f, -0.55f, -0.72f, 0.0f};
@@ -1181,6 +1189,10 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
         if (rails) {
           SurfaceRail ru = surfaceRail(*seams, patch.cell, 0, i, j);
           SurfaceRail rv = surfaceRail(*seams, patch.cell, 1, i, j);
+          ru.color =
+              hoveredSeam(ru.color, 0, view::SeamKind::Glued, options_.seamHighlightAxis);
+          rv.color =
+              hoveredSeam(rv.color, 1, view::SeamKind::Glued, options_.seamHighlightAxis);
           ru.weight *= railW0;
           rv.weight *= railW1;
           if (effectWeight)
@@ -1750,7 +1762,8 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
         rail.scale[0] = (f.screenAxis == 0 ? 0.07f : 0.5f) / half.x;
         rail.scale[1] = (f.screenAxis == 1 ? 0.07f : 0.5f) / half.y;
         rail.scale[2] = 0.055f / half.z;
-        toFloat4(f.color, rail.color);
+        toFloat4(hoveredSeam(f.color, f.screenAxis, f.kind, options_.seamHighlightAxis),
+                 rail.color);
         // A mirror is drawn as metal; a glued portal keeps the matte seam colour.
         rail.material =
             shaderMaterial(f.kind == view::SeamKind::Mirror ? view::Material::Metal

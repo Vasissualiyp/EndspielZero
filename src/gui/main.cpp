@@ -50,6 +50,7 @@ using namespace cb;
 namespace {
 
 std::string gThemeOverride;
+std::string gSeamHover;
 bool gMatteCapture = false;
 bool gDevOverlay = false;
 float gUiScaleOverride = -1.0f;
@@ -399,8 +400,9 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
 
 /// The board options for the shell's current variant: the geometry view is offered only
 /// where there is a surface to become, so `standard` and every non-glued board stay flat.
-render::BoardOptions optionsFor(const app::Shell& shell) {
+render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight = -1) {
   render::BoardOptions o = optionsFrom(shell.settings());
+  o.seamHighlightAxis = seamHighlight;
   // The trailer clips further in (see `Settings::trailerNearClip`).
   if (shell.attracting())
     o.nearClip = std::max(o.nearClip, shell.settings().trailerNearClip);
@@ -418,6 +420,23 @@ render::BoardOptions optionsFor(const app::Shell& shell) {
   (void)shell;
 #endif
   return o;
+}
+
+/// Resolve a run-only legend pin once the command-line session has loaded.
+bool pinSeamHover(app::Shell& shell) {
+  if (gSeamHover.empty()) return true;
+  if (auto* session = shell.session()) {
+    const auto legend = view::seamLegend(session->seams(), session->viewConfig(),
+                                         session->variant().dims);
+    for (const auto& entry : legend) {
+      if (entry.axis == gSeamHover) {
+        session->setSeamHoverPin(entry.screenAxis);
+        return true;
+      }
+    }
+  }
+  std::fprintf(stderr, "--seam-hover: no glued axis named %s\n", gSeamHover.c_str());
+  return false;
 }
 
 #ifdef CB_HAVE_IMGUI
@@ -724,6 +743,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
                  ok.error().format().c_str());
     return 1;
   }
+  if (!pinSeamHover(*shell)) return 1;
   if (!playing && !script.empty()) {
     if (auto ok = shell->session()->applyScript(script); !ok.has_value()) {
       std::fprintf(stderr, "script: %s\n", ok.error().format().c_str());
@@ -1026,10 +1046,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
           shell->settings().geometryAlignOffset = off.u;
           shell->settings().geometryAlignOffsetV = off.v;
         }
-        // The offsets just changed, so the renderer's options must be refreshed before
-        // the board is built from them.
-        renderer->setOptions(optionsFor(*shell));
       }
+      // Refresh the alignment offsets and this frame's legend hover before building.
+      renderer->setOptions(optionsFor(*shell, (*ui)->seamHover()));
       syncMarks(*renderer, *shell->session());
       instances = renderer->buildInstances(
           shell->session()->snapshot(), shell->session()->viewConfig(),
@@ -1509,6 +1528,7 @@ int main(int argc, char** argv) {
           "for this run only (not saved).\n"
           "--theme console|manifold overrides the theme for this run; --matte disables "
           "materials.\n"
+          "--seam-hover AXIS pins that drawn axis's seam-legend highlight for this run.\n"
           "--ui-scale 0.6..3.0 is exact; --ui-auto opts captures into automatic "
           "scaling.\n"
           "--presentation 0..1 sets the presentation intensity for this run (not "
@@ -1562,6 +1582,8 @@ int main(int argc, char** argv) {
       geometry = true;
     else if (arg == "--theme" && i + 1 < argc)
       gThemeOverride = argv[++i];
+    else if (arg == "--seam-hover" && i + 1 < argc)
+      gSeamHover = argv[++i];
     else if (arg == "--visual-time") {
       if (i + 1 >= argc) {
         std::fprintf(stderr, "--visual-time requires finite nonnegative seconds\n");
@@ -1725,6 +1747,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (!pinSeamHover(*shell)) return 1;
   auto window = render::Window::create("EndspielZero", static_cast<std::uint32_t>(width),
                                        static_cast<std::uint32_t>(height));
   if (!window.has_value()) {
@@ -2484,6 +2507,9 @@ int main(int argc, char** argv) {
 
     render::InstanceSet instances;
     view::OrbitCamera camera;
+#ifdef CB_HAVE_IMGUI
+    renderer->setOptions(optionsFor(*shell, (*ui)->seamHover()));
+#endif
     // Check after Ui::build and request processing: the console may replace a
     // position in the existing Session without producing a load request.
     const bool collectPanels = panelResponse.prepare(

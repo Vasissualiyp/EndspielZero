@@ -88,6 +88,9 @@ struct BoardRect {
   [[nodiscard]] bool valid() const noexcept { return width > 0 && height > 0; }
 };
 
+inline constexpr float kSeamHoverGain = 1.8f;  ///< hovered axis: colour multiplier
+inline constexpr float kSeamHoverDim = 0.55f;  ///< other glued axes
+
 /// What the board shows. Driven by the player's settings; the renderer holds no
 /// opinions of its own about what is worth marking.
 struct BoardOptions {
@@ -98,6 +101,10 @@ struct BoardOptions {
   bool swapLayerColors{false};
   bool showCheck{true};
   bool showSeams{true};
+  /// The seam-legend hover (M23.12 section 1): the drawn axis (an index into
+  /// ViewConfig::screenAxes) whose seams are brightened while the others dim; -1 for
+  /// none. Colour only: no instance is added, removed or moved.
+  int seamHighlightAxis{-1};
   /// Nothing closer to the camera than this many cells is drawn (`Settings::nearClip`).
   float nearClip{0.1f};
   /// 1 keeps the height a piece's value implies; 0 makes every piece the same height.

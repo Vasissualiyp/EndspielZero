@@ -136,6 +136,13 @@ class Session {
     return engineThinking() || thinkingPreview_;
   }
   void setThinkingPreview(bool on) noexcept { thinkingPreview_ = on; }
+  /// Presentation-only seam-legend pin; the mouse resumes when cleared.
+  void setSeamHoverPin(std::optional<std::uint8_t> axis) noexcept {
+    seamHoverPin_ = axis;
+  }
+  [[nodiscard]] std::optional<std::uint8_t> seamHoverPin() const noexcept {
+    return seamHoverPin_;
+  }
   /// Console `endfx`: preview an end (or clear it) without changing the game.
   void requestEndFx(std::optional<view::EndFx> fx) noexcept {
     endEvent_ = fx;
@@ -476,6 +483,7 @@ class Session {
   std::uint64_t moveSerial_{0};
   Color lastSide_{Color::White};
   bool thinkingPreview_{false};
+  std::optional<std::uint8_t> seamHoverPin_;
   std::optional<CellId> checkEvent_;
   std::uint64_t endSerial_{0};
   std::uint64_t powerUpSerial_{0};

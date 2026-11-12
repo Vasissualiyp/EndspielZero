@@ -29,6 +29,34 @@ bool has(const std::string& s, const char* t) {
 }
 }  // namespace
 
+TEST_CASE("seamhover pins a glued drawn axis and off clears it", "[unit][app][seams]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  CHECK(has(console.run(*shell, "seamhover file"), "no game is running"));
+  REQUIRE(shell->startGame("torus").has_value());
+  auto* session = shell->session();
+  CHECK_FALSE(session->seamHoverPin().has_value());
+  const auto legend =
+      view::seamLegend(session->seams(), session->viewConfig(), session->variant().dims);
+  REQUIRE(legend.size() == 2);
+  for (const auto& entry : legend) {
+    CHECK(console.run(*shell, "seamhover " + entry.axis) ==
+          "highlighting " + entry.axis + " edges");
+    CHECK(session->seamHoverPin() == entry.screenAxis);
+  }
+  CHECK(console.run(*shell, "seamhover level") ==
+        "no glued axis named level; this board has: file, rank");
+  CHECK(session->seamHoverPin() == legend[1].screenAxis);
+  CHECK(console.run(*shell, "seamhover off") == "seam highlight off");
+  CHECK_FALSE(session->seamHoverPin().has_value());
+  CHECK(console.run(*shell, "seamhover") == "usage: seamhover <axis>|off");
+  CHECK(console.run(*shell, "seamhover file extra") == "usage: seamhover <axis>|off");
+  CHECK(has(DebugConsole::help(), "seamhover <axis>|off"));
+  REQUIRE(shell->startGame("mirrorbox").has_value());
+  CHECK(has(console.run(*shell, "seamhover file"), "no glued axis named file"));
+  CHECK_FALSE(shell->session()->seamHoverPin().has_value());
+}
+
 TEST_CASE("developer presentation is opt-in and reachable without a game",
           "[unit][app][dev-overlay]") {
   auto shell = makeShell();
