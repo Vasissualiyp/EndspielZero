@@ -10,16 +10,17 @@
 #include <string>
 #include <vector>
 
+#include "io/obj_mesh.hpp"
 #include "render/image_io.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/post_process.hpp"
 #include "space/coord.hpp"
 #include "view/camera.hpp"
+#include "view/cell_fx.hpp"
 #include "view/layout.hpp"
 #include "view/move_anim.hpp"
 #include "view/seams.hpp"
-#include "view/cell_fx.hpp"
 #include "view/snapshot.hpp"
 #include "view/theme.hpp"
 
@@ -57,8 +58,8 @@ struct Instance {
   /// copies of the geometry.
   float roll{0};
   /// Which `InstanceSet::cellFx` record the shader reads for this instance (M23.10): 0 is
-  /// "none"; a cell is `2 * (cell + 1)` and the piece standing on it `2 * (cell + 1) + 1`.
-  /// Shares the edge-mask attribute, so the pipeline stays at sixteen vertex inputs.
+  /// "none"; a cell is `2 * (cell + 1)` and the piece standing on it `2 * (cell + 1) +
+  /// 1`. Shares the edge-mask attribute, so the pipeline stays at sixteen vertex inputs.
   float fxCell{0};
   /// Full orientation as a quaternion (x,y,z,w), applied after `roll`. Identity on the
   /// flat board; on the geometry view it turns a cell's local +Z onto the surface normal,
@@ -95,7 +96,11 @@ inline constexpr float kSeamHoverDim = 0.55f;  ///< other glued axes
 
 /// What the board shows. Driven by the player's settings; the renderer holds no
 /// opinions of its own about what is worth marking.
+enum class Cut : std::uint8_t { Plank, Turned };
+float shaderMaterial(view::Material material, Cut cut, float variation);
+
 struct BoardOptions {
+  bool labMode{false};
   bool showLegalMoves{true};
   bool showLastMove{true};
   /// Flip square colours on every second layer of a board with 3+ axes
@@ -178,6 +183,9 @@ struct InstanceSet {
     std::uint32_t count{0};
   };
   std::array<Batch, kShapeSlots> batches{};
+  std::vector<Instance> lab;
+  std::array<Batch, static_cast<std::size_t>(LabShape::Count) + 1> labBatches{};
+  std::vector<Batch> labFileBatches;
   /// M17.26: how many of `batches[s]` are token discs rather than icon decals. The shape
   /// view emits the disc first and the icon second for each piece, both in this one
   /// batch; the first `discCounts[s]` draw from `discRanges[s]` and the rest from
@@ -188,9 +196,10 @@ struct InstanceSet {
   /// a few per ten seconds on any board size (M23.9 C).
   std::uint32_t panelCells{0};
 
-  /// Board presentation effects (M23.10): boot, check ripple, game-end power-down. Indexed
-  /// by `cell + 1`; record 0 is the neutral "no effect" one. Empty when nothing is
-  /// running, which costs nothing - the renderer then binds a one-record neutral buffer.
+  /// Board presentation effects (M23.10): boot, check ripple, game-end power-down.
+  /// Indexed by `cell + 1`; record 0 is the neutral "no effect" one. Empty when nothing
+  /// is running, which costs nothing - the renderer then binds a one-record neutral
+  /// buffer.
   std::vector<view::CellFx> cellFx;
   view::FxGlobals fxGlobals;
   /// One neutral Cell-mesh draw after board FX composition, separate from shape batches
@@ -321,6 +330,7 @@ class BoardRenderer {
   /// `buildInstances`; pieces whose bodies are not synced are drawn from their
   /// archetype, so skipping it is safe, just plain.
   Result<void> syncBodies(const VariantSpec& v);
+  std::vector<std::uint32_t> addLabMeshes(const std::vector<io::ObjMesh>& meshes);
   /// Royal cell to mark as under attack, or kInvalidCell.
   void setCheckCell(CellId c) noexcept { checkCell_ = c; }
 
@@ -398,6 +408,7 @@ class BoardRenderer {
   PostProcess post_;
   std::string postUnavailable_;
   MeshLibrary meshes_;
+  std::vector<io::ObjMesh> labMeshes_;
   /// Which custom slot each piece type of the synced variant draws from (-1 for none),
   /// and the signature of the bodies that built them.
   std::vector<int> customSlot_;

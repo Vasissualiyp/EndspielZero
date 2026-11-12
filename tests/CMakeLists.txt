@@ -76,6 +76,12 @@ if(TARGET endspielzero_gui)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ui_auto.cmake)
   set_tests_properties(gui-ui-auto PROPERTIES LABELS "render;gui" TIMEOUT 180
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-lab-room
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lab_room.cmake)
+  set_tests_properties(gui-lab-room PROPERTIES LABELS "render;gui" TIMEOUT 300
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   add_test(NAME gui-screen-transition
     COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
             -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures

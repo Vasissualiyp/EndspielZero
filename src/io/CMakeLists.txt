@@ -3,6 +3,6 @@ find_package(tomlplusplus REQUIRED)
 
 cb_layer(endspielzero_io LEVEL 90
   SOURCES notation.cpp fen.cpp variant_toml.cpp variant_doc.cpp model_toml.cpp atom_toml.cpp moveset_library.cpp ascii_board.cpp rule_parse.cpp
-          game_file.cpp
+          game_file.cpp lab_doc.cpp obj_mesh.cpp
   DEPS endspielzero_assets endspielzero_movegen endspielzero_view endspielzero_game endspielzero_rules
   SYSTEM_DEPS tomlplusplus::tomlplusplus)

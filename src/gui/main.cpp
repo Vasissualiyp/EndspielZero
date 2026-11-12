@@ -36,6 +36,7 @@
 #include "render/board_renderer.hpp"
 #include "render/hud_layout.hpp"
 #include "render/image_io.hpp"
+#include "render/lab_scene.hpp"
 #include "render/panel_response.hpp"
 #include "render/window.hpp"
 #include "view/game_end_fx.hpp"
@@ -56,6 +57,40 @@ bool gDevOverlay = false;
 float gUiScaleOverride = -1.0f;
 bool gUiAuto = false;
 int gHudFraming = -1;
+int gLab = -1;
+std::string gStation;
+bool gLabCapture = false;
+std::optional<render::LabScene> gLabScene;
+bool labEnabled(const app::Shell& shell) {
+  return gLabScene.has_value() &&
+         (gLab >= 0 ? gLab == 1 : !gLabCapture && shell.settings().labScene);
+}
+bool labBackdrop(const app::Shell& shell, bool hold) {
+  return labEnabled(shell) &&
+         (!gStation.empty() ||
+          (!shell.showsBoard() && !hold && shell.screen() != app::Screen::Editor));
+}
+std::string_view stationFor(app::Screen screen) {
+  switch (screen) {
+    case app::Screen::MainMenu:
+      return "menu";
+    case app::Screen::Welcome:
+      return "tutorial";
+    case app::Screen::NewGame:
+      return "library";
+    case app::Screen::Watch:
+      return "watch";
+    case app::Screen::Settings:
+    case app::Screen::GameInfo:
+    case app::Screen::PieceMoves:
+      return "settings";
+    case app::Screen::QuitConfirm:
+      return "quit";
+    default:
+      return "menu";
+  }
+}
+
 float gIntensity = -1.0f;  ///< --presentation: presentation intensity for this run
 float gCaptureT = -1.0f;
 /// --post 0|1 and --bloom <scale>: this run only, never saved. Negative means "use the
@@ -191,6 +226,32 @@ std::filesystem::path variantDir() {
     if (std::filesystem::is_directory(base)) return base;
   }
   return "variants";
+}
+
+bool loadLab(render::BoardRenderer& renderer) {
+  const auto file = variantDir().parent_path() / "assets/lab/lab.toml";
+  auto doc = io::loadLabDoc(file);
+  if (!doc) {
+    std::fprintf(stderr, "lab disabled: %s\n", doc.error().format().c_str());
+    return gStation.empty();
+  }
+  auto lab = render::LabScene::create(std::move(*doc));
+  if (!lab) {
+    std::fprintf(stderr, "lab disabled: %s\n", lab.error().format().c_str());
+    return gStation.empty();
+  }
+  if (!gStation.empty() && !lab->station(gStation)) {
+    std::fprintf(stderr, "unknown lab station: %s\n", gStation.c_str());
+    return false;
+  }
+  try {
+    lab->setFileRanges(renderer.addLabMeshes(lab->fileMeshes()));
+    gLabScene = std::move(*lab);
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "lab disabled: %s\n", e.what());
+    return gStation.empty();
+  }
+  return true;
 }
 
 /// Where the player's own variants live, or empty when only the shipped ones are in use
@@ -414,6 +475,7 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
 render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight = -1) {
   render::BoardOptions o = optionsFrom(shell.settings());
   o.seamHighlightAxis = seamHighlight;
+  o.labMode = labBackdrop(shell, false);
   // The trailer clips further in (see `Settings::trailerNearClip`).
   if (shell.attracting())
     o.nearClip = std::max(o.nearClip, shell.settings().trailerNearClip);
@@ -932,6 +994,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "cannot set up the renderer\n");
     return 1;
   }
+  if (!loadLab(*renderer)) return 1;
   renderer->setOptions(optionsFor(*shell));
 
 #ifdef CB_HAVE_IMGUI
@@ -1016,6 +1079,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->pinTransitionAge(gTransitionT >= 0 ? std::optional<float>(gTransitionT)
                                               : std::nullopt);
     (*ui)->tick(dt);
+    (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
@@ -1024,7 +1088,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     // Cinema is the board and the move and nothing else: the whole frame is the board
     // and the interface builds no furniture, only the frame's grade and vignette
     // (M18.3), so a clip reads as footage rather than a screenshot of the panels.
-    const render::BoardRect frame =
+    render::BoardRect frame =
         cinema ? render::BoardRect{0.0f, 0.0f, static_cast<float>(target->width()),
                                    static_cast<float>(target->height())}
                : uiRect;
@@ -1032,7 +1096,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     const bool hold = holdsBoard(*shell, **ui);
     // The geometry view builds the warped board as ordinary instances, so the same
     // render path draws it (M17); only the surface flag on the options selects it.
-    if (shell->showsBoard() || hold) {
+    if ((shell->showsBoard() || hold) && gStation.empty()) {
       // A capture of a screen that sits over the board shows it exactly as a player
       // would see it - stepped back and out of focus - which is also what puts the blur
       // passes under the validation layers in `ctest -R gui-pause`. Cinema never blurs:
@@ -1085,11 +1149,22 @@ int captureFrame(const std::string& variantName, const std::string& path,
       if (hold) applyMoveHold(fx, *shell->session(), **ui);
       render::applyBoardFx(instances, *shell->session(), fx);
     }
-    const view::OrbitCamera camera =
+    view::OrbitCamera camera =
         shell->showsBoard() || hold
             ? boardCamera(*shell,
                           playSeq != nullptr ? *playSeq : render::kNoShapeSequence)
             : view::OrbitCamera{};
+    const bool room = labBackdrop(*shell, hold);
+    auto labOptions = renderer->options();
+    labOptions.labMode = room;
+    renderer->setOptions(labOptions);
+    if (room) {
+      gLabScene->appendTo(instances, renderer->theme());
+      camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())
+                                                    : std::string_view(gStation));
+      frame = {};
+      renderer->setBlur(0);
+    }
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
@@ -1561,6 +1636,7 @@ int main(int argc, char** argv) {
           "--from SCREEN --transition-t SECONDS pins the screen move from SCREEN (menu, "
           "game, "
           "pause, newgame, watch) to --screen at that age (M23.11 section 6).\n"
+          "--lab 0|1 toggles the static lab room; --station <name> requires --lab 1.\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
           "--event-t SECONDS pins the HUD turn flip and newest ledger row; --think-t "
@@ -1671,6 +1747,23 @@ int main(int argc, char** argv) {
         return 1;
       }
       gHudFraming = value == "1" ? 1 : 0;
+    } else if (arg == "--lab") {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "--lab requires 0 or 1\n");
+        return 1;
+      }
+      const std::string value = argv[++i];
+      if (value != "0" && value != "1") {
+        std::fprintf(stderr, "--lab requires 0 or 1\n");
+        return 1;
+      }
+      gLab = value == "1" ? 1 : 0;
+    } else if (arg == "--station") {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "--station requires a name\n");
+        return 1;
+      }
+      gStation = argv[++i];
     } else if (arg == "--ui-auto")
       gUiAuto = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
@@ -1731,6 +1824,10 @@ int main(int argc, char** argv) {
     else if (!arg.starts_with("-"))
       variantName = arg;
   }
+  if (!gStation.empty() && gLab != 1) {
+    std::fprintf(stderr, "--station requires --lab 1\n");
+    return 1;
+  }
   // A trailer render is footage: the board and the grade, no interface.
   if (!gTrailerClipDir.empty()) cinema = true;
   const std::string& targetPath = !clipDir.empty() ? clipDir : shotPath;
@@ -1748,6 +1845,7 @@ int main(int argc, char** argv) {
     setMovesetDirs(std::move(dirs));
   }
   if (!targetPath.empty() || benchFrames > 0 || !gTrailerClipDir.empty()) {
+    gLabCapture = true;
     return captureFrame(variantName.empty() ? "standard" : variantName, targetPath,
                         script, screen, overtureT, previewDims, !clipDir.empty(),
                         clipFrames, clipT0, clipT1, cinema, followMode, shapeFollow,
@@ -1795,6 +1893,7 @@ int main(int argc, char** argv) {
                  renderer.error().format().c_str());
     return 1;
   }
+  if (!loadLab(*renderer)) return 1;
   renderer->setOptions(optionsFor(*shell));
 
 #ifdef CB_HAVE_IMGUI
@@ -2394,6 +2493,7 @@ int main(int argc, char** argv) {
     }
     (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);
+    (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, fps);
     (*ui)->endFrame();
@@ -2541,7 +2641,7 @@ int main(int argc, char** argv) {
         shell->showsBoard() && !shell->attracting() ? shell->session() : nullptr,
         renderer->theme(), renderer->options());
     const bool hold = holdsBoard(*shell, **ui);
-    if (shell->showsBoard() || hold) {
+    if ((shell->showsBoard() || hold) && gStation.empty()) {
       if (boardRect.valid()) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
 #ifdef CB_HAVE_IMGUI
@@ -2608,6 +2708,16 @@ int main(int argc, char** argv) {
       camera = boardCamera(*shell, shapeSeq);
     }
 
+    const bool room = labBackdrop(*shell, hold);
+    auto labOptions = renderer->options();
+    labOptions.labMode = room;
+    renderer->setOptions(labOptions);
+    if (room) {
+      gLabScene->appendTo(instances, renderer->theme());
+      camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())
+                                                    : std::string_view(gStation));
+      renderer->setBlur(0);
+    }
     const auto overlay = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI
       (*ui)->record(cmd);
@@ -2637,7 +2747,8 @@ int main(int argc, char** argv) {
     }
     if (frame->valid()) {
       if (auto ok = renderer->record(frame->commandBuffer, *frame->target, instances,
-                                     camera, overlay, background, boardRect, frame->slot);
+                                     camera, overlay, background,
+                                     room ? render::BoardRect{} : boardRect, frame->slot);
           !ok.has_value()) {
         std::fprintf(stderr, "render failed: %s\n", ok.error().format().c_str());
         break;

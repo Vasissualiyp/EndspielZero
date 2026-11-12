@@ -27,6 +27,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `set <setting> <value>` | Change one setting. The value goes through the settings-file parser, so it accepts the same syntax as the file |
 | `post [on\|off]` | Turn post-processing (HDR scene, emissive bloom, tone map, grain/dither; ADR-0025) on or off; no argument toggles it. Default on; works without a loaded game. Also `get`/`set postProcess` or `post_process`, and `bloomScale` or `bloom_scale` (finite, clamped to 0..4, multiplies the theme's bloom; 0 skips the bloom passes) |
 | `get`/`set presentationIntensity` | The board's presentation intensity (`presentation_intensity`, persisted, clamped to 0..1, default 1): the glitches, the boot sweep, the check ripple and the end power-down. Below one half every effect takes its calm form |
+| `lab [on\|off]` | Toggle the static lab behind menu screens (default off); works without a game. Also `get`/`set labScene` or `lab_scene` |
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
 | `ripple [<cell>]` | Play the check ripple (M23.10 section 4) from `<cell>` (default: the royal of the side to move) without touching the game. It wraps through glued seams. Calm intensity and non-LED themes have none |
@@ -51,7 +52,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `expr <s-expression>` | Evaluate a rule expression against the position |
 | `clear` | Empty the scrollback |
 
-Every command except `help`, `load`, `goto`, `get`, `set`, `dev` and `clear` needs a running
+Every command except `help`, `load`, `goto`, `get`, `set`, `dev`, `post`, `lab` and `clear` needs a running
 game, and says so if there is none.
 
 ### Adding a command
@@ -100,6 +101,15 @@ groups:
     `--piece-cylinders` and `--dims`.
 - **Camera:** `--cinema`, `--follow <mode>` and `--shape-follow chase|turntable`.
 - **Look:**
+  - **Lab:**
+    - `--lab 0|1` overrides the static menu room for this run. Captures default off,
+      including with saved settings; use `--lab 1` to opt in.
+    - `--station <name>` requires `--lab 1` and shows the room from a named station
+      regardless of screen: menu, tutorial, library, watch, settings or quit.
+    - Console `lab [on|off]` toggles it; `get`/`set labScene` (alias `lab_scene`)
+      reaches the saved preference. Room parts, anchors and stations live in
+      `assets/lab/lab.toml`. OBJ parts use metres, Z up and an authored origin;
+      their size is a multiplier, while procedural parts use full extents.
   - `--seam-hover <axis>` pins the seam-legend highlight by axis name for this run (e.g.
     `klein --seam-hover file`). An unknown or unglued axis exits with an error.
   - `--dev` forces developer presentation on for this run without saving it.

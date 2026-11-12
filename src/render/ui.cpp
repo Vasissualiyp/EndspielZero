@@ -1033,8 +1033,10 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
 
   // The ground. A light shell has to paint its own, or the board's clear colour shows
   // through where nothing else is drawn.
-  dl->AddRectFilled(min, max, u32(theme_.ink));
-  field_.draw(dl, min, max, theme_, iconStyle_, true, true);
+  if (!labBackdrop_) {
+    dl->AddRectFilled(min, max, u32(theme_.ink));
+    field_.draw(dl, min, max, theme_, iconStyle_, true, true);
+  }
   // Every pane carries its own screen panel now; only the editor, which does not, keeps
   // the open frame.
   if (theme_.panelStyle == view::PanelStyle::Brackets &&
@@ -1083,7 +1085,8 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   }
 
   // A hairline between the object and the menu, and the depth ladder on the far left.
-  dl->AddLine(ImVec2(split, min.y), ImVec2(split, max.y), u32(theme_.rule, 0.6f));
+  if (!labBackdrop_)
+    dl->AddLine(ImVec2(split, min.y), ImVec2(split, max.y), u32(theme_.rule, 0.6f));
 
   // The ladder lives on the decoration side's outer edge. The menu side is full of
   // list rows and buttons that reach the margins; the object is centred in its own half

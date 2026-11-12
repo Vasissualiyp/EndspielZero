@@ -27,6 +27,7 @@ struct Settings {
   bool guiScaleAuto{true};
   /// Frame within HUD clearance; debug A/B for material and camera captures.
   bool hudFraming{true};
+  bool labScene{false};
   bool fullscreen{false};
   /// Developer-only presentation: fps and unfinished menu entries. Console access only.
   bool devOverlay{false};

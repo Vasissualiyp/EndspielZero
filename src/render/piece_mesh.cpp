@@ -2,6 +2,7 @@
 #include "render/piece_mesh.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <vector>
@@ -622,7 +623,6 @@ void buildArchetype(MeshLibrary& m, Archetype which, std::int32_t base) {
 
 }  // namespace
 
-
 // ---------------------------------------------------------------------------
 // Authored bodies
 // ---------------------------------------------------------------------------
@@ -632,10 +632,18 @@ namespace {
 struct V3 {
   float x{0}, y{0}, z{0};
 };
-V3 operator+(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
-V3 operator-(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
-V3 operator*(V3 a, float k) { return {a.x * k, a.y * k, a.z * k}; }
-float dot3(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+V3 operator+(V3 a, V3 b) {
+  return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+V3 operator-(V3 a, V3 b) {
+  return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+V3 operator*(V3 a, float k) {
+  return {a.x * k, a.y * k, a.z * k};
+}
+float dot3(V3 a, V3 b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
 V3 cross3(V3 a, V3 b) {
   return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
@@ -719,8 +727,9 @@ void revolve(ModelBuilder& b, const assets::PieceModel& model) {
   }
 }
 
-/// One copy of an element: the outline extruded about its plane. `frame` gives the plane's
-/// two directions (`u` along the outline's x, up for its y) and the way it is extruded.
+/// One copy of an element: the outline extruded about its plane. `frame` gives the
+/// plane's two directions (`u` along the outline's x, up for its y) and the way it is
+/// extruded.
 void prism(ModelBuilder& b, const assets::Element& e, V3 origin, V3 u, V3 extrude,
            float thickness) {
   const auto& pts = e.outline.points;
@@ -773,7 +782,8 @@ void place(ModelBuilder& b, const assets::PieceModel& model, const assets::Eleme
   const auto copy = [&](float theta, bool mirrored) {
     const V3 radial{std::cos(theta), std::sin(theta), 0.0f};
     // A reflection across the radial plane turns the tangent round, and nothing else.
-    const V3 tangent = V3{-std::sin(theta), std::cos(theta), 0.0f} * (mirrored ? -1.0f : 1.0f);
+    const V3 tangent =
+        V3{-std::sin(theta), std::cos(theta), 0.0f} * (mirrored ? -1.0f : 1.0f);
     const V3 origin = radial * radius + tangent * lateral + V3{0, 0, height};
     if (e.tangent) {
       prism(b, e, origin, tangent, radial, thick);
@@ -786,7 +796,8 @@ void place(ModelBuilder& b, const assets::PieceModel& model, const assets::Eleme
       break;  // refused by `validate`; nothing to place
     case assets::SymmetryKind::KFold: {
       const int k = std::max<int>(2, model.symmetry.k);
-      for (int i = 0; i < k; ++i) copy(tau * static_cast<float>(i) / static_cast<float>(k), false);
+      for (int i = 0; i < k; ++i)
+        copy(tau * static_cast<float>(i) / static_cast<float>(k), false);
       break;
     }
     case assets::SymmetryKind::Mirror:
@@ -801,7 +812,8 @@ void place(ModelBuilder& b, const assets::PieceModel& model, const assets::Eleme
 ModelMesh assembleModel(const assets::PieceModel& model) {
   ModelBuilder b;
   float top = 0.1f;
-  for (const auto& p : model.profile.points) top = std::max(top, static_cast<float>(p.y) / 1000.0f);
+  for (const auto& p : model.profile.points)
+    top = std::max(top, static_cast<float>(p.y) / 1000.0f);
   for (const auto& e : model.elements) {
     for (const auto& p : e.outline.points) {
       top = std::max(top, static_cast<float>(e.height + p.y) / 1000.0f);
@@ -886,7 +898,7 @@ Archetype archetypeFor(const PieceTypeDef& piece) {
       maxDiagonalOrder = std::max(maxDiagonalOrder, a.mags.size());
   }
 
-  if (oriented) return Archetype::Dome;                   // moves only forward: a pawn
+  if (oriented) return Archetype::Dome;  // moves only forward: a pawn
   // Three axes at once *and nothing else* is a unicorn. A queen rides the triagonals too,
   // but she also rides the axes, and that family is what makes her a queen.
   if (maxDiagonalOrder >= 3 && !axisLine) return Archetype::Horn;
@@ -920,6 +932,115 @@ float heightFor(const PieceTypeDef& piece) {
   if (piece.royal) scale = std::max(scale, 1.45f);
   return std::clamp(scale, 0.85f, 1.6f);
 }
+
+namespace {
+void buildLab(MeshLibrary& m, LabShape shape, std::int32_t base) {
+  using V = std::array<float, 3>;
+  const auto vertex = [&](V p, V n) {
+    return pushVertex(m, p[0], p[1], p[2], n[0], n[1], n[2], p[2] + .5f) -
+           static_cast<std::uint32_t>(base);
+  };
+  const auto polygon = [&](std::vector<V> points, V n) {
+    const float length = std::hypot(n[0], n[1], n[2]);
+    for (auto& c : n) c /= length;
+    V centre{};
+    for (auto p : points)
+      for (std::size_t j = 0; j < 3; ++j)
+        centre[j] += p[j] / static_cast<float>(points.size());
+    const V u{points[0][0] - centre[0], points[0][1] - centre[1],
+              points[0][2] - centre[2]};
+    const V v{n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2],
+              n[0] * u[1] - n[1] * u[0]};
+    const auto angle = [&](V p) {
+      float x = 0, y = 0;
+      for (std::size_t j = 0; j < 3; ++j) {
+        x += (p[j] - centre[j]) * u[j];
+        y += (p[j] - centre[j]) * v[j];
+      }
+      return std::atan2(y, x);
+    };
+    std::sort(points.begin(), points.end(),
+              [&](V a, V b) { return angle(a) < angle(b); });
+    std::vector<std::uint32_t> ids;
+    for (auto p : points) ids.push_back(vertex(p, n));
+    for (std::size_t j = 1; j + 1 < ids.size(); ++j)
+      pushTri(m, ids[0], ids[j], ids[j + 1]);
+  };
+  if (shape == LabShape::Cylinder) {
+    const auto start =
+        static_cast<std::uint32_t>(m.vertices.size()) - static_cast<std::uint32_t>(base);
+    for (int i = 0; i <= 32; ++i) {
+      const float a = 2 * std::numbers::pi_v<float> * static_cast<float>(i) / 32;
+      const float x = std::cos(a), y = std::sin(a);
+      (void)vertex({.5f * x, .5f * y, -.5f}, {x, y, 0});
+      (void)vertex({.5f * x, .5f * y, .5f}, {x, y, 0});
+    }
+    for (std::uint32_t i = 0; i < 32; ++i) {
+      const auto a = start + 2 * i;
+      pushTri(m, a, a + 2, a + 1);
+      pushTri(m, a + 1, a + 2, a + 3);
+    }
+    for (float z : {-.5f, .5f}) {
+      const float nz = z * 2;
+      const auto centre = vertex({0, 0, z}, {0, 0, nz});
+      const auto rim = centre + 1;
+      for (int i = 0; i <= 32; ++i) {
+        const float a = 2 * std::numbers::pi_v<float> * static_cast<float>(i) / 32;
+        (void)vertex({.5f * std::cos(a), .5f * std::sin(a), z}, {0, 0, nz});
+      }
+      for (std::uint32_t i = 0; i < 32; ++i)
+        if (z > 0)
+          pushTri(m, centre, rim + i, rim + i + 1);
+        else
+          pushTri(m, centre, rim + i + 1, rim + i);
+    }
+    return;
+  }
+  const float inner = shape == LabShape::Bevel ? .46f : .5f;
+  for (std::size_t axis = 0; axis < 3; ++axis)
+    for (float sign : {-1.f, 1.f}) {
+      V n{};
+      n[axis] = sign;
+      std::vector<V> points;
+      for (float a : {-inner, inner})
+        for (float b : {-inner, inner}) {
+          V p{};
+          p[axis] = sign * .5f;
+          p[(axis + 1) % 3] = a;
+          p[(axis + 2) % 3] = b;
+          points.push_back(p);
+        }
+      polygon(points, n);
+    }
+  if (shape == LabShape::Box) return;
+  // Twelve edge quads and eight corner triangles close the six inset faces.
+  for (std::size_t axis = 0; axis < 3; ++axis)
+    for (float a : {-1.f, 1.f})
+      for (float b : {-1.f, 1.f}) {
+        const auto j = (axis + 1) % 3, k = (axis + 2) % 3;
+        V n{};
+        n[j] = a;
+        n[k] = b;
+        std::vector<V> points;
+        for (float end : {-inner, inner})
+          for (bool swap : {false, true}) {
+            V p{};
+            p[axis] = end;
+            p[j] = a * (swap ? inner : .5f);
+            p[k] = b * (swap ? .5f : inner);
+            points.push_back(p);
+          }
+        polygon(points, n);
+      }
+  for (float x : {-1.f, 1.f})
+    for (float y : {-1.f, 1.f})
+      for (float z : {-1.f, 1.f}) {
+        polygon({V{x * .5f, y * inner, z * inner}, V{x * inner, y * .5f, z * inner},
+                 V{x * inner, y * inner, z * .5f}},
+                {x, y, z});
+      }
+}
+}  // namespace
 
 MeshLibrary MeshLibrary::build(const std::vector<CustomBody>& custom) {
   MeshLibrary m;
@@ -997,6 +1118,14 @@ MeshLibrary MeshLibrary::build(const std::vector<CustomBody>& custom) {
       range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
       m.discRanges[at] = range;
     }
+  }
+  for (std::size_t i = 0; i < static_cast<std::size_t>(LabShape::Count); ++i) {
+    MeshRange range;
+    range.firstIndex = static_cast<std::uint32_t>(m.indices.size());
+    range.vertexOffset = static_cast<std::int32_t>(m.vertices.size());
+    buildLab(m, static_cast<LabShape>(i), range.vertexOffset);
+    range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
+    m.labRanges[i] = range;
   }
   return m;
 }

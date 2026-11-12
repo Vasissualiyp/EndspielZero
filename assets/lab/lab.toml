@@ -1,0 +1,1002 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# M24.1: metres, Z up; procedural parts use full extents.
+# File meshes (file:models/name.obj) use size as a multiplier; [1,1,1] is as modelled.
+version = 1
+
+[anchors]
+"gantry.centre" = [0.0, 0.6, 1.05]
+"projector.lens" = [-0.6, 2.62, 1.015]
+"magazine.front" = [2.245, 1.8, 1.3]
+"door.centre" = [0.0, -2.98, 1.2]
+"bench.top" = [-0.3, 2.65, 0.925]
+
+[[part]]
+name = "floor"
+mesh = "box"
+pos = [0, 0, -0.05]
+size = [5, 6, 0.1]
+material = "matte"
+color = "#101113"
+group = "room"
+
+[[part]]
+name = "wall.back"
+mesh = "box"
+pos = [0, 3.05, 1.35]
+size = [5, 0.1, 2.7]
+material = "matte"
+color = "#15171B"
+group = "room"
+
+[[part]]
+name = "wall.left"
+mesh = "box"
+pos = [-2.55, 0, 1.35]
+size = [0.1, 6, 2.7]
+material = "matte"
+color = "#15171B"
+group = "room"
+
+[[part]]
+name = "wall.right"
+mesh = "box"
+pos = [2.55, 0, 1.35]
+size = [0.1, 6, 2.7]
+material = "matte"
+color = "#15171B"
+group = "room"
+
+[[part]]
+name = "door.panel"
+mesh = "box"
+pos = [0, -3.05, 1.2]
+size = [3, 0.06, 2.4]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.0"
+mesh = "box"
+pos = [0, -3.0, 0.1]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.1"
+mesh = "box"
+pos = [0, -3.0, 0.3]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.2"
+mesh = "box"
+pos = [0, -3.0, 0.5]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.3"
+mesh = "box"
+pos = [0, -3.0, 0.7]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.4"
+mesh = "box"
+pos = [0, -3.0, 0.9]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.5"
+mesh = "box"
+pos = [0, -3.0, 1.1]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.6"
+mesh = "box"
+pos = [0, -3.0, 1.3]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.7"
+mesh = "box"
+pos = [0, -3.0, 1.5]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.8"
+mesh = "box"
+pos = [0, -3.0, 1.7]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.9"
+mesh = "box"
+pos = [0, -3.0, 1.9]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.10"
+mesh = "box"
+pos = [0, -3.0, 2.1]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "door.slats.11"
+mesh = "box"
+pos = [0, -3.0, 2.3]
+size = [3, 0.02, 0.03]
+material = "metal"
+color = "#2A2E34"
+group = "room"
+
+[[part]]
+name = "wall.front.l"
+mesh = "box"
+pos = [-2, -3.05, 1.35]
+size = [1, 0.1, 2.7]
+material = "matte"
+color = "#15171B"
+group = "room"
+
+[[part]]
+name = "wall.front.r"
+mesh = "box"
+pos = [2, -3.05, 1.35]
+size = [1, 0.1, 2.7]
+material = "matte"
+color = "#15171B"
+group = "room"
+
+[[part]]
+name = "wall.front.top"
+mesh = "box"
+pos = [0, -3.05, 2.55]
+size = [3, 0.1, 0.3]
+material = "matte"
+color = "#15171B"
+group = "room"
+
+[[part]]
+name = "ceiling.l"
+mesh = "box"
+pos = [-1.65, 0, 2.75]
+size = [1.7, 6, 0.1]
+material = "matte"
+color = "#121316"
+group = "room"
+
+[[part]]
+name = "ceiling.r"
+mesh = "box"
+pos = [1.65, 0, 2.75]
+size = [1.7, 6, 0.1]
+material = "matte"
+color = "#121316"
+group = "room"
+
+[[part]]
+name = "ceiling.front"
+mesh = "box"
+pos = [0, -1.7, 2.75]
+size = [1.6, 2.6, 0.1]
+material = "matte"
+color = "#121316"
+group = "room"
+
+[[part]]
+name = "ceiling.back"
+mesh = "box"
+pos = [0, 2.1, 2.75]
+size = [1.6, 1.8, 0.1]
+material = "matte"
+color = "#121316"
+group = "room"
+
+[[part]]
+name = "skylight.glass"
+mesh = "box"
+pos = [0, 0.4, 2.78]
+size = [1.6, 1.6, 0.02]
+material = "glass"
+color = "#0A0E18"
+group = "room"
+
+[[part]]
+name = "skylight.frame.xn0.8"
+mesh = "box"
+pos = [-0.8, 0.4, 2.73]
+size = [0.06, 1.66, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "room"
+
+[[part]]
+name = "skylight.frame.x0.8"
+mesh = "box"
+pos = [0.8, 0.4, 2.73]
+size = [0.06, 1.66, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "room"
+
+[[part]]
+name = "skylight.frame.yn0.4"
+mesh = "box"
+pos = [0, -0.4, 2.73]
+size = [1.6, 0.06, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "room"
+
+[[part]]
+name = "skylight.frame.y1.2"
+mesh = "box"
+pos = [0, 1.2, 2.73]
+size = [1.6, 0.06, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "room"
+
+[[part]]
+name = "bench.top"
+mesh = "bevel"
+pos = [-0.3, 2.65, 0.9]
+size = [3, 0.7, 0.05]
+material = "matte"
+color = "#23262C"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "bench.legs.0"
+mesh = "box"
+pos = [-1.7, 2.37, 0.44]
+size = [0.05, 0.05, 0.88]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "bench.legs.1"
+mesh = "box"
+pos = [-1.7, 2.93, 0.44]
+size = [0.05, 0.05, 0.88]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "bench.legs.2"
+mesh = "box"
+pos = [1.1, 2.37, 0.44]
+size = [0.05, 0.05, 0.88]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "bench.legs.3"
+mesh = "box"
+pos = [1.1, 2.93, 0.44]
+size = [0.05, 0.05, 0.88]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "bench.shelf"
+mesh = "box"
+pos = [-0.3, 2.65, 0.25]
+size = [2.9, 0.6, 0.03]
+material = "matte"
+color = "#1C1F24"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.base"
+mesh = "cylinder"
+pos = [-0.6, 2.62, 0.95]
+size = [0.22, 0.22, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.body"
+mesh = "cylinder"
+pos = [-0.6, 2.62, 0.99]
+size = [0.16, 0.16, 0.04]
+material = "matte"
+color = "#1C1F24"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.lens"
+mesh = "cylinder"
+pos = [-0.6, 2.62, 1.012]
+size = [0.1, 0.1, 0.006]
+material = "glass"
+color = "#203040"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.leds.0"
+mesh = "box"
+pos = [-0.505, 2.62, 0.99]
+size = [0.008, 0.008, 0.008]
+material = "glow"
+color = "#6FE3FF"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.leds.1"
+mesh = "box"
+pos = [-0.5525, 2.7022724, 0.99]
+size = [0.008, 0.008, 0.008]
+material = "glow"
+color = "#6FE3FF"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.leds.2"
+mesh = "box"
+pos = [-0.6475, 2.7022724, 0.99]
+size = [0.008, 0.008, 0.008]
+material = "glow"
+color = "#6FE3FF"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.leds.3"
+mesh = "box"
+pos = [-0.695, 2.62, 0.99]
+size = [0.008, 0.008, 0.008]
+material = "glow"
+color = "#6FE3FF"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.leds.4"
+mesh = "box"
+pos = [-0.6475, 2.5377276, 0.99]
+size = [0.008, 0.008, 0.008]
+material = "glow"
+color = "#6FE3FF"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "projector.leds.5"
+mesh = "box"
+pos = [-0.5525, 2.5377276, 0.99]
+size = [0.008, 0.008, 0.008]
+material = "glow"
+color = "#6FE3FF"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "lamp.base"
+mesh = "cylinder"
+pos = [0.7, 2.75, 0.94]
+size = [0.16, 0.16, 0.03]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "lamp.arm1"
+mesh = "box"
+pos = [0.7, 2.75, 1.12]
+size = [0.025, 0.025, 0.35]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+rot = [0, 15, 0]
+ao = 0.12
+
+[[part]]
+name = "lamp.arm2"
+mesh = "box"
+pos = [0.62, 2.68, 1.38]
+size = [0.025, 0.025, 0.24]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+rot = [0, -35, 0]
+ao = 0.12
+
+[[part]]
+name = "lamp.head"
+mesh = "bevel"
+pos = [0.5, 2.6, 1.46]
+size = [0.18, 0.1, 0.04]
+material = "metal"
+color = "#3A3F47"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "screen.old"
+mesh = "bevel"
+pos = [0.35, 2.85, 1.12]
+size = [0.5, 0.04, 0.32]
+material = "matte"
+color = "#0E0F11"
+group = "bench"
+rot = [0, -8, 0]
+ao = 0.12
+
+[[part]]
+name = "tools.0"
+mesh = "cylinder"
+pos = [-1.4, 2.7, 0.96]
+size = [0.08, 0.09, 0.07]
+material = "matte"
+color = "#24272C"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "tools.1"
+mesh = "box"
+pos = [-1.24, 2.7, 0.96]
+size = [0.08, 0.09, 0.07]
+material = "matte"
+color = "#292B30"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "tools.2"
+mesh = "box"
+pos = [-1.08, 2.7, 0.96]
+size = [0.08, 0.09, 0.07]
+material = "matte"
+color = "#202329"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "tools.3"
+mesh = "box"
+pos = [-0.92, 2.7, 0.96]
+size = [0.08, 0.09, 0.07]
+material = "matte"
+color = "#282A30"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "tools.4"
+mesh = "box"
+pos = [-0.76, 2.7, 0.96]
+size = [0.08, 0.09, 0.07]
+material = "matte"
+color = "#1A1C21"
+group = "bench"
+ao = 0.12
+
+[[part]]
+name = "magazine.frame"
+mesh = "bevel"
+pos = [2.49, 1.8, 1.3]
+size = [0.03, 1, 1.1]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+# Open cassette frame: the parked slabs remain visible between the rails.
+[[part]]
+name = "magazine.frame.top"
+mesh = "bevel"
+pos = [2.38, 1.8, 1.825]
+size = [0.25, 1, 0.05]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.frame.bottom"
+mesh = "bevel"
+pos = [2.38, 1.8, 0.775]
+size = [0.25, 1, 0.05]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.frame.near"
+mesh = "bevel"
+pos = [2.38, 1.325, 1.3]
+size = [0.25, 0.05, 1]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.frame.far"
+mesh = "bevel"
+pos = [2.38, 2.275, 1.3]
+size = [0.25, 0.05, 1]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.0"
+mesh = "slab"
+pos = [2.35, 1.415, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.0"
+mesh = "box"
+pos = [2.245, 1.415, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.1"
+mesh = "slab"
+pos = [2.35, 1.525, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.1"
+mesh = "box"
+pos = [2.245, 1.525, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.2"
+mesh = "slab"
+pos = [2.35, 1.635, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.2"
+mesh = "box"
+pos = [2.245, 1.635, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.3"
+mesh = "slab"
+pos = [2.35, 1.745, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.3"
+mesh = "box"
+pos = [2.245, 1.745, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.4"
+mesh = "slab"
+pos = [2.35, 1.855, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.4"
+mesh = "box"
+pos = [2.245, 1.855, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.5"
+mesh = "slab"
+pos = [2.35, 1.965, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.5"
+mesh = "box"
+pos = [2.245, 1.965, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.6"
+mesh = "slab"
+pos = [2.35, 2.075, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.6"
+mesh = "box"
+pos = [2.245, 2.075, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "magazine.slab.7"
+mesh = "slab"
+pos = [2.35, 2.185, 1.3]
+size = [0.42, 0.42, 0.03]
+material = "led"
+color = "#090C10"
+group = "rig"
+rot = [90, 90, 0]
+ao = 0.1
+
+[[part]]
+name = "magazine.bayleds.7"
+mesh = "box"
+pos = [2.245, 2.185, 0.83]
+size = [0.01, 0.01, 0.01]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "gantry.rail.x.a"
+mesh = "box"
+pos = [0, -0.6, 2.55]
+size = [3.4, 0.06, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "gantry.rail.x.b"
+mesh = "box"
+pos = [0, 1.8, 2.55]
+size = [3.4, 0.06, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "gantry.rail.y.a"
+mesh = "box"
+pos = [-1.7, 0.6, 2.55]
+size = [0.06, 2.5, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "gantry.rail.y.b"
+mesh = "box"
+pos = [1.7, 0.6, 2.55]
+size = [0.06, 2.5, 0.06]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "gantry.carriage.0"
+mesh = "bevel"
+pos = [0, 0.6, 2.5]
+size = [0.3, 0.3, 0.08]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "cable.tray"
+mesh = "box"
+pos = [2.43, 1.8, 2.2]
+size = [0.1, 0.05, 0.7]
+material = "metal"
+color = "#3A3F47"
+group = "rig"
+ao = 0.1
+
+[[part]]
+name = "shelf.0"
+mesh = "box"
+pos = [-2.35, 1.5, 0.6]
+size = [0.3, 2, 0.03]
+material = "matte"
+color = "#15171B"
+group = "clutter"
+
+[[part]]
+name = "boxes.0"
+mesh = "box"
+pos = [-2.32, 1.0, 0.74]
+size = [0.22, 0.3, 0.25]
+material = "matte"
+color = "#22252B"
+group = "clutter"
+ao = 0.2
+
+[[part]]
+name = "boxes.1"
+mesh = "box"
+pos = [-2.32, 1.65, 0.74]
+size = [0.22, 0.3, 0.25]
+material = "matte"
+color = "#1B1E24"
+group = "clutter"
+ao = 0.2
+
+[[part]]
+name = "shelf.1"
+mesh = "box"
+pos = [-2.35, 1.5, 1.1]
+size = [0.3, 2, 0.03]
+material = "matte"
+color = "#15171B"
+group = "clutter"
+
+[[part]]
+name = "boxes.2"
+mesh = "box"
+pos = [-2.32, 1.0, 1.24]
+size = [0.22, 0.3, 0.25]
+material = "matte"
+color = "#22252B"
+group = "clutter"
+ao = 0.2
+
+[[part]]
+name = "boxes.3"
+mesh = "box"
+pos = [-2.32, 1.65, 1.24]
+size = [0.22, 0.3, 0.25]
+material = "matte"
+color = "#1B1E24"
+group = "clutter"
+ao = 0.2
+
+[[part]]
+name = "shelf.2"
+mesh = "box"
+pos = [-2.35, 1.5, 1.6]
+size = [0.3, 2, 0.03]
+material = "matte"
+color = "#15171B"
+group = "clutter"
+
+[[part]]
+name = "boxes.4"
+mesh = "box"
+pos = [-2.32, 1.0, 1.74]
+size = [0.22, 0.3, 0.25]
+material = "matte"
+color = "#22252B"
+group = "clutter"
+ao = 0.2
+
+[[part]]
+name = "boxes.5"
+mesh = "box"
+pos = [-2.32, 1.65, 1.74]
+size = [0.22, 0.3, 0.25]
+material = "matte"
+color = "#1B1E24"
+group = "clutter"
+ao = 0.2
+
+[[part]]
+name = "pegboard"
+mesh = "box"
+pos = [-2.48, -1.2, 1.4]
+size = [0.02, 1.6, 1]
+material = "matte"
+color = "#1A1C20"
+group = "clutter"
+
+[[part]]
+name = "pegboard.tools.0"
+mesh = "box"
+pos = [-2.44, -1.8, 1.4]
+size = [0.04, 0.06, 0.25]
+material = "metal"
+color = "#3A3F47"
+group = "clutter"
+
+[[part]]
+name = "pegboard.tools.1"
+mesh = "cylinder"
+pos = [-2.44, -1.57, 1.4]
+size = [0.04, 0.06, 0.25]
+material = "metal"
+color = "#3A3F47"
+group = "clutter"
+
+[[part]]
+name = "pegboard.tools.2"
+mesh = "box"
+pos = [-2.44, -1.34, 1.4]
+size = [0.04, 0.06, 0.25]
+material = "metal"
+color = "#3A3F47"
+group = "clutter"
+
+[[part]]
+name = "pegboard.tools.3"
+mesh = "cylinder"
+pos = [-2.44, -1.11, 1.4]
+size = [0.04, 0.06, 0.25]
+material = "metal"
+color = "#3A3F47"
+group = "clutter"
+
+[[part]]
+name = "pegboard.tools.4"
+mesh = "box"
+pos = [-2.44, -0.88, 1.4]
+size = [0.04, 0.06, 0.25]
+material = "metal"
+color = "#3A3F47"
+group = "clutter"
+
+[[part]]
+name = "pegboard.tools.5"
+mesh = "cylinder"
+pos = [-2.44, -0.65, 1.4]
+size = [0.04, 0.06, 0.25]
+material = "metal"
+color = "#3A3F47"
+group = "clutter"
+
+[[station]]
+name = "menu"
+target = [-0.15, 2.55, 1.2]
+distance = 1.55
+yaw = 12
+pitch = 14
+fov = 50
+
+[[station]]
+name = "tutorial"
+target = [-0.45, 2.6, 1.15]
+distance = 1.1
+yaw = 8
+pitch = 12
+fov = 50
+
+[[station]]
+name = "library"
+target = [2.8, 2.2, 2.4]
+distance = 4.0
+yaw = -10
+pitch = 0
+fov = 65
+
+[[station]]
+name = "watch"
+target = [2.8, 2.2, 2.4]
+distance = 4.0
+yaw = -10
+pitch = 0
+fov = 65
+
+[[station]]
+name = "settings"
+target = [-0.2, 2.4, 1]
+distance = 2.6
+yaw = 0
+pitch = 18
+fov = 55
+
+[[station]]
+name = "quit"
+target = [0, -2.6, 1.3]
+distance = 2.4
+yaw = 180
+pitch = 6
+fov = 50

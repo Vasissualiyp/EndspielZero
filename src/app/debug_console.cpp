@@ -99,13 +99,16 @@ std::string execute(Shell& shell, const std::string& line) {
 
   if (cmd == "help" || cmd == "?") return DebugConsole::help();
 
-  if (cmd == "dev" || cmd == "post") {
+  if (cmd == "dev" || cmd == "post" || cmd == "lab") {
     if (w.size() > 2 || (w.size() == 2 && w[1] != "on" && w[1] != "off"))
       return "usage: " + cmd + " [on|off]";
-    bool& enabled =
-        cmd == "dev" ? shell.settings().devOverlay : shell.settings().postProcess;
+    bool& enabled = cmd == "lab"   ? shell.settings().labScene
+                    : cmd == "dev" ? shell.settings().devOverlay
+                                   : shell.settings().postProcess;
     enabled = w.size() == 1 ? !enabled : w[1] == "on";
-    const std::string label = cmd == "dev" ? "dev overlay: " : "post processing: ";
+    const std::string label = cmd == "lab"   ? "lab "
+                              : cmd == "dev" ? "dev overlay: "
+                                             : "post processing: ";
     return label + (enabled ? "on" : "off");
   }
 
@@ -155,6 +158,7 @@ std::string execute(Shell& shell, const std::string& line) {
     const std::string text = settingsText(shell.settings());
     std::string key = w.size() > 1 ? w[1] : std::string{};
     if (key == "guiScaleAuto") key = "gui_scale_auto";
+    if (key == "labScene") key = "lab_scene";
     if (key == "hudFraming") key = "hud_framing";
     if (key == "guiScale") key = "gui_scale";
     if (key == "devOverlay") key = "dev_overlay";
@@ -453,6 +457,7 @@ std::string DebugConsole::help() {
          "stays on in both paths\n"
          "set guiScaleAuto true|false  automatic interface scale; guiScale is its "
          "multiplier\n"
+         "lab [on|off]  toggle the lab room (also get/set labScene)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"
          "boot                     replay the board's power-on sequence\n"

@@ -192,6 +192,7 @@ class Ui {
   void setTheme(const view::Theme& t) noexcept;
   /// Presentation seconds for live controls, independent of transitions/background.
   void setVisualTime(double seconds) noexcept;
+  void setLabBackdrop(bool enabled) noexcept { labBackdrop_ = enabled; }
   /// The HUD panels' share of the board's presentation (M23.10 section 7): `draw` traces
   /// the panel edges on (boot, 0..1), `content` fades what is inside them in, `level`
   /// dims the panels (the end power-down). All 1 is the settled HUD; status stays lit.
@@ -244,6 +245,7 @@ class Ui {
   void recordBackground(VkCommandBuffer cmd, bool hdr = false);
 
  private:
+  bool labBackdrop_{false};
   Ui() = default;
   bool forceDevOverlay_{false};
   std::optional<std::uint8_t> seamHover_;

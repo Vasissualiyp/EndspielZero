@@ -56,6 +56,9 @@ cb_write_layer_manifest(${CMAKE_BINARY_DIR}/layers.manifest)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/variants/
         DESTINATION share/endspielzero/variants
         FILES_MATCHING PATTERN "*.toml")
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/assets/lab/
+        DESTINATION share/endspielzero/assets/lab
+        FILES_MATCHING PATTERN "*.toml" PATTERN "*.obj")
 # The bundled showcase games for the "Watch a game" action (M12.8) are content too: the
 # menu reads them at startup, so an install that left them behind would ship a dead row.
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/games/

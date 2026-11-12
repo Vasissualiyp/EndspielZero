@@ -74,6 +74,8 @@ Settings Settings::load(const std::filesystem::path& path) {
 
     if (key == "gui_scale")
       s.guiScale = asFloat(value, s.guiScale);
+    else if (key == "lab_scene")
+      s.labScene = asBool(value);
     else if (key == "hud_framing")
       s.hudFraming = asBool(value);
     else if (key == "gui_scale_auto")
@@ -222,6 +224,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "# EndspielZero settings. Edited by the game; safe to edit by hand.\n";
   out << "gui_scale = " << guiScale << '\n';
   out << "gui_scale_auto = " << boolText(guiScaleAuto) << '\n';
+  out << "lab_scene = " << boolText(labScene) << '\n';
   out << "hud_framing = " << boolText(hudFraming) << '\n';
   out << "fullscreen = " << boolText(fullscreen) << '\n';
   out << "dev_overlay = " << boolText(devOverlay) << '\n';

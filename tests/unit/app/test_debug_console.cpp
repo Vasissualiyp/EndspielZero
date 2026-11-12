@@ -282,3 +282,22 @@ TEST_CASE("transition console previews a screen move from another screen",
   CHECK(shell->transitionSerial() == serial + 1);
   CHECK(has(DebugConsole::help(), "transition <from> <to>"));
 }
+
+TEST_CASE("lab setting and command work without a game", "[unit][app][lab]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  CHECK_FALSE(shell->settings().labScene);
+  CHECK(console.run(*shell, "lab") == "lab on");
+  CHECK(console.run(*shell, "get labScene") == "lab_scene = true");
+  CHECK(console.run(*shell, "lab off") == "lab off");
+  CHECK(console.run(*shell, "lab on") == "lab on");
+  CHECK(console.run(*shell, "lab bad") == "usage: lab [on|off]");
+  CHECK(console.run(*shell, "set labScene false") == "labScene is now false");
+  CHECK_FALSE(shell->settings().labScene);
+  const auto path = std::filesystem::path(CB_BINARY_DIR) / "lab-settings.conf";
+  shell->settings().labScene = true;
+  REQUIRE(shell->settings().save(path).has_value());
+  CHECK(app::Settings::load(path).labScene);
+  std::filesystem::remove(path);
+  CHECK(DebugConsole::help().find("lab [on|off]") != std::string::npos);
+}

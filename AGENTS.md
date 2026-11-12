@@ -157,6 +157,8 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
                                  # --dwell S, --fps N, --play-at S, --width W --height H
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --theme manifold # dark glass alternative
+./build/dev/src/gui/endspielzero_gui --theme manifold --lab 1 --screen menu --station menu --shot lab.ppm
+                                 # M24.1 static lab; captures default off, console lab [on|off]
 ./build/dev/src/gui/endspielzero_gui standard --dev --shot dev.ppm # fps + unfinished menu rows
                                  # run-only; console `dev [on|off]` changes the saved preference
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --post 0 --shot a.ppm  # post-processing A/B
@@ -322,6 +324,7 @@ point, the layers below may not - that boundary is the whole point of where `vie
 | Game status / recent-move text | `Ui::buildGameHud` and the measured `drawHudText` overlay in `src/render/ui.cpp` (panels via `widgets::hudPanel`, M23.10 section 7; captured trays from `app::capturedBySide`); size current rows before `Begin`, so first replay frames agree with settled frames. See `docs/plan/M23.5-capture-hud-refresh.md` | |
 | Keyboard ownership between the game and interface | `Ui::create`, `Ui::processEvent`/`capturesKeyboard` and `updateKeyboardNavigation` in `src/render/ui.cpp`; idle navigation passes shortcuts, active widgets/text/modal choices capture them, and hot-seat/trailer keys disable HUD navigation. See `docs/plan/M23.6-game-keyboard-shortcuts.md` | |
 | A menu control's animation | `Theme::liveControls`, `Ui::setVisualTime` and `widgets::rowControl` in `src/render/ui_widgets.cpp`; manifold plates glitch only on hover/focus, using explicit presentation seconds. `menuEntry` bounds rows and `actionPairLayout` measures responsive footers in `ui_menus.cpp`. See `docs/plan/M23.7-manifold-glitch-controls.md` | |
+| The static menu lab and its OBJ props | `assets/lab/lab.toml`, `io::parseLabDoc` / `loadLabDoc` in `src/io/lab_doc.*`, `io::parseObj` in `src/io/obj_mesh.*`, `render::LabScene` in `src/render/lab_scene.*` and `BoardRenderer::addLabMeshes`; `labScene`, console `lab [on\|off]`, `--lab 0\|1` and `--station <name>`. See `docs/plan/M24.1-lab-kit-and-room.md` | |
 | A menu's decorative object | `src/render/deco.cpp` + `decoForScreen` | |
 | How a menu object answers a drag | `Ui::updateObjectDrag`; the turn is an offset on the object's own animation | |
 | The trailer's camera (calm sway, follow, authored keyframes, edit mode) | `Shell::trailerCamera`/`setTrailerEditing` in `src/app/shell.cpp`, `view::steadySway`, the panel in `Ui::buildTrailerEditRows`. Never write the trailer's camera into `Settings`. See `docs/plan/M13-overtures.md` (2026-10-16) | |

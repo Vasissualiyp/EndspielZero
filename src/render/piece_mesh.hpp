@@ -153,10 +153,16 @@ struct CustomBody {
   std::optional<assets::IconModel> icon;
 };
 
+/// Unit lab meshes: centred boxes span +/-0.5; the Z-up cylinder has radius 0.5,
+/// height 1.
+enum class LabShape : std::uint8_t { Box, Bevel, Cylinder, Count };
+
 struct MeshLibrary {
   std::vector<MeshVertex> vertices;
   std::vector<std::uint16_t> indices;
   MeshRange ranges[kShapeSlots];
+  MeshRange labRanges[static_cast<std::size_t>(LabShape::Count)];
+  std::vector<MeshRange> fileRanges;
   /// The shape view's alternate piece mesh (M17.25): each archetype's **Primitive** icon
   /// extruded into a two-sided puck, the same outline on both faces. Empty for the
   /// archetypes that are not pieces - Cell, Portal, Arrow, Fillet and Disc. Lives in the

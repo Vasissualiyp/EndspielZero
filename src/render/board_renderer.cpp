@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstring>
 #include <map>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "render/board_glow.hpp"
@@ -91,7 +92,7 @@ void toFloat4(const view::Rgba& c, float out[4]) {
   out[3] = c.a;
 }
 
-enum class Cut : std::uint8_t { Plank, Turned };
+}  // namespace
 
 float shaderMaterial(view::Material m, Cut cut, float variation) {
   if (m == view::Material::Wood)
@@ -104,6 +105,7 @@ float shaderMaterial(view::Material m, Cut cut, float variation) {
   return 0.0f;
 }
 
+namespace {
 std::uint32_t materialHash(std::uint32_t key) {
   std::uint32_t x = key * 0x9E3779B1u;
   x ^= x >> 16;
@@ -730,6 +732,16 @@ Result<void> BoardRenderer::buildBackdropPipeline() {
 }
 
 Result<void> BoardRenderer::uploadGeometry() {
+  vkDeviceWaitIdle(ctx_->device());
+  if (vertexBuffer_ != VK_NULL_HANDLE)
+    vkDestroyBuffer(ctx_->device(), vertexBuffer_, nullptr);
+  if (vertexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), vertexMem_, nullptr);
+  if (indexBuffer_ != VK_NULL_HANDLE)
+    vkDestroyBuffer(ctx_->device(), indexBuffer_, nullptr);
+  if (indexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), indexMem_, nullptr);
+  vertexBuffer_ = indexBuffer_ = VK_NULL_HANDLE;
+  vertexMem_ = indexMem_ = VK_NULL_HANDLE;
+
   const VkDeviceSize vbytes = meshes_.vertices.size() * sizeof(MeshVertex);
   const VkDeviceSize ibytes = meshes_.indices.size() * sizeof(std::uint16_t);
   const auto hostProps =
@@ -955,6 +967,43 @@ std::uint64_t bodiesSignature(const VariantSpec& v) {
 
 }  // namespace
 
+namespace {
+void appendLabFile(MeshLibrary& library, const io::ObjMesh& mesh) {
+  MeshRange range;
+  range.firstIndex = static_cast<std::uint32_t>(library.indices.size());
+  range.vertexOffset = static_cast<std::int32_t>(library.vertices.size());
+  range.indexCount = static_cast<std::uint32_t>(mesh.indices.size());
+  float minZ = mesh.positions.front()[2], maxZ = minZ;
+  for (const auto& p : mesh.positions) {
+    minZ = std::min(minZ, p[2]);
+    maxZ = std::max(maxZ, p[2]);
+  }
+  for (std::size_t i = 0; i < mesh.positions.size(); ++i) {
+    MeshVertex v{};
+    std::copy(mesh.positions[i].begin(), mesh.positions[i].end(), v.pos);
+    std::copy(mesh.normals[i].begin(), mesh.normals[i].end(), v.normal);
+    v.height = maxZ > minZ ? (v.pos[2] - minZ) / (maxZ - minZ) : 0;
+    library.vertices.push_back(v);
+  }
+  for (auto index : mesh.indices)
+    library.indices.push_back(static_cast<std::uint16_t>(index));
+  library.fileRanges.push_back(range);
+}
+}  // namespace
+std::vector<std::uint32_t> BoardRenderer::addLabMeshes(
+    const std::vector<io::ObjMesh>& meshes) {
+  std::vector<std::uint32_t> ranges;
+  for (const auto& mesh : meshes) {
+    ranges.push_back(static_cast<std::uint32_t>(meshes_.fileRanges.size()));
+    appendLabFile(meshes_, mesh);
+    labMeshes_.push_back(mesh);
+  }
+  if (!meshes.empty()) {
+    if (auto r = uploadGeometry(); !r) throw std::runtime_error(r.error().format());
+  }
+  return ranges;
+}
+
 Result<void> BoardRenderer::syncBodies(const VariantSpec& v) {
   const std::uint64_t sig = bodiesSignature(v);
   if (sig == bodiesSig_) return {};
@@ -971,15 +1020,7 @@ Result<void> BoardRenderer::syncBodies(const VariantSpec& v) {
     ++slot;
   }
   meshes_ = MeshLibrary::build(custom);
-  vkDeviceWaitIdle(ctx_->device());
-  if (vertexBuffer_ != VK_NULL_HANDLE)
-    vkDestroyBuffer(ctx_->device(), vertexBuffer_, nullptr);
-  if (vertexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), vertexMem_, nullptr);
-  if (indexBuffer_ != VK_NULL_HANDLE)
-    vkDestroyBuffer(ctx_->device(), indexBuffer_, nullptr);
-  if (indexMem_ != VK_NULL_HANDLE) vkFreeMemory(ctx_->device(), indexMem_, nullptr);
-  vertexBuffer_ = indexBuffer_ = VK_NULL_HANDLE;
-  vertexMem_ = indexMem_ = VK_NULL_HANDLE;
+  for (const auto& mesh : labMeshes_) appendLabFile(meshes_, mesh);
   if (auto r = uploadGeometry(); !r.has_value()) return r;
   bodiesSig_ = sig;
   return {};
@@ -2319,7 +2360,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   const std::size_t scaffoldBase = flourishBase + set.flourish.size();
   const std::size_t shadowBase = scaffoldBase + set.scaffold.size();
   const std::size_t standbyBase = shadowBase + set.shadows.size();
-  const std::size_t instanceCount = standbyBase + (set.standbyLed ? 1 : 0);
+  const std::size_t labBase = standbyBase + (set.standbyLed ? 1 : 0);
+  const std::size_t instanceCount = labBase + set.lab.size();
   if (auto r = ensureInstanceCapacity(frame, instanceCount); !r.has_value()) return r;
   if (instanceCount > 0) {
     void* mapped = nullptr;
@@ -2335,6 +2377,9 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     if (set.standbyLed)
       std::memcpy(static_cast<char*>(mapped) + standbyBase * sizeof(Instance),
                   &*set.standbyLed, sizeof(Instance));
+    if (!set.lab.empty())
+      std::memcpy(static_cast<char*>(mapped) + labBase * sizeof(Instance), set.lab.data(),
+                  set.lab.size() * sizeof(Instance));
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
@@ -2376,8 +2421,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
                               : BoardRect{0, 0, static_cast<float>(target.width()),
                                           static_cast<float>(target.height())};
   PushConstants push{};
-  push.viewProj =
-      camera.withNearClip(options_.nearClip).viewProj(board.width / board.height);
+  push.viewProj = (options_.labMode ? camera : camera.withNearClip(options_.nearClip))
+                      .viewProj(board.width / board.height);
   const view::Vec3 eye = camera.eye();
   push.eyePos[0] = eye.x;
   push.eyePos[1] = eye.y;
@@ -2505,7 +2550,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     const VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
 
     vkCmdBeginRendering(cmd, &ri);
-    if (glow.valid && backdropPipeline != VK_NULL_HANDLE) {
+    if (!options_.labMode && glow.valid && backdropPipeline != VK_NULL_HANDLE) {
       vkCmdSetViewport(cmd, 0, 1, &full);
       vkCmdSetScissor(cmd, 0, 1, &fullScissor);
       BackdropPush bp{};
@@ -2582,7 +2627,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // and the ordinary solid board keep the sculptural meshes whatever the setting says.
     const bool cylinderPieces = options_.shapePieceCylinders && options_.surface &&
                                 !options_.flat && !set.surfaceIndices.empty();
-    if (!set.instances.empty() || set.standbyLed) {
+    if (!set.instances.empty() || set.standbyLed || !set.lab.empty()) {
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, scenePipeline);
       vkCmdPushConstants(cmd, layout_,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -2591,6 +2636,21 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer_, &zero);
       vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_[frame], &zero);
       vkCmdBindIndexBuffer(cmd, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+      const auto drawLab = [&](const MeshRange& range, const InstanceSet::Batch& batch) {
+        if (batch.count)
+          vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
+                           range.vertexOffset,
+                           static_cast<std::uint32_t>(labBase) + batch.first);
+      };
+      for (std::size_t s = 0; s < set.labBatches.size(); ++s) {
+        const auto& range =
+            s < static_cast<std::size_t>(LabShape::Count)
+                ? meshes_.labRanges[s]
+                : meshes_.ranges[static_cast<std::size_t>(Archetype::Cell)];
+        drawLab(range, set.labBatches[s]);
+      }
+      for (std::size_t s = 0; s < set.labFileBatches.size(); ++s)
+        drawLab(meshes_.fileRanges.at(s), set.labFileBatches[s]);
       // One draw per shape, not per piece: eight calls for any board of any size.
       for (std::size_t s = 0; s < set.batches.size(); ++s) {
         const auto& batch = set.batches[s];
@@ -2876,6 +2936,7 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(blurFromScratch_, o.blurFromScratch_);
   std::swap(blurBoundColor_, o.blurBoundColor_);
   std::swap(blur_, o.blur_);
+  std::swap(labMeshes_, o.labMeshes_);
   std::swap(backdropVert_, o.backdropVert_);
   std::swap(backdropFrag_, o.backdropFrag_);
   std::swap(backdropLayout_, o.backdropLayout_);
