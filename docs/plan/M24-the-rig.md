@@ -476,7 +476,7 @@ Every slice file repeats what it needs, but these hold throughout:
 | M24.4a | `docs/plan/M24.4a-stations-and-camera-moves.md` | Screens as stations, menu ↔ menu camera flights, hologram collapse/grow, salience | behind `labScene` |
 | M24.4b | `docs/plan/M24.4b-implant-layer.md` | Synaptic hue, implant composite: organic form/dissolve, afterimage, heartbeat, saccadic dip | behind `labScene`; at the end of M24.4b, switch `labScene` to default **on** for interactive play (captures stay off) |
 | M24.4c | `docs/plan/M24.4c-living-vision.md` | Living vision: lens warp, frameless glowing panels, peripheral softening, gaze wander with focus shift (depth of field), micro-tremor; the main-menu hologram takes a fifth of the screen | behind `livingVision` (on the lab path only) |
-| M24.5 | to be written after M24.4b lands | Deploy and stow: the game in the lab (gpt-6-astra) | yes |
+| M24.5 | `docs/plan/M24.5-deploy-and-stow.md` | Deploy and stow: the game in the lab (gpt-6-astra) | yes |
 | M24.5b | to be written after M24.5 lands | The slab's skin: physical in-game morphs, stretch, ribs, seam latches, light-completed Klein (gpt-6-astra) | yes |
 | M24.6 | to be written | Multi-slab gantry, light bridges, layout changes as gantry moves (gpt-6-astra) | yes |
 | M24.7 | to be written | Geometry view projector, the first-launch wake-up and implant handshake | yes |
