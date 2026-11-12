@@ -183,9 +183,11 @@ The salience rim is in the board shader (lab parts only), not in the composite.
 
 ### Camera stations
 
-Each shell screen is a camera pose in the lab. Poses are data (`src/view/rig_stations.*`),
-in room coordinates (metres; Y up; origin at the floor below the gantry centre; the
-bench along −Z).
+Each shell screen is a camera pose in the lab. The poses are data: `[[station]]` entries in
+`assets/lab/lab.toml`, in metres, **Z up** (the board renderer's convention), X right and
+Y away from a yaw-0 camera. The bench is against the far (+Y) wall and the roller door is
+on the near (−Y) wall. The renderer's world is the lab's metres minus `gantry.centre`,
+times 20 (one cell = 5 cm). M24.1 gives the exact numbers.
 
 | Screen | Station | Looks at | Implant panel (salience on) |
 |---|---|---|---|
@@ -384,147 +386,104 @@ Everything goes through the existing board pipeline unless noted. No second rend
 - An art pass on the lab. M24 ships the procedural kit, laid out with care; a human may
   replace parts later.
 
+## Rules for every M24 slice
+
+Every slice file repeats what it needs, but these hold throughout:
+
+1. **Environment.** There is no GPU. Run every build, test and capture through `g.sh`.
+   Its exact content is in `docs/plan/M23.12-seam-hover-and-hologram-shutdown.md`,
+   "Rules", item 1; recreate it if it is missing.
+2. **Test first.** Write each test, see it fail, then implement.
+3. **Pure in explicit time.** New animation is a pure function of an age or progress the
+   caller passes in. Captures reproduce bit for bit.
+4. **Intensity.** Below `presentationIntensity` 0.5, every effect takes its calm form.
+5. **Lab off is byte-identical.** With `labScene` off, every frame equals what it was
+   before M24. Captures (`--shot`, `--clip`, `--trailer-clip`) default the lab **off**,
+   as `--ui-auto` does; `--lab 1` turns it on. Existing tests therefore never change.
+6. **Debug access** (AGENTS.md rule 9). Every new state has a console command, a setting,
+   or a CLI flag where captures need one. Keep `DebugConsole::help()` and
+   `docs/debug-console.md` in step.
+7. **Gates before each commit, all through `g.sh`:** `tools/precommit.sh` prints
+   `precommit: OK`; the `[render],[app],[view]` tests pass; `ctest -L gui` passes.
+8. **Look at every capture** you make, as a contact sheet in `out/m24.N/`. Never commit
+   `out/`.
+9. **One commit per slice**, of your own files only. Don't push. Add a dated Status entry
+   to the slice file: what was built, deviations, test counts, and sheet paths.
+10. **If a name in a spec does not exist, stop and report it.** Do not invent a
+    substitute. The names were checked on 2026-11-12, and earlier slices may have
+    renamed things; their Status says so.
+
 ## Slices
 
-Each slice is test-first, captured, and committed on its own. Run everything through
-`g.sh`. The precommit must print `precommit: OK`, plus the `[render][app][view]` and
-`gui-*` tests. Never commit `out/`. Don't push.
+| Slice | File | What | Lands visibly? |
+|---|---|---|---|
+| M24.1 | `docs/plan/M24.1-lab-kit-and-room.md` | Lab file format and parser, lab meshes, `LabScene`, room v1, menus show the static room | behind `labScene` (off) |
+| M24.2 | `docs/plan/M24.2-lab-lights.md` | Up to 8 room lights, near-off key in the lab, the night sky in the skylight, `roomLight` | behind `labScene` |
+| M24.3 | `docs/plan/M24.3-projector-holograms.md` | Manifold, overture and tesseract as 3-D holograms above the bench projector, with a beam | behind `labScene` |
+| M24.4a | `docs/plan/M24.4a-stations-and-camera-moves.md` | Screens as stations, menu ↔ menu camera flights, hologram collapse/grow, salience | behind `labScene` |
+| M24.4b | `docs/plan/M24.4b-implant-layer.md` | Synaptic hue, implant composite: organic form/dissolve, afterimage, heartbeat, saccadic dip | behind `labScene`; at the end of M24.4b, switch `labScene` to default **on** for interactive play (captures stay off) |
+| M24.5 | to be written after M24.4b lands | Deploy and stow: the game in the lab | yes |
+| M24.6 | to be written | Multi-slab gantry | yes |
+| M24.7 | to be written | Geometry view projector, the first-launch wake-up and implant handshake | yes |
+| M24.8 | to be written | Cleanup | yes |
 
-| Slice | What | Lands visibly? |
-|---|---|---|
-| §1 | ADR-0026 text check, `LabScene` kit format + loader + procedural meshes, room layout v1 (static, no lights) | behind `labScene`, off by default |
-| §2 | Light list (≤ 8), per-slab glow light, room lights, focus-mode dim, wall fade | behind `labScene` |
-| §3 | Overture as 3-D hologram instances above the bench projector, 3-D overture picking | behind `labScene` |
-| §4 | Menu screens render the lab from station cameras; menu ↔ menu camera moves; implant composite (form/dissolve, afterimage, dip, heartbeat), synaptic hue, salience | `labScene` default on |
-| §5 | `rigXform`, slab hardware (masts, clamps, magazine), deploy/stow paths, menu → game and game → menu moves | yes |
-| §6 | Layout-driven gantry for multi-slab variants, quarter-size tiles, `rigScale` easing, 5D timeline slab arrival | yes |
-| §7 | Geometry view as the gantry projector's hologram, slabs retracting; first-launch wake-up (eyes opening, two blinks, defocus clearing) and the implant handshake | yes |
-| §8 | Remove `DepthField`/grid floor/screen-space backdrop from manifold menus; contact sheets; perf note | yes |
+**Why M24.5–M24.8 are not yet written at full detail.** They hook into code that M24.1–M24.4b
+create, such as `LabScene`, the light block, `HologramPlacement`, the Station move and
+`ImplantLayer`. Exact names and signatures for those should come from what was built, not
+from a guess, or a smaller model would be told to call functions that turned out
+differently. Write each one at the level of M24.1–M24.4b once the previous slice's Status
+is in. The outlines below are binding on **what** gets built.
 
-### §1 Lab kit and room v1
+### M24.5 Deploy and stow (outline)
 
-- `assets/lab/lab.toml`: parts (`name`, `mesh`, `pos`, `rot` in degrees, `size`,
-  `material`, `color`, `ao`), named anchors (`projector.lens`, `magazine.bay0`,
-  `gantry.origin`, `gantry.volume`, `door`, `bench.top`, stations `station.menu`, ...).
-  Parsed by `io/lab_doc.*` with errors and line numbers like the variant parser.
-- `render/lab_scene.{hpp,cpp}`: `LabScene::build(doc, theme) -> InstanceSet part` and
-  `anchor(name) -> Vec3`.
-- Room v1, about 5 × 6 × 2.7 m: floor, three walls plus a roller door, ceiling with
-  skylight, workbench with projector, magazine rack, gantry frame (rails only), shelving
-  with boxes, pegboard with a few tools, cable tray, task lamp.
-- **Debug access:** console `lab [on|off]`, `get`/`set labScene`; CLI `--lab 0|1`,
-  `--station <name>` (render the static lab from a named station).
-- **Tests:**
-  - parser: a valid file; errors with line numbers; unknown mesh;
-  - GPU: lab instances build and validate clean at scales 1 and 3;
-  - capture from every station.
+- The board in the lab: a world transform `rigXform` (uniform scale `rigScale`, origin at
+  `gantry.centre`) applied to every board instance and to the board camera. Picking
+  goes through the inverse, so cells pick identically (ray tests).
+- Slab hardware per slice: a mast from the gantry carriage, a clamp ring, and the standby
+  LED from M23.12 §2.
+- `slabPath`: magazine → carriage → place, with mass and a settle; a clamp pulse.
+- Menu → game (about 3.0 s) and game → menu (about 2.8 s) exactly as in "The moves",
+  including the boot hand-off. When leaving a live game, use the compressed shutdown
+  from M23.12 §2.
+- Moved here from the old §2:
+  - the per-slab glow light, one point light per slab coloured by the panel's mean
+    emission and scaled by power. Merge slabs into at most 2 lights when there are more;
+  - focus mode, with room lights at 15 % while a game runs;
+  - wall fade (screen-door) for room parts between the eye and the target;
+  - the game camera's orbit clamped to stay inside the room.
+- The HUD and pause panels become implant panels (they form as the board boots).
+- **Debug:** `deploy`, `stow`, `--deploy-t`, `--stow-t`.
+- **Tests:** path endpoints; no slab intersections for standard and cube5; pick
+  equivalence; captures every 0.25 s.
 
-### §2 Lights
+### M24.6 Multi-slab gantry (outline)
 
-- Light list in a UBO (≤ 8), shader evaluation, room light parts in `lab.toml`
-  (`[[light]]`), per-slab glow light, `roomLight` and focus-mode dim, wall fade.
-- **Debug access:**
-  - console `lights` lists the active lights;
-  - `set roomLight`;
-  - CLI `--room-light <0..1>`.
-- **Tests:**
-  - pure: falloff, cone;
-  - a light at radius gives zero;
-  - power-down at `--end-t` 14 lowers the slab light to its hold;
-  - GPU validation;
-  - captures with the room lit, in focus mode, and at end standby.
-- Perf: record frame time on lavapipe before and after, and leave a note for a GPU run
-  with `--bench-frame`.
+- One carriage per slice, positions from `view::layout`.
+- Quarter-size tiles when a layout does not fit; `rigScale` eases over 1 s when a layout
+  grows.
+- Departures overlap.
+- 5D: a new timeline's slab arrives and boots, joined to its parent by a light-guide
+  connector (`TimelineLink`).
+- **Tests:** every shipped variant fits; no mast collisions; one arrival per branch;
+  captures for standard, cube5, hyper4, t6 and 5D.
 
-### §3 Overture as a hologram
+### M24.7 Geometry view, first launch (outline)
 
-- `overtureInstances`, the projector transform from `projector.lens`, a beam cone (soft
-  additive hologram quad), 3-D pick.
-- The Library preview drag (`updateObjectDrag`) turns the hologram about the lens axis.
-- **Debug access:** the existing overture controls work. Add CLI `--overture <name>
-  --overture-t <0..1>` with the lab.
-- **Tests:**
-  - instance count matches the scene's quads and tokens;
-  - the pick hits the same cell as the legacy projection for a set of rays;
-  - captures.
+- In the geometry view, the slabs retract to the gantry top and a ceiling projector shows
+  the formed surface as a hologram LED surface.
+- The first-launch wake-up exactly as in "First launch: waking up": `view::wakeState`,
+  eyelids and defocus in the post composite before the implant layer, `--wake-t`, `wake`.
+- The implant handshake: phosphenes and a log-polar ring wave via `ImplantParams::globalSync`
+  and new ring parameters, curl-noise colour separation converging onto the main menu,
+  `--handshake-t`, `poweron`.
+- **Tests** as listed in "First launch: waking up", plus captures. Pin existing
+  geometry-view tests to `--lab 0` where their framing changes.
 
-### §4 Stations and menu moves
+### M24.8 Cleanup (outline)
 
-- `view::rig_stations`, `RigMove`, `rigEase`.
-- The implant layer: UI into an offscreen target, `ImplantComposite` + `implant.frag`,
-  panel records with enter/leave ages, afterimage, saccadic dip from camera angular
-  speed, heartbeat.
-- Synaptic theme tokens for the manifold HUD and menus.
-- Lab-part `salience` with the rim in the board shader.
-- The M23.11 trace-on is retired for panels on the lab path (kept with `--lab 0`).
-- `main.cpp` renders the lab for every non-editor screen.
-- **Debug access:**
-  - `transition <from> <to>` now flies the camera;
-  - `station <name>` jumps there;
-  - CLI `--from/--transition-t` unchanged;
-  - `implant [on|off]` and `get`/`set implantFx`;
-  - CLI `--implant 0|1`, and `--panel-t <s>` to pin every panel's form/dissolve age;
-  - `salience <part>|off` pins a salience target.
-- **Tests:**
-  - pure pose interpolation (endpoints exact, monotonic arc length);
-  - the implant composite with sync 1 and no records is byte-identical to the plain UI;
-  - form at `--panel-t` 0.1 differs, at 0.35 it equals the plain UI;
-  - the dip is 0 during game orbit and the pull-back;
-  - the heartbeat and afterimage are absent at calm;
-  - a capture at the move's end is byte-identical to the station's plain capture;
-  - calm is a cross-fade;
-  - existing `gui-screen-transition` is pinned to `--lab 0`.
-
-### §5 Deploy and stow
-
-- `rigXform`, slab hardware, `slabPath` (magazine → carriage → place, with settle),
-  clamp pulse, menu → game and game → menu sequences, boot hand-off, compressed shutdown
-  on leave.
-- **Debug access:**
-  - console `deploy` / `stow` replays them;
-  - CLI `--deploy-t <s>`, `--stow-t <s>`.
-- **Tests:**
-  - pure: path endpoints;
-  - no slab intersects another during travel for standard and cube5;
-  - the board picks the same cells with `rigXform` applied (ray tests);
-  - captures every 0.25 s.
-
-### §6 Multi-slab gantry
-
-- Carriages per slice, quarter tiles, `rigScale`, departure overlap, 5D arrival of new
-  timeline slabs with a light-guide connector.
-- **Debug access:** `--variant 5d --script ...` captures with `--event-t` on the arrival.
-- **Tests:**
-  - every shipped variant's layout fits the volume after `rigScale`;
-  - no two masts collide;
-  - a 5D branch triggers exactly one slab arrival;
-  - captures for standard, cube5, hyper4, t6 and 5D.
-
-### §7 Geometry view, first launch, lens
-
-- The gantry ceiling projector, slabs retracting in the geometry view, first-launch
-  power-on with the implant handshake (phosphenes, log-polar ring wave, curl-noise colour
-  separation converging onto the menu).
-- The wake-up (see "First launch: waking up"): `view::wakeState`, eyelid regions and
-  defocus in the post composite.
-- CLI `--handshake-t <s>` pins the handshake age; `--wake-t <s>` pins the wake-up age.
-- **Debug access:**
-  - console `poweron` replays the launch, and `wake` replays the wake-up alone;
-  - pure tests for `wakeState`:
-    - lids closed at 0, at 1.95 s and at 2.65 s;
-    - fully open and blur 0 after 3.0 s;
-    - the upper lid's travel is greater than the lower's;
-    - calm has no blink;
-  - a capture at the middle of a blink has black rows at the top and bottom;
-  - CLI `--launch-t <s>`.
-- **Tests:** captures; existing geometry-view tests pinned to `--lab 0` where their
-  framing changes.
-
-### §8 Cleanup
-
-- Remove the manifold menus' `DepthField`, grid floor and backdrop path (keep them for
-  console theme and `--lab 0`).
-- Contact sheets for every station and move in both intensities.
+- Remove the manifold menus' `DepthField`, grid floor and flat decoration path on the lab
+  path. Keep them for the console theme and `--lab 0`.
+- Contact sheets for every station and move, at both intensities.
 - A perf note.
 - Update `visual_ideas.md`'s approved direction and `docs/debug-console.md`.
 
