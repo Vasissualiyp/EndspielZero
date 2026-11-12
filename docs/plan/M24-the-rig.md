@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-# M24 — The Rig: one physical lab under an AR layer
+# M24 — The Rig: one physical lab under a neural-implant layer
 
 Status: **planned 2026-11-12.** Design confirmed with the user 2026-11-12 (see "Decisions").
-The decision record is ADR-0026 (`docs/adr/0026-world-is-hardware-screen-is-ar.md`).
+The decision record is ADR-0026 (`docs/adr/0026-world-is-hardware-screen-is-implant.md`).
 
 Builds on:
 - M23.9–M23.11: the LED slab, the hologram pieces, boot, power-down, post, the HUD panel
@@ -29,12 +29,13 @@ The polygon field and grid floor read as abstract cyberspace; they are not physi
   materials, mass, panel lines, cables, status LEDs. It is lit by lights that exist in the
   room. Every hologram has a visible projector: the slab projects the pieces, the bench
   projector projects the overture.
-- **The screen is the player's AR glasses.** Everything flat (menus, HUD, result panel,
-  review dock, debug console) is an AR layer drawn over the world. It keeps the M23.11
-  panel language exactly. It is allowed to be futuristic precisely because it is not in
-  the world.
+- **The screen is the player's neural implant.** Everything flat (menus, HUD, result
+  panel, review dock) is perceived through an implant on top of the visual field. It keeps
+  the M23.11 panel geometry, in its own synaptic hue, and forms and dissolves in an
+  organic way, never like the LEDs. It is allowed to be futuristic precisely because it
+  is not in the world.
 - **One scene, one camera.** The menus and the game are the same lab seen from different
-  camera stations. A screen change is a camera move plus AR panels changing, never a cut.
+  camera stations. A screen change is a camera move plus implant panels changing, never a cut.
   The only exception is calm intensity, which uses the M23.11 cross-fade.
 
 ### The setting: a home lab, 2050
@@ -96,28 +97,89 @@ needs no new hardware.
 - **The flat 2-D view** (`--flat`) keeps the camera straight down; it is a top view of the
   deployed slabs.
 
-### The AR layer
+### The implant layer
 
-The player wears AR glasses. The menus are not "a menu screen". They are what the
-glasses overlay on the lab.
+The player has a neural implant. The menus are not a display in front of the eyes. They
+are written into the visual cortex and **perceived** on top of the lab. Glasses would
+draw over the world; the implant changes how the world is seen. Every effect below
+follows from that, and none of it looks like the LEDs.
 
-- **Panels** are screen-space (unchanged widgets, `hudPanel`, auto UI scale). They follow
-  the head with a little lag: a critically damped spring, about 0.12 s, on a small offset
-  driven by camera angular velocity, at most 1.5 % of screen height. During a camera move
-  the panels visibly trail and settle. This is the cue that they belong to the glasses,
-  not the room. Calm intensity: no lag.
-- **Anchors.** A panel about an object is anchored to it: a thin leader line from the
-  panel's edge to a small reticle on the object's projected position. The objects are
-  the projector (main menu, Library preview), the magazine (Library list), the board
-  (game plate, result panel) and the door (Quit). The reticle tracks the object as the
-  camera moves. Anchors are optional per panel. The HUD in game keeps its edge layout
-  (M23.11 §1); only the variant plate gets an anchor, a faint line to the nearest slab
-  corner.
-- **Materialising.** Panels appear with the M23.11 trace-on (edges first, then fill,
-  scanline), and leave with its reverse. That is already the AR look; keep it.
-- **Glasses edge.** A very faint lens vignette with chromatic fringe at the extreme
-  corners, added in the post composite. Strength 0.2 of the current vignette; off at
-  calm; never on captures with `--post 0`.
+**The contrast rule.** The LEDs are digital: square pixels, grid-aligned, scan lines,
+hard steps, cyan. The implant is organic: radial and log-polar, soft, flowing noise,
+continuous, colour fringes, never a grid and never a scan line. Neither ever uses the
+other's motion vocabulary, so hardware and brain are always told apart.
+
+- **Synaptic hue.** The implant layer gets its own palette, distinct from the LEDs' cyan:
+  a pale violet-white body (`implant`, about `#D9D2FF`), a warm fringe (`implantWarm`,
+  about `#FFB8A0`) used only in transient colour separation, and a dim `implantDim` for
+  secondary text. Add these as theme tokens. The manifold HUD and menu panels use them
+  for text, edges and brackets; panel fills stay the theme's ink. Gameplay colours stay
+  as they are: the check colour, the side colours and the seam ramp, because they mean
+  something on the board. The console theme is untouched.
+- **Panels** stay screen-space (unchanged widgets, `hudPanel`, auto UI scale) and are
+  perfectly stable. There is no lag and no frame, because nothing physical carries
+  them.
+- **Activation: the handshake.** At first launch only (§7), after the room lights come
+  up:
+  1. A few soft phosphenes appear near the centre of view: blurred points of light in the
+     implant hue, slightly chromatic, appearing and fading at random over about 0.4 s.
+  2. A travelling ring wave expands from the centre over about 0.9 s. Its spacing is
+     log-polar: rings are tight at the centre and widen toward the periphery. That is how
+     a wave across the visual cortex appears in the visual field, through the
+     retinotopic map. The rings are faint brightness modulation, not drawn lines.
+  3. Behind the front, colour separates organically: the implant's red and blue channels
+     are displaced by a slowly flowing curl-noise field (amplitude up to about 6 px at
+     1080p, spatial scale about 1/6 of the screen, flowing at about 0.3 screen per
+     second), like a signal not yet in sync.
+  4. The flow converges onto the menu: the displacement field is pulled toward zero near
+     panel edges and glyphs first. Text resolves from blurred colour blobs (a noise
+     dissolve plus a blur radius falling to 0) into crisp glyphs.
+  5. At full sync the layer is exactly the plain UI (identity), so captures and tests
+     compare byte-for-byte.
+
+  The whole handshake is about 1.8 s and skippable.
+- **Panels forming and dissolving (every other time).** About 0.35 s to form: a short
+  local version of steps 3–5, centred on the panel. There is a brief warm and violet
+  fringe flow, the panel's noise dissolve resolves, and glyphs sharpen. No ring wave. This
+  replaces the M23.11 trace-on (edges, fill, scanline), which is an LED motion and now
+  belongs to the hardware only. Dissolving reverses it over about 0.25 s: glyphs blur
+  into drifting colour, the panel breaks into a few phosphenes, and the afterimage
+  follows.
+- **Afterimage.** When a panel dissolves, a faint negative of it (complementary hue,
+  about 8 % strength, slightly blurred) lingers and fades over about 0.3 s, as a bright
+  image does on the retina.
+- **Salience instead of leader lines.** When a panel refers to an object (main menu or
+  Library: the projector; Library list: the magazine; Quit: the roller door; the game's
+  result panel: the board), the implant boosts how that object is seen. In the 3-D
+  scene, the object's parts get a soft rim glow in the implant hue plus a small local
+  contrast lift. This is a per-instance `salience` value (0..1) in the lab kit, eased
+  over 0.3 s. Nothing is drawn on the screen between panel and object.
+- **Saccadic dip.** During a camera flight between stations, the layer's opacity dips
+  with the camera's angular speed (to at most −60 % at the fastest moment). This is
+  saccadic suppression: perception blanks while the eyes swing. It never happens while
+  orbiting the board in a game, during a game → pause pull-back, or at calm intensity.
+- **Heartbeat.** The whole layer's brightness carries a faint double pulse ("lub-dub",
+  about 2 %, 60 bpm, the second beat 0.25 s after the first and smaller). It is pure in
+  visual time and off at calm.
+- **Calm intensity.** No phosphenes, ring, flow, dip, heartbeat or afterimage. Panels
+  cross-fade (0.2 s). The synaptic hue stays: it is a colour, not an effect.
+
+**How it renders.** The ImGui layer is recorded into its own offscreen RGBA target (the
+same size as the swapchain) instead of directly over the post output. A composite pass,
+`render::ImplantComposite` with shader `implant.frag`, then draws it over the scene:
+- inputs: the UI target, a per-frame `sync` (global, for the handshake), up to 16 panel
+  records (`rect`, `age`, `entering|leaving`), the ring-wave age, heartbeat phase, dip
+  amount, and the previous panels' afterimage records;
+- per pixel: the sync value (the global one combined with the containing panel's age) →
+  curl-noise displacement of R and B → noise-threshold dissolve → blur radius (a small
+  Poisson tap set) → phosphene sparks (hashed points, implant hue) → ring modulation →
+  heartbeat × dip;
+- `sync == 1` everywhere with no records is an exact pass-through, so `--post 0`,
+  existing captures and every UI test are unchanged. Add a test that asserts this.
+- the console, the dev overlay and the editor bypass the implant composite (drawn after
+  it); they are tools, not perception.
+
+The salience rim is in the board shader (lab parts only), not in the composite.
 
 ### Camera stations
 
@@ -125,10 +187,10 @@ Each shell screen is a camera pose in the lab. Poses are data (`src/view/rig_sta
 in room coordinates (metres; Y up; origin at the floor below the gantry centre; the
 bench along −Z).
 
-| Screen | Station | Looks at | AR panel |
+| Screen | Station | Looks at | Implant panel (salience on) |
 |---|---|---|---|
 | Main menu | standing at the bench, slightly left | the projector and its overture | main menu, right |
-| Library (New game) | turned 35° toward the magazine | magazine + projector showing the selected variant | list anchored to the magazine |
+| Library (New game) | turned 35° toward the magazine | magazine + projector showing the selected variant | list (magazine) |
 | Watch | same as Library | projector | list |
 | Tutorial | at the bench, closer to the projector | projector | tutorial list |
 | Settings / Game mode / Piece moves | stepped back, looking at the bench | bench | panel right |
@@ -152,12 +214,13 @@ All are camera paths with mass (one shared easing: ease-in-out with a small sett
 `view::rigEase`). All can be skipped by any key or click (`Ui::skipTransition`).
 
 **Menu ↔ menu.** The camera moves between stations (0.6–0.9 s depending on distance).
-The old AR panel traces off as the camera starts; the new one traces on as it arrives.
+The old implant panel dissolves as the camera starts; the new one forms as it arrives,
+and the layer dips during the flight (saccadic dip).
 The overture on the projector cross-fades to the new subject via the projector's own beam
 (it collapses into the lens, then grows out).
 
 **Menu → game ("start").** About 3.0 s total, every beat physical:
-1. 0.0 – 0.3: the AR panel traces off. The projector's overture collapses into the lens.
+1. 0.0 – 0.3: the implant panel dissolves. The projector's overture collapses into the lens.
 2. 0.2 – 1.4: the room lights dim toward focus mode. The magazine's bay LEDs blink. The
    needed slabs slide out one after another, are picked up by carriages, and travel
    along the gantry. Each slab has mass: it accelerates, decelerates and settles with a
@@ -165,12 +228,13 @@ The overture on the projector cross-fades to the new subject via the projector's
 3. 0.4 – 2.2: the camera flies from the bench station to the game's framed pose,
    following the first slab, and arrives as the last slab locks.
 4. 2.2 –: the board boots (M23.10 §3), unchanged, slab by slab in arrival order. The HUD
-   traces on with the boot, as now.
+   forms as implant panels while the boot runs (it no longer traces on with the bezel).
 
 A layout with many slabs keeps step 2 within 1.6 s by overlapping slab departures. The
 boot overlaps rather than waits.
 
-**Game → pause → game.** Unchanged (pull-back), plus the AR lag.
+**Game → pause → game.** Unchanged (pull-back). The pause panel forms and dissolves as an
+implant panel.
 
 **Game → menu ("leave").** About 2.8 s:
 1. If the game is still live: the LED power-down plus the hologram shutdown (M23.12 §2),
@@ -178,7 +242,7 @@ boot overlaps rather than waits.
    down, this step is skipped.
 2. The slabs unclamp, rise, ride back to the magazine and slide in. The camera returns to
    the bench station. The room lights come back up.
-3. The projector's overture grows out of the lens. The main menu panel traces on.
+3. The projector's overture grows out of the lens. The main menu panel forms.
 
 **Game end.** Unchanged plus M23.12 §2. The slabs stay deployed, dark, with their standby
 LEDs, until the player leaves or rematches. Rematch reboots in place: no slab movement.
@@ -187,9 +251,49 @@ LEDs, until the player leaves or rematches. Rematch reboots in place: no slab mo
 poses. There is no slab travel and no room dimming animation (the dim level simply
 switches). Boot and shutdown use their own calm forms.
 
-**First launch.** The app opens on the bench station with the room lights rising from
-dark over 1.2 s and the projector powering on (a lens flare, then the overture growing).
-It is skippable. This replaces the current menu fade-in.
+**First launch: waking up** (user, 2026-11-12). Starting the app is the player opening
+their eyes in the lab. Then the implant comes online. It is about 5 s, skippable by any
+key or click, and replaces the current menu fade-in. Each launch plays it once; no other
+screen change does.
+
+1. **Eyes closed (0 – 0.6 s).** Black, with a very faint warm glow through the lids (a
+   dim reddish wash, about 3 %, slowly varying), so it reads as closed eyes rather than
+   a black screen.
+2. **Eyes opening (0.6 – 1.6 s).** Two black eyelid regions, one from the top and one from
+   the bottom, pull apart:
+   - **Shape.** The lid edges are curved (an elliptical eye opening, wider in the middle,
+     so the corners open last) and soft, with a feathered edge of about 4 % of the screen
+     height.
+   - **Movement.** The upper lid moves farther and faster than the lower, as real lids
+     do. The opening hesitates once (it stops at about 40 % for 0.15 s), then completes.
+   - **The vision behind them** starts heavily defocused (a blur radius of about 2.5 % of
+     the screen), dim (exposure −1.5 EV) and slightly desaturated. It clears over 1.5 s,
+     overlapping the next step.
+3. **Blinks (1.9 s and 2.6 s).** Two blinks, the second quicker. A blink is the same two
+   black lid regions closing to meet slightly below the centre line and reopening:
+   - the first takes 0.18 s to close and 0.22 s to open;
+   - the second takes 0.12 s and 0.16 s.
+
+   Each blink takes the defocus a step closer to sharp, and after the second the vision
+   is fully sharp at normal exposure.
+4. **The room settles (2.0 – 3.2 s).** The lab's lights are already on (the player's own
+   lab). The projector powers on (a lens flare, then the overture growing out of the
+   lens).
+5. **The implant handshake (3.0 – 4.8 s).** Phosphenes, the log-polar ring wave, and the
+   colour separation converging onto the main menu, as in "The implant layer".
+
+Each step is a pure function of the launch age (`view::wakeState(age, intensity)` returns
+lid openness, top and bottom edge curves, blur radius, exposure, saturation and the
+lid-glow amount).
+- The lids and blur render in the post composite, after the scene and before the implant
+  layer: the implant is in the brain, so the eyelids cover the world but not the overlay.
+  The menu is not visible before step 5 in any case.
+- Captures: `--wake-t <s>`. Console `wake` replays it. Setting `wakeOnLaunch` (bool,
+  default true) disables it.
+- **Calm intensity:** no blinks or hesitation; the lids open once over 0.6 s while the blur
+  clears, then the menu cross-fades in.
+- **Pure-black lids.** The lid regions are exactly black (after the glow in step 1 ends),
+  so a capture mid-blink has rows of zero pixels. That is easy to test.
 
 ## Rendering plan
 
@@ -251,14 +355,18 @@ Everything goes through the existing board pipeline unless noted. No second rend
   There is no second transition system.
 - **Settings.** `labScene` (bool, default true; false gives the M23.11 menus and stars
   game, the recovery path and the A/B), `roomLight` (0..1 multiplier, default 1),
-  `arLag` (bool, default true).
+  `implantFx` (bool, default true; false keeps the synaptic hue with plain cross-fades).
 
 ## Decisions (user, 2026-11-12)
 
 - World concept: **the Rig**, now in a **2050 home lab / garage** (user revision during
   design; replaces "floating in space").
-- Menus: **screen-space AR glasses layer**, not world-space panels (user: "think about
-  them as AR glasses layer on top of the world").
+- Menus: **a neural-implant layer** on top of the visual field (user revision of the
+  earlier "AR glasses" idea): screen-space panels, not world-space panels.
+  - Its own **synaptic hue**.
+  - All four perception effects: **salience**, **saccadic dip**, **heartbeat**,
+    **afterimage**.
+  - The full **handshake at first launch only**; short form and dissolve afterwards.
 - Game end: pieces **wave out, the winning king last** (M23.12 §2).
 - Themes: **manifold first.** The console theme keeps the M23.11 menus and game
   backdrop until a later pass (`labScene` is forced off for it).
@@ -287,10 +395,10 @@ Each slice is test-first, captured, and committed on its own. Run everything thr
 | §1 | ADR-0026 text check, `LabScene` kit format + loader + procedural meshes, room layout v1 (static, no lights) | behind `labScene`, off by default |
 | §2 | Light list (≤ 8), per-slab glow light, room lights, focus-mode dim, wall fade | behind `labScene` |
 | §3 | Overture as 3-D hologram instances above the bench projector, 3-D overture picking | behind `labScene` |
-| §4 | Menu screens render the lab from station cameras; menu ↔ menu camera moves; AR panel lag; anchors | `labScene` default on |
+| §4 | Menu screens render the lab from station cameras; menu ↔ menu camera moves; implant composite (form/dissolve, afterimage, dip, heartbeat), synaptic hue, salience | `labScene` default on |
 | §5 | `rigXform`, slab hardware (masts, clamps, magazine), deploy/stow paths, menu → game and game → menu moves | yes |
 | §6 | Layout-driven gantry for multi-slab variants, quarter-size tiles, `rigScale` easing, 5D timeline slab arrival | yes |
-| §7 | Geometry view as the gantry projector's hologram, slabs retracting; first-launch power-on; glasses-edge vignette | yes |
+| §7 | Geometry view as the gantry projector's hologram, slabs retracting; first-launch wake-up (eyes opening, two blinks, defocus clearing) and the implant handshake | yes |
 | §8 | Remove `DepthField`/grid floor/screen-space backdrop from manifold menus; contact sheets; perf note | yes |
 
 ### §1 Lab kit and room v1
@@ -342,16 +450,27 @@ Each slice is test-first, captured, and committed on its own. Run everything thr
 
 ### §4 Stations and menu moves
 
-- `view::rig_stations`, `RigMove`, `rigEase`, AR lag spring, anchors with leader lines
-  and reticles.
+- `view::rig_stations`, `RigMove`, `rigEase`.
+- The implant layer: UI into an offscreen target, `ImplantComposite` + `implant.frag`,
+  panel records with enter/leave ages, afterimage, saccadic dip from camera angular
+  speed, heartbeat.
+- Synaptic theme tokens for the manifold HUD and menus.
+- Lab-part `salience` with the rim in the board shader.
+- The M23.11 trace-on is retired for panels on the lab path (kept with `--lab 0`).
 - `main.cpp` renders the lab for every non-editor screen.
 - **Debug access:**
   - `transition <from> <to>` now flies the camera;
   - `station <name>` jumps there;
   - CLI `--from/--transition-t` unchanged;
-  - `--ar-lag 0`.
+  - `implant [on|off]` and `get`/`set implantFx`;
+  - CLI `--implant 0|1`, and `--panel-t <s>` to pin every panel's form/dissolve age;
+  - `salience <part>|off` pins a salience target.
 - **Tests:**
   - pure pose interpolation (endpoints exact, monotonic arc length);
+  - the implant composite with sync 1 and no records is byte-identical to the plain UI;
+  - form at `--panel-t` 0.1 differs, at 0.35 it equals the plain UI;
+  - the dip is 0 during game orbit and the pull-back;
+  - the heartbeat and afterimage are absent at calm;
   - a capture at the move's end is byte-identical to the station's plain capture;
   - calm is a cross-fade;
   - existing `gui-screen-transition` is pinned to `--lab 0`.
@@ -384,9 +503,19 @@ Each slice is test-first, captured, and committed on its own. Run everything thr
 ### §7 Geometry view, first launch, lens
 
 - The gantry ceiling projector, slabs retracting in the geometry view, first-launch
-  power-on, glasses-edge vignette and fringe.
+  power-on with the implant handshake (phosphenes, log-polar ring wave, curl-noise colour
+  separation converging onto the menu).
+- The wake-up (see "First launch: waking up"): `view::wakeState`, eyelid regions and
+  defocus in the post composite.
+- CLI `--handshake-t <s>` pins the handshake age; `--wake-t <s>` pins the wake-up age.
 - **Debug access:**
-  - console `poweron` replays the launch;
+  - console `poweron` replays the launch, and `wake` replays the wake-up alone;
+  - pure tests for `wakeState`:
+    - lids closed at 0, at 1.95 s and at 2.65 s;
+    - fully open and blur 0 after 3.0 s;
+    - the upper lid's travel is greater than the lower's;
+    - calm has no blink;
+  - a capture at the middle of a blink has black rows at the top and bottom;
   - CLI `--launch-t <s>`.
 - **Tests:** captures; existing geometry-view tests pinned to `--lab 0` where their
   framing changes.
