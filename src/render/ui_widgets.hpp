@@ -180,14 +180,15 @@ bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* l
 /// here, so an arriving screen can grow from small while a departing one swells and
 /// fades, and the two moves can be exact reverses of each other. `remember` is false for
 /// a departing ghost: its scaled measurement must not become the height the settled pane
-/// is later centred from.
+/// is later centred from. With `fadeFinished`, layout runs at full alpha and endPane
+/// fades all finished vertices, including custom chrome and child windows (Station).
 void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
-               float pad, bool remember = true);
+               float pad, bool remember = true, bool fadeFinished = false);
 void endPane();
 /// Frame the pane just begun in the screen panel, around its measured content (the last
-/// frame's height; nothing on the first), kept `8 * scale` inside the limits. Call between
-/// beginPane and the content, so the content draws over it and the pane's transition
-/// scales it with the rest.
+/// frame's height; nothing on the first), kept `8 * scale` inside the limits. Call
+/// between beginPane and the content, so the content draws over it and the pane's
+/// transition scales it with the rest.
 void paneFrame(const view::Theme& theme, float scale, ImVec2 limitMin, ImVec2 limitMax,
                float draw = 1.0f, float level = 1.0f);
 

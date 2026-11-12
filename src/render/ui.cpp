@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "render/ui.hpp"
+#include "render/lab_scene.hpp"
+#include "view/rig_move.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -904,7 +906,7 @@ void Ui::tick(float dt) {
   // travelled anywhere.
   // The new screen moves (section 6) run on the same clock at their own rate: their
   // length in seconds is the whole clock.
-  const float seconds = app::moveSeconds(move_, intensity_);
+  const float seconds = currentMoveSeconds();
   if (pinnedMoveAge_ && seconds > 0.0f) {
     enter_ = std::clamp(*pinnedMoveAge_ / seconds, 0.0f, 1.0f);
   } else if (enter_ < 1.0f) {
@@ -913,7 +915,63 @@ void Ui::tick(float dt) {
 }
 
 app::MoveFx Ui::moveFx() const noexcept {
-  return app::moveFx(move_, enter_ * app::moveSeconds(move_, intensity_), intensity_);
+  return app::moveFx(move_, enter_ * currentMoveSeconds(), intensity_,
+                     currentMoveSeconds());
+}
+
+float Ui::currentMoveSeconds() const noexcept {
+  if (move_ == app::ScreenMove::Station && intensity_ >= .5f) return stationSeconds_;
+  return app::moveSeconds(move_, intensity_);
+}
+
+bool Ui::paneInteractive() const noexcept {
+  return !ghosting_ && (move_ != app::ScreenMove::Station || moveFx().arriveAlpha > .5f);
+}
+
+std::optional<view::OrbitCamera> Ui::labCamera() const {
+  if (!labBackdrop_) return std::nullopt;
+  if (move_ == app::ScreenMove::Station && intensity_ >= .5f && fromCam_ && toCam_) {
+    if (enter_ >= 1) return toCam_;
+    return view::blendCamera(*fromCam_, *toCam_, view::rigEase(enter_));
+  }
+  return toCam_;
+}
+
+float Ui::salience(std::string_view focus) const {
+  if (!labBackdrop_ || focus.empty()) return 0;
+  if (!console_.saliencePin().empty()) return focus == console_.saliencePin() ? 1.f : 0.f;
+  if (!focusFor_ || currentScreen_ < 0) return 0;
+  const auto arriving = focusFor_(static_cast<app::Screen>(currentScreen_));
+  if (move_ != app::ScreenMove::Station || enter_ >= 1)
+    return focus == arriving ? 1.f : 0.f;
+  const auto leaving = focusFor_(static_cast<app::Screen>(leavingScreen_));
+  if (arriving == leaving) return focus == arriving ? 1.f : 0.f;
+  const float age = enter_ * currentMoveSeconds();
+  float value = 0;
+  if (focus == leaving) value = 1 - smoothstep(age / .3f);
+  if (focus == arriving) value = smoothstep((age - .5f * currentMoveSeconds()) / .3f);
+  return value;
+}
+
+HologramRequest Ui::hologramRequest() const {
+  auto out = hologramRequest_;
+  if (move_ != app::ScreenMove::Station || intensity_ < .5f || enter_ >= 1) return out;
+  if (out.kind == leavingHologram_.kind &&
+      (out.kind != HologramRequest::Overture || leavingVariant_ == pickedVariant_))
+    return out;
+  if (enter_ < .4f) {
+    out = leavingHologram_;
+    out.seconds = clock_;
+    out.scale = out.alpha = 1 - smoothstep(enter_ / .4f);
+    out.squashZ = out.scale * out.scale;
+  } else if (enter_ < .5f) {
+    out.kind = HologramRequest::None;
+    out.scale = out.alpha = out.squashZ = 0;
+  } else {
+    out.scale = out.alpha = smoothstep((enter_ - .5f) / .5f);
+    out.squashZ = out.scale;
+  }
+  return out;
 }
 
 void Ui::newFrame() {
@@ -1499,7 +1557,10 @@ void Ui::drawGhost(app::Shell& shell) {
     // Only the moves that take a panel away leave one to draw: the menu off to the game,
     // the pause panel off to the game.
     const app::MoveFx fx = moveFx();
-    if (fx.done || fx.leaveAlpha <= 0.0f || !isMenuScreen(leaving)) return;
+    if (fx.done || fx.leaveAlpha <= 0.0f ||
+        (!isMenuScreen(leaving) &&
+         !(move_ == app::ScreenMove::Station && leaving == app::Screen::Welcome)))
+      return;
   }
   // Disabled while it is drawn: a departing screen must be seen but not touched. Its
   // request is discarded too, so re-running its build can neither start a game nor
@@ -1507,6 +1568,9 @@ void Ui::drawGhost(app::Shell& shell) {
   ghosting_ = true;
   ImGui::BeginDisabled();
   switch (leaving) {
+    case app::Screen::Welcome:
+      (void)buildWelcome(shell);
+      break;
     case app::Screen::MainMenu:
       (void)buildMainMenu(shell);
       break;
@@ -1600,7 +1664,6 @@ void Ui::drawDebugConsole(app::Shell& shell) {
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
   seamHover_.reset();
-  hologramRequest_ = {};
   const widgets::ScopedVisualTime visualTime(visualTime_);
   updateKeyboardNavigation(shell);
   // Start the frame with an empty field list. Only the board screen fills it; every other
@@ -1610,6 +1673,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   // transition. The caller records this pass, so drawing only the look here is what keeps
   // the furniture out while still compositing the grade and vignette over the board.
   if (cinema_) {
+    hologramRequest_ = {};
     drawCinemaLook();
     return UiRequest{};
   }
@@ -1622,13 +1686,59 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   // the one drawn last.
   const bool previewed = shell.transitionSerial() != lastTransitionSerial_;
   if (screen != lastScreen_ || previewed) {
+    const auto currentCamera = labCamera();
+    const bool interrupted = move_ == app::ScreenMove::Station && enter_ < 1;
+    leavingHologram_ = hologramRequest();
+    overtureLeaving_ = overtureCache_;
+    leavingVariant_ = pickedVariant_;
     if (previewed) {
       lastTransitionSerial_ = shell.transitionSerial();
       lastScreen_ = static_cast<int>(shell.transitionFrom());
+      leavingHologram_ = {};
+      leavingHologram_.seconds = clock_;
+      leavingHologram_.yaw = objectYaw_;
+      if (shell.transitionFrom() == app::Screen::NewGame) {
+        refreshOvertureCache(shell);
+        overtureLeaving_ = overtureCache_;
+        leavingHologram_.kind = HologramRequest::Overture;
+      } else {
+        switch (decoForScreen(lastScreen_, false)) {
+          case Deco::Manifold:
+            leavingHologram_.kind = HologramRequest::Manifold;
+            break;
+          case Deco::Tesseract:
+            leavingHologram_.kind = HologramRequest::Tesseract;
+            break;
+          default:
+            break;
+        }
+      }
     }
     move_ = lastScreen_ < 0 ? app::ScreenMove::Cut
                             : app::classifyMove(static_cast<app::Screen>(lastScreen_),
                                                 shell.screen());
+    labLeaving_ = labLast_;
+    if (previewed && stationCamera_ && lastScreen_ >= 0) {
+      const auto from = static_cast<app::Screen>(lastScreen_);
+      labLeaving_ = labBackdrop_ && from != app::Screen::Editor &&
+                    from != app::Screen::Game && from != app::Screen::Paused &&
+                    from != app::Screen::PauseQuitConfirm &&
+                    stationCamera_(from).has_value();
+    }
+    const bool arrivingLab =
+        labBackdrop_ && !shell.showsBoard() && shell.screen() != app::Screen::Editor;
+    toCam_ =
+        arrivingLab && stationCamera_ ? stationCamera_(shell.screen()) : std::nullopt;
+    if (move_ == app::ScreenMove::Cut && labLeaving_ && arrivingLab && stationCamera_ &&
+        lastScreen_ >= 0) {
+      fromCam_ = interrupted && currentCamera
+                     ? currentCamera
+                     : stationCamera_(static_cast<app::Screen>(lastScreen_));
+      if (fromCam_ && toCam_) {
+        move_ = app::ScreenMove::Station;
+        stationSeconds_ = view::rigMoveSeconds(*fromCam_, *toCam_, 1 / kCellsPerMetre);
+      }
+    }
     const bool deeper = lastScreen_ < 0 ||
                         goesDeeper(static_cast<app::Screen>(lastScreen_), shell.screen());
     // Going in, the field rushes towards and past the viewer; coming back it recedes.
@@ -1640,7 +1750,9 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     leaving_ = lastScreen_ >= 0 ? decoForScreen(lastScreen_) : Deco::None;
     leavingScreen_ = lastScreen_;
     deeper_ = deeper;
-    enter_ = 0.0f;
+    enter_ = pinnedMoveAge_ && currentMoveSeconds() > 0
+                 ? std::clamp(*pinnedMoveAge_ / currentMoveSeconds(), 0.f, 1.f)
+                 : 0.f;
     lastScreen_ = screen;
     // The library always opens on standard. It is the board every overture departs from,
     // so it is the one that makes the next choice legible - and reopening on whatever
@@ -1657,6 +1769,8 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     }
   }
 
+  labLast_ = labBackdrop_ && !shell.showsBoard() && shell.screen() != app::Screen::Editor;
+  hologramRequest_ = {};
   // The departing menu first, so the arriving one is drawn over it.
   drawGhost(shell);
 
@@ -1672,6 +1786,8 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   }
 
   UiRequest request;
+  const bool waiting = move_ == app::ScreenMove::Station && !paneInteractive();
+  if (waiting) ImGui::BeginDisabled();
   switch (shell.screen()) {
     case app::Screen::Welcome:
       request = buildWelcome(shell);
@@ -1710,6 +1826,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
       request = buildGameHud(shell, fps);
       break;
   }
+  if (waiting) ImGui::EndDisabled();
   drawCheckEdges(shell);
   // An action may have closed a modal or changed screens. Prepare navigation before
   // the next NewFrame processes queued Tab/Space events with the new ownership.

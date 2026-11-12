@@ -9,6 +9,7 @@
 #include "render/lab_scene.hpp"
 #include "render/vulkan_context.hpp"
 #include "support/variants.hpp"
+#include "view/rig_move.hpp"
 #ifdef CB_HAVE_IMGUI
 #include <SDL3/SDL.h>
 #include "app/shell.hpp"
@@ -250,5 +251,53 @@ TEST_CASE("every lab station renders a nonuniform room", "[render][lab]") {
       CHECK(std::sqrt(sq / count - (sum / count) * (sum / count)) > 2);
     }
   CHECK(ctx->takeValidationMessages().empty());
+}
+TEST_CASE("salience marks only authored focus parts with positive material payload",
+          "[unit][render][rig]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  std::vector<std::uint32_t> ranges(lab->fileMeshes().size());
+  std::iota(ranges.begin(), ranges.end(), 0);
+  lab->setFileRanges(ranges);
+  InstanceSet set;
+  lab->appendTo(set, view::Theme::manifold(),
+                [](std::string_view focus) { return focus == "projector" ? .75f : 0.f; });
+  std::size_t marked = 0, authored = 0;
+  for (const auto& p : doc->parts)
+    if (p.focus == "projector") ++authored;
+  REQUIRE(authored == 4);
+  for (const auto& i : set.lab)
+    if (i.panelSignal[2] > 0) {
+      ++marked;
+      CHECK(i.panelSignal[2] == .75f);
+    }
+  CHECK(marked == authored);
+  lab->appendTo(set, view::Theme::manifold());
+  for (const auto& i : set.lab) CHECK(i.panelSignal[2] == 0);
+}
+TEST_CASE("menu station flights keep their eyes within the room", "[unit][render][rig]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto centre = *doc->anchor("gantry.centre");
+  for (const auto from : {"menu", "library", "watch", "tutorial", "settings", "quit"})
+    for (const auto to : {"menu", "library", "watch", "tutorial", "settings", "quit"}) {
+      CAPTURE(from, to);
+      const auto a = *lab->station(from), b = *lab->station(to);
+      for (int i = 0; i <= 100; ++i) {
+        const auto camera =
+            view::blendCamera(a, b, view::rigEase(static_cast<float>(i) / 100));
+        const auto eye = camera.eye() * (1 / kCellsPerMetre) +
+                         view::Vec3{centre[0], centre[1], centre[2]};
+        CAPTURE(i, eye.x, eye.y, eye.z);
+        CHECK(std::abs(eye.x) < 2.5f);
+        CHECK(std::abs(eye.y) < 3.f);
+        CHECK(eye.z > 0);
+        CHECK(eye.z < 2.7f);
+      }
+    }
 }
 #endif

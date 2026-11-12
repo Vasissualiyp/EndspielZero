@@ -51,6 +51,7 @@ group = "room"
 # The roller door faces +Y into the room.
 [[part]]
 name = "door.panel"
+focus = "door"
 mesh = "file:models/door_roller.obj"
 pos = [0, -3.02, 0]
 size = [1, 1, 1]
@@ -168,6 +169,7 @@ group = "room"
 
 [[part]]
 name = "bench.top"
+focus = "bench"
 mesh = "bevel"
 pos = [-0.3, 2.65, 0.9]
 size = [3, 0.7, 0.05]
@@ -230,6 +232,7 @@ ao = 0.12
 # top at the unchanged projector.lens anchor (0.94 + 0.075 = 1.015 m).
 [[part]]
 name = "projector.base"
+focus = "projector"
 mesh = "cylinder"
 pos = [-0.6, 2.62, 0.9325]
 size = [0.22, 0.22, 0.015]
@@ -240,6 +243,7 @@ ao = 0.12
 
 [[part]]
 name = "projector.body"
+focus = "projector"
 mesh = "file:models/projector_body.obj"
 pos = [-0.6, 2.62, 0.94]
 size = [1, 1, 1]
@@ -249,6 +253,7 @@ group = "bench"
 
 [[part]]
 name = "projector.lens"
+focus = "projector"
 mesh = "file:models/projector_lens.obj"
 pos = [-0.6, 2.62, 0.94]
 size = [1, 1, 1]
@@ -258,6 +263,7 @@ group = "bench"
 
 [[part]]
 name = "projector.leds"
+focus = "projector"
 mesh = "file:models/projector_leds.obj"
 pos = [-0.6, 2.62, 0.94]
 size = [1, 1, 1]
@@ -331,6 +337,7 @@ group = "bench"
 # The cassette back is flush to the right wall, front toward -X.
 [[part]]
 name = "magazine.frame"
+focus = "magazine"
 mesh = "file:models/magazine.obj"
 pos = [2.5, 1.8, 0.75]
 size = [1, 1, 1]
@@ -342,6 +349,7 @@ group = "rig"
 # depth fits the cassette; their 0.03 m thickness fits the authored slot guides.
 [[part]]
 name = "magazine.slab.0"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 1.415, 1.3]
 size = [0.42, 0.22, 0.03]
@@ -353,6 +361,7 @@ ao = 0.1
 
 [[part]]
 name = "magazine.bayleds"
+focus = "magazine"
 mesh = "file:models/magazine_leds.obj"
 pos = [2.5, 1.8, 0.75]
 size = [1, 1, 1]
@@ -362,6 +371,7 @@ group = "rig"
 
 [[part]]
 name = "magazine.slab.1"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 1.525, 1.3]
 size = [0.42, 0.22, 0.03]
@@ -373,6 +383,7 @@ ao = 0.1
 
 [[part]]
 name = "magazine.slab.2"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 1.635, 1.3]
 size = [0.42, 0.22, 0.03]
@@ -384,6 +395,7 @@ ao = 0.1
 
 [[part]]
 name = "magazine.slab.3"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 1.745, 1.3]
 size = [0.42, 0.22, 0.03]
@@ -395,6 +407,7 @@ ao = 0.1
 
 [[part]]
 name = "magazine.slab.4"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 1.855, 1.3]
 size = [0.42, 0.22, 0.03]
@@ -406,6 +419,7 @@ ao = 0.1
 
 [[part]]
 name = "magazine.slab.5"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 1.965, 1.3]
 size = [0.42, 0.22, 0.03]
@@ -417,6 +431,7 @@ ao = 0.1
 
 [[part]]
 name = "magazine.slab.6"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 2.075, 1.3]
 size = [0.42, 0.22, 0.03]
@@ -428,6 +443,7 @@ ao = 0.1
 
 [[part]]
 name = "magazine.slab.7"
+focus = "magazine"
 mesh = "slab"
 pos = [2.37, 2.185, 1.3]
 size = [0.42, 0.22, 0.03]

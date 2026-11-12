@@ -117,13 +117,14 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
           r.bad(item, "invalid name");
         if (!names.insert(p.name).second) r.bad(item, "duplicate name");
         r.keys(*t, {"name", "mesh", "pos", "size", "rot", "material", "color", "ao",
-                    "group", "fallback"});
+                    "group", "fallback", "focus"});
         p.mesh = r.mesh(r.need(*t, "mesh"));
         p.pos = r.triple(r.need(*t, "pos"));
         p.size = r.triple(r.need(*t, "size"));
         for (float s : p.size)
           if (s <= 0) r.bad(r.need(*t, "size"), "size must be positive");
         if (auto* v = t->get("rot")) p.rot = r.triple(*v);
+        if (auto* v = t->get("focus")) p.focus = r.string(*v);
         if (auto* v = t->get("ao")) {
           p.ao = r.number(*v);
           if (p.ao < 0 || p.ao > 1) r.bad(*v, "ao outside 0..1");

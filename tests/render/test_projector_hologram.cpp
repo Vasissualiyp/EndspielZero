@@ -72,6 +72,21 @@ TEST_CASE("library projector keeps a1 on the near left corner",
   CHECK(view::length(a1 - camera.eye()) < view::length(a8 - camera.eye()));
 }
 
+TEST_CASE("projector collapse squashes world Z about its lens", "[unit][render][rig]") {
+  const auto theme = view::Theme::manifold();
+  HologramPlacement at{{1, 2, 12}, 4, .4f, 1, 1};
+  at.lens = {1, 2, 5};
+  const auto original = tesseractHologram(0, theme, at);
+  at.squashZ = .25f;
+  const auto squashed = tesseractHologram(0, theme, at);
+  REQUIRE(original.lines.size() == squashed.lines.size());
+  for (std::size_t i = 0; i < original.lines.size(); ++i) {
+    CHECK(squashed.lines[i].center[0] == original.lines[i].center[0]);
+    CHECK(squashed.lines[i].center[1] == original.lines[i].center[1]);
+    CHECK(squashed.lines[i].center[2] ==
+          Catch::Approx(5 + (original.lines[i].center[2] - 5) * .25f));
+  }
+}
 TEST_CASE("projector basis quaternions rotate local axes without reflection",
           "[unit][render][hologram]") {
   CHECK(quatFromBasis({1, 0, 0}, {0, 1, 0}, {0, 0, 1}) ==

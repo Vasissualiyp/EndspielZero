@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <functional>
 #include "io/lab_doc.hpp"
 #include "io/obj_mesh.hpp"
 #include "render/board_renderer.hpp"
@@ -13,7 +14,8 @@ class LabScene {
   static Result<LabScene> create(io::LabDoc doc);
   [[nodiscard]] view::Vec3 toWorld(std::array<float, 3> metres) const noexcept;
   [[nodiscard]] std::optional<view::OrbitCamera> station(std::string_view name) const;
-  void appendTo(InstanceSet& set, const view::Theme& theme) const;
+  void appendTo(InstanceSet& set, const view::Theme& theme,
+                const std::function<float(std::string_view)>& salience = {}) const;
   [[nodiscard]] const io::LabDoc& doc() const noexcept { return doc_; }
   [[nodiscard]] const std::vector<io::ObjMesh>& fileMeshes() const noexcept {
     return fileMeshes_;

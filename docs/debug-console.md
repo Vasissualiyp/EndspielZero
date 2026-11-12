@@ -22,11 +22,13 @@ walk the command history. `help` (or `?`) prints the command list from
 |---|---|
 | `load <variant>` | Start a variant from `variants/` |
 | `goto <screen>` | Switch to `menu`, `game`, `paused`, `settings`, `editor`, `newgame` or `welcome` |
-| `transition <from> <to>` | Preview a screen move (M23.11 section 6) as if arriving from `<from>`: `menu`, `newgame`, `watch`, `game` or `paused`. `menu`/`newgame`/`watch` to `game` traces the menu off, `game` to `paused` traces the pause panel on, `paused` to `game` traces it off, `game`/`paused` to `menu` powers the board down for 0.8 s then traces the menu on. Any key or click skips it; at calm intensity it is one 0.3 s cross-fade |
+| `transition <from> <to>` | Preview a screen move (M23.11 section 6) as if arriving from `<from>`: `menu`, `newgame`, `watch`, `welcome`, `settings`, `quit`, `info`, `pieces`, `game` or `paused`. `menu`/`newgame`/`watch` to `game` traces the menu off, `game` to `paused` traces the pause panel on, `paused` to `game` traces it off, `game`/`paused` to `menu` powers the board down for 0.8 s then traces the menu on. With the lab on, menu-to-menu changes fly between their camera stations over 0.6–1.1 s, collapse/grow the projector subject, and transfer object salience. Any key or click skips it; at calm intensity it is one 0.3 s cross-fade |
 | `get [<setting>]` | Print all settings, or one |
 | `set <setting> <value>` | Change one setting. The value goes through the settings-file parser, so it accepts the same syntax as the file |
 | `post [on\|off]` | Turn post-processing (HDR scene, emissive bloom, tone map, grain/dither; ADR-0025) on or off; no argument toggles it. Default on; works without a loaded game. Also `get`/`set postProcess` or `post_process`, and `bloomScale` or `bloom_scale` (finite, clamped to 0..4, multiplies the theme's bloom; 0 skips the bloom passes) |
 | `get`/`set presentationIntensity` | The board's presentation intensity (`presentation_intensity`, persisted, clamped to 0..1, default 1): the glitches, the boot sweep, the check ripple and the end power-down. Below one half every effect takes its calm form |
+| `station <name>\|off` | Pin the lab camera to a loaded station; `off` restores the screen station and camera flight. `--station` takes precedence for captures |
+| `salience <focus>\|off` | Pin one lab object focus at full glow: `projector`, `magazine`, `bench`, `door`, or an authored focus name; `off` restores screen-driven easing |
 | `lights` | List the loaded lab lights with kind, position in metres, radius, authored intensity and group; prints `lab is off` when disabled; needs no game |
 | `get`/`set roomLight` | Practical room-light gain (`room_light`, persisted, finite 0..2, default 1); machine lights keep their authored intensity |
 | `projector [on\|off]` | Toggle the bench hologram; works without a game. Also `get`/`set projector` (persisted, default on) |
@@ -86,7 +88,7 @@ groups:
 - **What to show:**
   - `--screen <name>` picks the screen (`pausequit` is the pause menu's quit prompt).
   - `--from <screen> --transition-t <s>` renders the screen move from `menu`, `newgame`, `watch`,
-    `game`, `pause` or `welcome` to `--screen`, `s` seconds into it (M23.11 section 6; past the
+    `game`, `pause`, `welcome`, `settings`, `quit`, `info` or `pieces` to `--screen`, `s` seconds into it (M23.11 section 6; past the
     move's end it is exactly the plain frame). `--presentation <0..1>` sets the presentation
     intensity for the run, so `--presentation 0` shows the calm cross-fade. Example:
     `--screen menu --from pause --transition-t 0.4` (the board powering down).
@@ -109,6 +111,9 @@ groups:
       including with saved settings; use `--lab 1` to opt in.
     - `--station <name>` requires `--lab 1` and shows the room from a named station
       regardless of screen: menu, tutorial, library, watch, settings, quit or sky (looks up through the skylight).
+    - Console `station <name>|off` pins a station; `salience <focus>|off` pins its object glow.
+      Menu screen changes fly between stations. `--from <screen> --transition-t <seconds>`
+      previews the flight; with `--clip`, `--t0`/`--t1` sweep transition age per frame.
     - `--projector 0|1` overrides the bench hologram for this run. The menu and
       tutorial project the manifold; Settings projects a tesseract; Library projects
       the selected overture. Drag on the left to turn it about vertical; lab drag

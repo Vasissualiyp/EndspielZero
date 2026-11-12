@@ -57,7 +57,9 @@ struct Mapping {
   float yaw;
   const HologramPlacement& at;
   Vec3 point(Vec3 p) const {
-    return at.centre + direction(p - centre) * (at.radius * at.scale / reach);
+    auto world = at.centre + direction(p - centre) * (at.radius * at.scale / reach);
+    if (at.squashZ != 1) world.z = at.lens.z + (world.z - at.lens.z) * at.squashZ;
+    return world;
   }
   Vec3 direction(Vec3 p) const { return turn(axes(p), yaw); }
 };
@@ -269,7 +271,8 @@ Hologram tesseractHologram(float seconds, const view::Theme& theme,
 }
 Instance projectorBeam(view::Vec3 lens, const HologramPlacement& at,
                        const view::Theme& theme) {
-  const Vec3 base{at.centre.x, at.centre.y, at.centre.z - at.radius};
+  Vec3 base{at.centre.x, at.centre.y, at.centre.z - at.radius};
+  if (at.squashZ != 1) base.z = lens.z + (base.z - lens.z) * at.squashZ;
   return line(lens, base, .10f * kCellsPerMetre, theme.ember, .12f * at.alpha);
 }
 }  // namespace cb::render

@@ -10,6 +10,8 @@ namespace cb::app {
 /// the shell's one transition clock (`Ui::enter_`, which only runs at a different rate
 /// per move: there is no second clock).
 enum class ScreenMove : std::uint8_t {
+  Station,     ///< both screens are lab menu screens: the camera flies between their
+               ///< stations (M24.4a)
   Cut,         ///< any other change: the old menu pane move
   MenuToGame,  ///< New game, Continue, load, Watch: the menu traces off, the boot follows
   GameToPause,  ///< the pause panel traces on over the blur
@@ -42,6 +44,9 @@ struct MoveFx {
   bool done{true};
 };
 [[nodiscard]] MoveFx moveFx(ScreenMove move, float age, float intensity) noexcept;
+
+[[nodiscard]] MoveFx moveFx(ScreenMove move, float age, float intensity,
+                            float seconds) noexcept;
 
 /// The age on the end power-down's own timeline (`view::powerDown`) that a move's
 /// `powerDown` progress stands for: the decisive look with no hold, compressed.

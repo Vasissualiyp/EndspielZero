@@ -20,6 +20,8 @@ struct HologramPlacement {
   float yaw{0};
   float alpha{1};
   float scale{1};
+  float squashZ{1};
+  view::Vec3 lens{};
 };
 /// Columns of a right-handed orthonormal frame; quaternion order is x,y,z,w.
 [[nodiscard]] std::array<float, 4> quatFromBasis(view::Vec3 t, view::Vec3 b,

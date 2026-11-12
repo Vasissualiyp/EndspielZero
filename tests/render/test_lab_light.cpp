@@ -211,4 +211,69 @@ TEST_CASE("GPU skylight contains stars above three times its sky base",
   }
   CHECK(ctx->takeValidationMessages().empty());
 }
+TEST_CASE("GPU salience affects only the focused projector rectangle", "[render][rig]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx);
+  {
+    auto renderer = BoardRenderer::create(*ctx);
+    REQUIRE(renderer);
+    auto target = OffscreenTarget::create(*ctx, 640, 360);
+    REQUIRE(target);
+    renderer->setTheme(view::Theme::manifold());
+    BoardOptions options;
+    options.labMode = true;
+    renderer->setOptions(options);
+    auto block = labLightBlock(*doc, *lab, 1, kLabKey);
+    CHECK(block.implant[0] == renderer->theme().implant.r);
+    CHECK(neutralLightBlock().implant[0] == 0);
+    renderer->setLights(block);
+    lab->setFileRanges(renderer->addLabMeshes(lab->fileMeshes()));
+    InstanceSet set;
+    const auto camera = *lab->station("menu");
+    const auto render = [&](float sal) {
+      lab->appendTo(set, renderer->theme(), [&](std::string_view focus) {
+        return focus == "projector" ? sal : 0.f;
+      });
+      REQUIRE(renderer->render(*target, set, camera));
+      auto pixels = target->readPixels();
+      REQUIRE(pixels);
+      return *pixels;
+    };
+    const auto off = render(0), on = render(1);
+    CHECK(on != off);
+    // All projector parts fit in this authored 40cm cube; double its projected
+    // half-extents for the same bloom margin as the M24.3 locality test.
+    auto lens = *doc->anchor("projector.lens");
+    const auto centre = lab->toWorld(lens);
+    float x0 = 640, y0 = 360, x1 = 0, y1 = 0;
+    for (float x : {-4.f, 4.f})
+      for (float y : {-4.f, 4.f})
+        for (float z : {-4.f, 4.f}) {
+          const auto p =
+              camera.project(centre + view::Vec3{x, y, z}, 640.f / 360, 640, 360);
+          x0 = std::min(x0, p.x);
+          x1 = std::max(x1, p.x);
+          y0 = std::min(y0, p.y);
+          y1 = std::max(y1, p.y);
+        }
+    std::size_t changed = 0, outside = 0;
+    for (int y = 0; y < 360; ++y)
+      for (int x = 0; x < 640; ++x) {
+        const auto i = static_cast<std::size_t>((y * 640 + x) * 4);
+        if (on[i] == off[i] && on[i + 1] == off[i + 1] && on[i + 2] == off[i + 2])
+          continue;
+        ++changed;
+        if (std::abs(static_cast<float>(x) - (x0 + x1) / 2) > x1 - x0 ||
+            std::abs(static_cast<float>(y) - (y0 + y1) / 2) > y1 - y0)
+          ++outside;
+      }
+    CHECK(changed > 20);
+    CHECK(outside == 0);
+  }
+  CHECK(ctx->takeValidationMessages().empty());
+}
 #endif

@@ -50,8 +50,8 @@ float menuPanePadding(const view::Theme& theme, ImVec2 min, ImVec2 max, float sc
 /// beginPane plus the screen panel behind its content (M23.11 section 5).
 void beginScreenPane(const view::Theme& theme, float scale, const char* id, ImVec2 min,
                      ImVec2 max, float transitionScale, float alpha, float trace,
-                     float pad, bool remember) {
-  beginPane(id, min, max, transitionScale, alpha, pad, remember);
+                     float pad, bool remember, bool fadeFinished = false) {
+  beginPane(id, min, max, transitionScale, alpha, pad, remember, fadeFinished);
   paneFrame(theme, scale, min, max, trace);
 }
 
@@ -194,7 +194,8 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##mainmenu", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_),
+                  rememberPane(), move_ == app::ScreenMove::Station);
   screenTitle("ENDSPIELZERO", t, display, scale_, 2.4f);
   ImGui::Dummy(ImVec2(0, px(14)));
 
@@ -228,7 +229,8 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##watch", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_),
+                  rememberPane(), move_ == app::ScreenMove::Station);
   eyebrow("watch", t, mono, scale_);
   screenTitle("Watch a game", t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -313,7 +315,8 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
   ImGui::EndChild();
 
   ImGui::Dummy(ImVec2(0, px(10)));
-  const bool enter = !ghosting_ && !games.empty() && !ImGui::GetIO().WantTextInput &&
+  const bool enter = paneInteractive() && !games.empty() &&
+                     !ImGui::GetIO().WantTextInput &&
                      (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
   if (!games.empty() &&
@@ -355,7 +358,8 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##welcome", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_),
+                  rememberPane(), move_ == app::ScreenMove::Station);
   eyebrow("tutorial", t, mono, scale_);
   screenTitle("Start here", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -423,7 +427,8 @@ UiRequest Ui::buildQuitConfirm(app::Shell& shell) {
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##quitconfirm", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, px(46.0f), !ghosting_);
+                  move.trace, px(46.0f), rememberPane(),
+                  move_ == app::ScreenMove::Station);
   eyebrow("quit", t, mono, scale_);
   screenTitle("Are you sure?", t, display, scale_, 1.9f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -457,7 +462,8 @@ UiRequest Ui::buildPauseQuitConfirm(app::Shell& shell) {
   pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##pausequit", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, px(46.0f), !ghosting_);
+                  move.trace, px(46.0f), rememberPane(),
+                  move_ == app::ScreenMove::Station);
   eyebrow("quit", t, mono, scale_);
   screenTitle("Leave the game?", t, display, scale_, 1.9f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -511,7 +517,8 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   drawShellFrame(shell, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##newgame", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_),
+                  rememberPane(), move_ == app::ScreenMove::Station);
   eyebrow("new game", t, mono, scale_);
   screenTitle("Library", t, display, scale_, 2.2f);
   ImGui::Dummy(ImVec2(0, px(6)));
@@ -637,7 +644,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
   // Enter starts whatever the list has selected. The library is a list of things to
   // play, so the key that means "yes, this one" should work without reaching for the
   // mouse - and it is the only control here that needs no aim.
-  const bool enter = !ghosting_ && !ImGui::GetIO().WantTextInput &&
+  const bool enter = paneInteractive() && !ImGui::GetIO().WantTextInput &&
                      (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
   if (button("START", t, actions.first.x, true, false, true, actionFont()) || enter) {
@@ -668,7 +675,8 @@ UiRequest Ui::buildPause(app::Shell& shell) {
   pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##pause", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_),
+                  rememberPane(), move_ == app::ScreenMove::Station);
   eyebrow(shell.currentVariant().c_str(), t, mono, scale_);
   screenTitle("Paused", t, display, scale_, 1.8f);
   ImGui::Dummy(ImVec2(0, px(8)));
@@ -1168,7 +1176,8 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   }
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##settings", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_), !ghosting_);
+                  move.trace, menuPanePadding(t, menuMin, menuMax, scale_),
+                  rememberPane(), move_ == app::ScreenMove::Station);
   ImGui::PushFont(static_cast<ImFont*>(t.monoLabels ? fontLabel_ : fontBody_));
   eyebrow("settings", t, mono, scale_);
   screenTitle("Settings", t, display, scale_, 2.0f);
@@ -1517,7 +1526,8 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   pauseFrame(request, menuMin, menuMax);
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##gameinfo", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, px(46.0f), !ghosting_);
+                  move.trace, px(46.0f), rememberPane(),
+                  move_ == app::ScreenMove::Station);
   eyebrow("game mode", t, mono, scale_);
   screenTitle(v.name.c_str(), t, display, scale_, 2.0f);
   ImGui::Dummy(ImVec2(0, px(4)));
@@ -1716,7 +1726,8 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   // The right half is the menu: choose a piece, read its atoms.
   const PaneMove move = paneMove();
   beginScreenPane(t, scale_, "##pieces", menuMin, menuMax, move.scale, move.alpha,
-                  move.trace, px(46.0f), !ghosting_);
+                  move.trace, px(46.0f), rememberPane(),
+                  move_ == app::ScreenMove::Station);
   eyebrow("reference", t, mono, scale_);
   screenTitle("Piece moves", t, display, scale_, 1.9f);
   ImGui::PushFont(small);

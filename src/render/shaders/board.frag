@@ -205,6 +205,7 @@ layout(std140, set = 0, binding = 1) uniform LightBlock {
     vec4 header;
     vec4 softCos[2];
     Light lights[8];
+    vec4 implant;
 } lightBuf;
 
 void main() {
@@ -604,6 +605,12 @@ void main() {
         }
         sky += vec3(0.05, 0.03, 0.02) * smoothstep(0.2, -0.3, v.y);
         rgb = sky;
+    }
+    float sal = fragPanelSignal.z;
+    if (sal > 0.0 && (matId == 0 || matId == 1 || matId == 2 || matId == 3 || matId == 6)) {
+        float rim = pow(1.0 - abs(dot(n, normalize(push.eyePos.xyz - fragWorld))), 3.0);
+        rgb = mix(rgb, rgb * 1.25, 0.5 * sal);
+        rgb += lightBuf.implant.rgb * (0.10 + 0.55 * rim) * sal;
     }
     outColor = vec4(rgb, fragColor.a);
 }

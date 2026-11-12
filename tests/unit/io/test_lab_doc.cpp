@@ -315,3 +315,14 @@ color=[0.5,0.25,0.1]
   CHECK(d->lights[1].color.r == .5f);
   CHECK(d->lights[1].color.g == .25f);
 }
+
+TEST_CASE("lab focus is optional free text", "[unit][io][rig]") {
+  auto text = minimal;
+  auto d = io::parseLabDoc(text, "lab.toml");
+  REQUIRE(d);
+  CHECK(d->parts[0].focus.empty());
+  text.insert(text.find("[[station]]"), "focus = \"any object\"\n");
+  d = io::parseLabDoc(text, "lab.toml");
+  REQUIRE(d);
+  CHECK(d->parts[0].focus == "any object");
+}

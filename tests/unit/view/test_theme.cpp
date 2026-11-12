@@ -154,3 +154,8 @@ TEST_CASE("a palette is chosen by name, and an unknown name is the shipped one",
   // A settings file from a newer build, or a typo, still produces a usable palette.
   CHECK(themeFromName("tesseract").light == themeFromName("console").light);
 }
+
+TEST_CASE("implant hue is violet white in both themes", "[unit][view][rig]") {
+  for (const auto& theme : {Theme::console(), Theme::manifold()})
+    CHECK(theme.implant.array() == Rgba::hex(0xD9D2FF).array());
+}

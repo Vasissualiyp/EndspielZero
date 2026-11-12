@@ -481,4 +481,27 @@ TEST_CASE("the compact dock button keeps its ID in a shorter row",
   CHECK(ImGui::GetItemRectSize().y <= 27);
   ImGui::End();
 }
+TEST_CASE("station pane fades include custom chrome and child draw lists",
+          "[render][rig]") {
+  for (float alpha : {0.f, .5f, 1.f}) {
+    WidgetFrame frame(1);
+    render::widgets::beginPane("station-fade", ImVec2(0, 0), ImVec2(640, 360), 1, alpha,
+                               20, true, true);
+    auto* parent = ImGui::GetWindowDrawList();
+    const int parentFirst = parent->VtxBuffer.Size;
+    parent->AddRectFilled(ImVec2(30, 30), ImVec2(60, 60), IM_COL32_WHITE);
+    ImGui::TextUnformatted("measured even while invisible");
+    ImGui::BeginChild("child", ImVec2(100, 80));
+    auto* child = ImGui::GetWindowDrawList();
+    const int childFirst = child->VtxBuffer.Size;
+    child->AddRectFilled(ImVec2(40, 80), ImVec2(80, 100), IM_COL32_WHITE);
+    ImGui::EndChild();
+    render::widgets::endPane();
+    const auto expected = static_cast<ImU32>(255 * alpha + .5f);
+    CHECK(((parent->VtxBuffer[parentFirst].col & IM_COL32_A_MASK) >> IM_COL32_A_SHIFT) ==
+          expected);
+    CHECK(((child->VtxBuffer[childFirst].col & IM_COL32_A_MASK) >> IM_COL32_A_SHIFT) ==
+          expected);
+  }
+}
 #endif

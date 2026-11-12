@@ -95,3 +95,25 @@ TEST_CASE("a skip is an age past the end", "[transition]") {
   CHECK(fx.done);
   CHECK(fx.arriveAlpha == 1.0f);
 }
+
+TEST_CASE("station panels leave early arrive late and calm cross fades",
+          "[unit][app][rig]") {
+  CHECK(classifyMove(Screen::MainMenu, Screen::NewGame) == ScreenMove::Cut);
+  CHECK(moveSeconds(ScreenMove::Station, 0) == kCalmFadeSeconds);
+  const auto start = moveFx(ScreenMove::Station, 0, 1, .8f);
+  CHECK(start.leaveAlpha == 1);
+  CHECK(start.arriveAlpha == 0);
+  CHECK_FALSE(start.done);
+  const auto gap = moveFx(ScreenMove::Station, .4f, 1, .8f);
+  CHECK(gap.leaveAlpha == 0);
+  CHECK(gap.arriveAlpha == 0);
+  CHECK(gap.leaveTrace == 1);
+  CHECK(gap.arriveTrace == 1);
+  const auto late = moveFx(ScreenMove::Station, .7f, 1, .8f);
+  CHECK(late.arriveAlpha > .5f);
+  CHECK(late.arriveAlpha < 1);
+  CHECK(moveFx(ScreenMove::Station, .8f, 1, .8f).done);
+  const auto calm = moveFx(ScreenMove::Station, .15f, 0, kCalmFadeSeconds);
+  CHECK(calm.leaveAlpha == Approx(.5));
+  CHECK(calm.arriveAlpha == Approx(.5));
+}

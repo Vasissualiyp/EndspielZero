@@ -860,6 +860,10 @@ bool& currentPaneBuilt() {
 /// The transition scale a pane's finished drawing is transformed by at endPane, and the
 /// point it is transformed about. One pane is built at a time (a departing ghost first,
 /// then the arriving screen), so a single slot is enough.
+float& paneFinishedAlpha() {
+  static float alpha = -1;
+  return alpha;
+}
 float& paneTransitionScale() {
   static float k = 1.0f;
   return k;
@@ -872,7 +876,7 @@ ImVec2& paneTransitionCentre() {
 }  // namespace
 
 void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
-               float pad, bool remember) {
+               float pad, bool remember, bool fadeFinished) {
   const float k = std::max(0.05f, scale);
   const float a = std::clamp(alpha, 0.0f, 1.0f);
   const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
@@ -893,7 +897,10 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   ImGui::SetNextWindowPos(ImVec2(centre.x, centre.y + top), ImGuiCond_Always,
                           ImVec2(0.5f, 0.5f));
   ImGui::SetNextWindowSize(size);
-  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
+  // Stock text respects style alpha, custom chrome does not. Station panes fade
+  // their complete drawing once at endPane, while still measuring at alpha zero.
+  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, fadeFinished ? 1.f : a);
+  paneFinishedAlpha() = fadeFinished ? a : -1.f;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
   ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
@@ -963,6 +970,20 @@ void endPane() {
       r.z = std::clamp(c.x + (r.z - c.x) * k, viewport.x, viewport.z);
       r.w = std::clamp(c.y + (r.w - c.y) * k, viewport.y, viewport.w);
     }
+  }
+  const float alpha = paneFinishedAlpha();
+  if (alpha >= 0 && alpha < 1) {
+    const auto fade = [&](auto&& self, ImGuiWindow* window) -> void {
+      for (auto& vertex : window->DrawList->VtxBuffer) {
+        const auto oldAlpha = (vertex.col & IM_COL32_A_MASK) >> IM_COL32_A_SHIFT;
+        const auto newAlpha =
+            static_cast<ImU32>(static_cast<float>(oldAlpha) * alpha + .5f);
+        vertex.col = (vertex.col & ~IM_COL32_A_MASK) | (newAlpha << IM_COL32_A_SHIFT);
+      }
+      for (auto* child : window->DC.ChildWindows)
+        if (child->LastFrameActive == ImGui::GetFrameCount()) self(self, child);
+    };
+    fade(fade, ImGui::GetCurrentWindow());
   }
   ImGui::PopClipRect();
   ImGui::End();

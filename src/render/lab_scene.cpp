@@ -73,7 +73,8 @@ std::optional<view::OrbitCamera> LabScene::station(std::string_view name) const 
   c.farZ = 30 * kCellsPerMetre;
   return c;
 }
-void LabScene::appendTo(InstanceSet& set, const view::Theme& theme) const {
+void LabScene::appendTo(InstanceSet& set, const view::Theme& theme,
+                        const std::function<float(std::string_view)>& salience) const {
   (void)theme;  // Authored part colours/materials are independent of the theme.
   set.lab.clear();
   set.labBatches = {};
@@ -105,6 +106,8 @@ void LabScene::appendTo(InstanceSet& set, const view::Theme& theme) const {
         view::Material::Sky};
     i.material =
         shaderMaterial(materials[static_cast<std::size_t>(p.material)], Cut::Plank, 0);
+    if (salience && !p.focus.empty())
+      i.panelSignal[2] = std::clamp(salience(p.focus), 0.f, 1.f);
     // AO remains authored metadata: the LCD response contract requires this payload
     // to be inert on non-panel materials (M24.1 Step 3's permitted fallback).
     return i;

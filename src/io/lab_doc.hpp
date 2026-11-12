@@ -19,6 +19,7 @@ struct LabPart {
   LabMaterial material{LabMaterial::Matte};
   view::Rgba color{view::Rgba::hex(0x808080)};
   float ao{0};
+  std::string focus;
   std::string group{"room"};
 };
 struct LabLight {

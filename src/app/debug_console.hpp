@@ -32,12 +32,15 @@ class DebugConsole {
   }
   /// The GUI supplies the loaded document while the lab is enabled, otherwise null.
   void setLabDoc(const io::LabDoc* doc) noexcept { labDoc_ = doc; }
+  [[nodiscard]] std::string_view stationPin() const noexcept { return stationPin_; }
+  [[nodiscard]] std::string_view saliencePin() const noexcept { return saliencePin_; }
   void clearLog() { log_.clear(); }
 
   /// The help text: every command, one line each.
   [[nodiscard]] static std::string help();
 
  private:
+  std::string stationPin_, saliencePin_;
   const io::LabDoc* labDoc_{nullptr};
   std::vector<std::string> log_;
   std::vector<std::string> history_;

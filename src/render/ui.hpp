@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -33,6 +34,7 @@ struct HologramRequest {
   float yaw{0};
   float alpha{1};
   float scale{1};
+  float squashZ{1};
 };
 
 /// The window of the authoring plane an outline editor shows, in permille. The body's
@@ -202,8 +204,21 @@ class Ui {
   void setVisualTime(double seconds) noexcept;
   void setLabDoc(const io::LabDoc* doc) noexcept { console_.setLabDoc(doc); }
   void setLabBackdrop(bool enabled) noexcept { labBackdrop_ = enabled; }
-  [[nodiscard]] HologramRequest hologramRequest() const { return hologramRequest_; }
+  void setStationCamera(
+      std::function<std::optional<view::OrbitCamera>(app::Screen)> camera) {
+    stationCamera_ = std::move(camera);
+  }
+  void setFocusFor(std::function<std::string_view(app::Screen)> focus) {
+    focusFor_ = std::move(focus);
+  }
+  [[nodiscard]] std::optional<view::OrbitCamera> labCamera() const;
+  [[nodiscard]] float salience(std::string_view focus) const;
+  [[nodiscard]] std::string_view stationPin() const { return console_.stationPin(); }
+  [[nodiscard]] HologramRequest hologramRequest() const;
   [[nodiscard]] const OvertureScene* overtureScene() const {
+    if (move_ == app::ScreenMove::Station && intensity_ >= .5f && enter_ < .4f &&
+        leavingHologram_.kind == HologramRequest::Overture)
+      return &overtureLeaving_;
     return overtureCacheValid_ ? &overtureCache_ : nullptr;
   }
   /// The HUD panels' share of the board's presentation (M23.10 section 7): `draw` traces
@@ -258,7 +273,14 @@ class Ui {
   void recordBackground(VkCommandBuffer cmd, bool hdr = false);
 
  private:
-  bool labBackdrop_{false};
+  bool labBackdrop_{false}, labLast_{false}, labLeaving_{false};
+  std::function<std::optional<view::OrbitCamera>(app::Screen)> stationCamera_;
+  std::function<std::string_view(app::Screen)> focusFor_;
+  std::optional<view::OrbitCamera> fromCam_, toCam_;
+  float stationSeconds_{0.6f};
+  HologramRequest leavingHologram_{};
+  OvertureScene overtureLeaving_;
+  std::string leavingVariant_;
   HologramRequest hologramRequest_{};
   Ui() = default;
   bool forceDevOverlay_{false};
@@ -443,6 +465,11 @@ class Ui {
   std::optional<float> pinnedMoveAge_;
   std::uint32_t lastTransitionSerial_{0};
   [[nodiscard]] app::MoveFx moveFx() const noexcept;
+  [[nodiscard]] float currentMoveSeconds() const noexcept;
+  [[nodiscard]] bool paneInteractive() const noexcept;
+  [[nodiscard]] bool rememberPane() const noexcept {
+    return !ghosting_ || move_ == app::ScreenMove::Station;
+  }
   int lastScreen_{-1};
   /// Which piece the piece designer has selected. Editor state, not shell state: the
   /// document is what matters and it lives in the shell; which row is highlighted is a

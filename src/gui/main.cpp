@@ -95,16 +95,39 @@ std::string_view stationFor(app::Screen screen) {
 }
 
 #ifdef CB_HAVE_IMGUI
-bool appendProjector(const render::Ui& ui, const app::Settings& settings,
-                     render::InstanceSet& instances, const view::Theme& theme) {
-  if (!(gProjector >= 0 ? gProjector == 1 : settings.projector)) return false;
+std::string_view focusFor(app::Screen screen) {
+  switch (screen) {
+    case app::Screen::MainMenu:
+    case app::Screen::Welcome:
+    case app::Screen::Watch:
+      return "projector";
+    case app::Screen::NewGame:
+      return "magazine";
+    case app::Screen::Settings:
+    case app::Screen::GameInfo:
+    case app::Screen::PieceMoves:
+      return "bench";
+    case app::Screen::QuitConfirm:
+      return "door";
+    default:
+      return {};
+  }
+}
+
+float appendProjector(const render::Ui& ui, const app::Settings& settings,
+                      render::InstanceSet& instances, const view::Theme& theme) {
+  if (!(gProjector >= 0 ? gProjector == 1 : settings.projector)) return 0;
   const auto req = ui.hologramRequest();
   auto lens = *gLabScene->doc().anchor("projector.lens");
   const auto source = gLabScene->toWorld(lens);
   lens[2] += .32f;
   const render::HologramPlacement at{gLabScene->toWorld(lens),
-                                     .20f * render::kCellsPerMetre, req.yaw, req.alpha,
-                                     req.scale};
+                                     .20f * render::kCellsPerMetre,
+                                     req.yaw,
+                                     req.alpha,
+                                     req.scale,
+                                     req.squashZ,
+                                     source};
   render::Hologram h;
   switch (req.kind) {
     case render::HologramRequest::Manifold:
@@ -120,13 +143,13 @@ bool appendProjector(const render::Ui& ui, const app::Settings& settings,
     case render::HologramRequest::None:
       break;
   }
-  if (!h.any()) return false;
+  if (!h.any()) return 0;
   instances.holo = std::move(h.quads);
   instances.holo.insert(instances.holo.end(), h.lines.begin(), h.lines.end());
   instances.holoTokens = std::move(h.tokens);
   instances.holoTokenBatches = h.tokenBatches;
   instances.holoBeam.push_back(render::projectorBeam(source, at, theme));
-  return true;
+  return req.alpha;
 }
 #endif
 
@@ -938,9 +961,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // in (M23.11 section 6). The preview names the source; the clock is pinned per frame.
   if (!gFrom.empty()) {
     static const std::pair<const char*, app::Screen> kFrom[]{
-        {"menu", app::Screen::MainMenu}, {"game", app::Screen::Game},
-        {"pause", app::Screen::Paused},  {"newgame", app::Screen::NewGame},
-        {"watch", app::Screen::Watch},   {"welcome", app::Screen::Welcome}};
+        {"menu", app::Screen::MainMenu},    {"game", app::Screen::Game},
+        {"pause", app::Screen::Paused},     {"newgame", app::Screen::NewGame},
+        {"watch", app::Screen::Watch},      {"welcome", app::Screen::Welcome},
+        {"quit", app::Screen::QuitConfirm}, {"settings", app::Screen::Settings},
+        {"info", app::Screen::GameInfo},    {"pieces", app::Screen::PieceMoves}};
     bool known = false;
     for (const auto& [name, from] : kFrom) {
       if (gFrom == name) {
@@ -985,8 +1010,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // player sees before pressing the trailer button. Skipped when the capture asked for a
   // specific shape/ghost pose or a played game, so those captures keep their meaning.
 #ifdef CB_HAVE_IMGUI
-  if (screen == "menu" && attractTimeGiven && !geometry && playFile.empty() &&
-      watchName.empty()) {
+  if (screen == "menu" && gFrom.empty() && attractTimeGiven && !geometry &&
+      playFile.empty() && watchName.empty()) {
     shell->startAttract(app::defaultAttractSequence());
     constexpr float kStep = 1.0f / 60.0f;
     for (float t = 0.0f; t < overtureT; t += kStep) {
@@ -1072,7 +1097,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
   (*ui)->setPreviewDims(previewDims);
   // Point the library at the named variant, so a capture of a variant with a derived
   // overture shows *it* rather than the standard construction the first entry opens on.
-  if (screen == "newgame") (*ui)->pickVariant(variantName);
+  if (screen == "newgame" || gFrom == "newgame") (*ui)->pickVariant(variantName);
+  if (gFrom == "newgame" && screen != "newgame") {
+    shell->overtures().jumpTo(app::overtureFor(variantName));
+    shell->overtures().setProgress(overtureT);
+  }
   // One frame, built and rendered at whatever `t` the caller has pinned. Split out from
   // writing so `--clip` can call it once per frame. `dt` is the interface's own clock:
   // the warm-up gives it enough to settle a screen transition, and the real frames give
@@ -1123,6 +1152,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->tick(dt);
     (*ui)->setLabDoc(labEnabled(*shell) ? &gLabScene->doc() : nullptr);
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
+    (*ui)->setStationCamera([&](app::Screen which) -> std::optional<view::OrbitCamera> {
+      if (!labEnabled(*shell)) return std::nullopt;
+      return gLabScene->station(stationFor(which));
+    });
+    (*ui)->setFocusFor(focusFor);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
@@ -1201,14 +1235,23 @@ int captureFrame(const std::string& variantName, const std::string& path,
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
-    bool projected = false;
+    float projected = 0;
     if (room) {
+#ifdef CB_HAVE_IMGUI
+      gLabScene->appendTo(instances, renderer->theme(),
+                          [&](std::string_view focus) { return (*ui)->salience(focus); });
+#else
       gLabScene->appendTo(instances, renderer->theme());
+#endif
 #ifdef CB_HAVE_IMGUI
       projected = appendProjector(**ui, shell->settings(), instances, renderer->theme());
 #endif
-      camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())
-                                                    : std::string_view(gStation));
+      camera = *gLabScene->station(stationFor(shell->screen()));
+#ifdef CB_HAVE_IMGUI
+      if (const auto moving = (*ui)->labCamera()) camera = *moving;
+      if (!(*ui)->stationPin().empty()) camera = *gLabScene->station((*ui)->stationPin());
+#endif
+      if (!gStation.empty()) camera = *gLabScene->station(gStation);
       frame = {};
       renderer->setBlur(0);
     }
@@ -1216,7 +1259,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                    gLabScene->doc(), *gLabScene,
                                    gRoomLightOverride >= 0 ? gRoomLightOverride
                                                            : shell->settings().roomLight,
-                                   render::kLabKey, "projector", projected ? 1.f : .5f)
+                                   render::kLabKey, "projector", .5f + .5f * projected,
+                                   renderer->theme())
                              : render::neutralLightBlock());
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
@@ -1531,10 +1575,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
       const float t = frames <= 1 ? clipT0
                                   : clipT0 + (clipT1 - clipT0) * static_cast<float>(i) /
                                                  static_cast<float>(frames - 1);
+      if (!gFrom.empty()) gTransitionT = t;
       // Pin the cycle outright: a clip is only deterministic if every frame states its
       // own `t` rather than integrating towards it. The library sweeps the overture;
       // every other screen sweeps the running move, so a board clip is a gameplay shot.
-      if (screen == "newgame") {
+      if (gFrom.empty() && screen == "newgame") {
         shell->overtures().setProgress(t);
       } else if (shell->session() != nullptr) {
         shell->session()->setMoveProgress(t);
@@ -1688,7 +1733,8 @@ int main(int argc, char** argv) {
           "saved).\n"
           "--from SCREEN --transition-t SECONDS pins the screen move from SCREEN (menu, "
           "game, "
-          "pause, newgame, watch) to --screen at that age (M23.11 section 6).\n"
+          "pause, newgame, watch, welcome, settings, quit, info, pieces) to --screen at "
+          "that age.\n"
           "--room-light 0..2 scales the room practicals for this run only.\n"
           "--projector 0|1 toggles the bench hologram; --overture-t 0..1 pins Library "
           "progress (alias --t).\n"
@@ -2586,6 +2632,11 @@ int main(int argc, char** argv) {
     (*ui)->tick(dt);
     (*ui)->setLabDoc(labEnabled(*shell) ? &gLabScene->doc() : nullptr);
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
+    (*ui)->setStationCamera([&](app::Screen which) -> std::optional<view::OrbitCamera> {
+      if (!labEnabled(*shell)) return std::nullopt;
+      return gLabScene->station(stationFor(which));
+    });
+    (*ui)->setFocusFor(focusFor);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, fps);
     (*ui)->endFrame();
@@ -2804,21 +2855,31 @@ int main(int argc, char** argv) {
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
-    bool projected = false;
+    float projected = 0;
     if (room) {
+#ifdef CB_HAVE_IMGUI
+      gLabScene->appendTo(instances, renderer->theme(),
+                          [&](std::string_view focus) { return (*ui)->salience(focus); });
+#else
       gLabScene->appendTo(instances, renderer->theme());
+#endif
 #ifdef CB_HAVE_IMGUI
       projected = appendProjector(**ui, shell->settings(), instances, renderer->theme());
 #endif
-      camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())
-                                                    : std::string_view(gStation));
+      camera = *gLabScene->station(stationFor(shell->screen()));
+#ifdef CB_HAVE_IMGUI
+      if (const auto moving = (*ui)->labCamera()) camera = *moving;
+      if (!(*ui)->stationPin().empty()) camera = *gLabScene->station((*ui)->stationPin());
+#endif
+      if (!gStation.empty()) camera = *gLabScene->station(gStation);
       renderer->setBlur(0);
     }
     renderer->setLights(room ? render::labLightBlock(
                                    gLabScene->doc(), *gLabScene,
                                    gRoomLightOverride >= 0 ? gRoomLightOverride
                                                            : shell->settings().roomLight,
-                                   render::kLabKey, "projector", projected ? 1.f : .5f)
+                                   render::kLabKey, "projector", .5f + .5f * projected,
+                                   renderer->theme())
                              : render::neutralLightBlock());
     const auto overlay = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI

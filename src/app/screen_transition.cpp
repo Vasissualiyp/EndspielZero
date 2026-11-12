@@ -45,6 +45,7 @@ float moveSeconds(ScreenMove move, float intensity) noexcept {
       return kPauseOffSeconds;
     case ScreenMove::GameToMenu:
       return kPowerDownSeconds + kMenuOnSeconds;
+    case ScreenMove::Station:
     case ScreenMove::Cut:
       break;
   }
@@ -52,8 +53,11 @@ float moveSeconds(ScreenMove move, float intensity) noexcept {
 }
 
 MoveFx moveFx(ScreenMove move, float age, float intensity) noexcept {
+  return moveFx(move, age, intensity, moveSeconds(move, intensity));
+}
+
+MoveFx moveFx(ScreenMove move, float age, float intensity, float total) noexcept {
   MoveFx fx;
-  const float total = moveSeconds(move, intensity);
   if (move == ScreenMove::Cut || !(age < total)) return fx;  // settled: the cut's state
   fx.done = false;
   age = std::max(0.0f, age);
@@ -67,6 +71,11 @@ MoveFx moveFx(ScreenMove move, float age, float intensity) noexcept {
     return fx;
   }
   switch (move) {
+    case ScreenMove::Station:
+      fx.leaveTrace = fx.arriveTrace = 1;
+      fx.leaveAlpha = 1 - smooth(age / (.35f * total));
+      fx.arriveAlpha = smooth((age - .55f * total) / (.45f * total));
+      break;
     case ScreenMove::MenuToGame: {
       const float f = smooth(age / kMenuOffSeconds);
       fx.leaveTrace = fx.leaveAlpha = 1.0f - f;

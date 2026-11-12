@@ -136,11 +136,12 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
   }
   if (cmd == "transition") {
     // Preview a screen move (M23.11 section 6), as `goto` but played from `<from>`.
-    static const std::pair<const char*, Screen> kMoves[]{{"menu", Screen::MainMenu},
-                                                         {"game", Screen::Game},
-                                                         {"paused", Screen::Paused},
-                                                         {"newgame", Screen::NewGame},
-                                                         {"watch", Screen::Watch}};
+    static const std::pair<const char*, Screen> kMoves[]{
+        {"menu", Screen::MainMenu},    {"game", Screen::Game},
+        {"paused", Screen::Paused},    {"newgame", Screen::NewGame},
+        {"watch", Screen::Watch},      {"settings", Screen::Settings},
+        {"quit", Screen::QuitConfirm}, {"welcome", Screen::Welcome},
+        {"info", Screen::GameInfo},    {"pieces", Screen::PieceMoves}};
     const auto find = [&](const std::string& name) -> std::optional<Screen> {
       for (const auto& [n, screen] : kMoves)
         if (name == n) return screen;
@@ -148,7 +149,9 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
     };
     const auto from = w.size() > 2 ? find(w[1]) : std::nullopt;
     const auto to = w.size() > 2 ? find(w[2]) : std::nullopt;
-    if (!from || !to) return "usage: transition menu|newgame|watch|game|paused <to>";
+    if (!from || !to)
+      return "usage: transition "
+             "menu|newgame|watch|settings|quit|welcome|info|pieces|game|paused <to>";
     if ((*from == Screen::Game || *from == Screen::Paused || *to == Screen::Game ||
          *to == Screen::Paused) &&
         !shell.hasGame())
@@ -468,7 +471,7 @@ std::string DebugConsole::help() {
   return "load <variant>            start a variant\n"
          "goto <screen>            menu game paused settings editor newgame welcome\n"
          "transition <from> <to>   preview a screen move: "
-         "menu|newgame|watch|game|paused\n"
+         "menu|newgame|watch|settings|quit|welcome|info|pieces|game|paused\n"
          "get [<setting>]          show settings; set <setting> <value> changes one\n"
          "dev [on|off]             developer overlay; no argument toggles it\n"
          "post [on|off]            post processing; toggles if omitted; floor dither "
@@ -476,6 +479,8 @@ std::string DebugConsole::help() {
          "set guiScaleAuto true|false  automatic interface scale; guiScale is its "
          "multiplier\n"
          "set roomLight 0..2       practical room-light gain (machine lights unchanged)\n"
+         "station <name>|off  pin the lab camera to a station\n"
+         "salience <focus>|off  pin a lab object salience glow\n"
          "lights       list the active lab lights (no game needed)\n"
          "projector [on|off] toggle the bench hologram (also get/set projector)\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
@@ -515,6 +520,29 @@ std::string DebugConsole::help() {
 std::string DebugConsole::run(Shell& shell, std::string_view line) {
   const std::string text(line);
   if (words(text).empty()) return {};
+  const auto args = words(text);
+  if (args[0] == "station" || args[0] == "salience") {
+    const bool station = args[0] == "station";
+    auto& pin = station ? stationPin_ : saliencePin_;
+    std::string result;
+    if (args.size() != 2)
+      result = "usage: " + args[0] + " <name>|off";
+    else if (args[1] == "off") {
+      pin.clear();
+      result = args[0] + " off";
+    } else if (!labDoc_)
+      result = "lab is off";
+    else if (station && !labDoc_->station(args[1]))
+      result = "unknown lab station: " + args[1];
+    else {
+      pin = args[1];
+      result = args[0] + " " + pin;
+    }
+    history_.push_back(text);
+    log_.push_back("> " + text);
+    log_.push_back(result);
+    return result;
+  }
   history_.push_back(text);
   log_.push_back("> " + text);
   std::string out =

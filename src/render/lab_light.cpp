@@ -23,9 +23,11 @@ GpuLightBlock neutralLightBlock() noexcept {
 }
 GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene, float roomLight,
                             float keyFactor, std::string_view lightName,
-                            float intensityScale) {
+                            float intensityScale, const view::Theme& theme) {
   auto b = neutralLightBlock();
   const auto count = std::min<std::size_t>(doc.lights.size(), 8);
+  const auto implant = theme.implant.array();
+  std::copy(implant.begin(), implant.end(), b.implant);
   b.header[0] = static_cast<float>(count);
   b.header[1] = keyFactor;
   for (std::size_t i = 0; i < count; ++i) {

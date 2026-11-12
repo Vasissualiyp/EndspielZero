@@ -103,6 +103,8 @@ struct Theme {
   /// The Ctrl-peek destinations and the faint "defended by" hint; distinct from moss,
   /// blood and the selection colour `ember`.
   Rgba peek{Rgba::hex(0x9B7BEA)};
+  /// The implant hue belongs to perception, distinct from the hardware LEDs.
+  Rgba implant{Rgba::hex(0xD9D2FF)};
 
   // Difficulty, reserved for the library's entries: one hue per level, from the
   // reassuring green of a game anyone can sit down to, through amber and red, to the
