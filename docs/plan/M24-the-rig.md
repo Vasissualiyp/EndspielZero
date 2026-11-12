@@ -386,6 +386,59 @@ Everything goes through the existing board pipeline unless noted. No second rend
 - An art pass on the lab. M24 ships the procedural kit, laid out with care; a human may
   replace parts later.
 
+## Morphs in the game: the slab's skin (user, 2026-11-12)
+
+During a game, the board morphs from flat into its topological shape and back:
+- cylinder, torus, Klein and Möbius, with the staged rolls of `src/view/morph.hpp`
+  (`kTorusRollEnd`, `kKleinRingEnd` and `kKleinFoldEnd`);
+- the shape-follow choreography;
+- the layout views of multi-board variants.
+
+In the lab, every morph must read as something **the hardware physically does**. The
+user chose:
+
+1. **Mechanism: a stretch skin on ribs.**
+   - **The skin.** The slab's LED face is a stretchable skin: rigid cell tiles (the LEDs)
+     joined by thin serpentine bridges. It is the 2050 version of island-bridge
+     stretchable electronics.
+   - **Unlatching.** At rest the skin lies on the slab's rigid back plate
+     (`slab_back.obj`). To morph, it unlatches from the plate.
+   - **The ribs.** Thin metal ribs extend from the mast's clamp ring and bend the skin
+     into the shape. The surface maths is the existing morph maths, unchanged; the
+     hardware is dressing driven by it.
+   - **Stretch is honest.** Where the shape stretches the sheet, the tiles spread apart
+     and their bridges glow faintly in the gaps. Where it compresses, the tiles crowd
+     together and the gaps close. The stretch is measured per cell as the area ratio of
+     the surface's local Jacobian against flat: for example, a torus's outer equator
+     stretches and its inner one compresses. The tiles themselves never distort: a cell
+     is rigid.
+   - **Visible ribs.** The ribs stay visible behind the formed skin, so the player can see
+     what holds it up. They are matte dark metal, and the lab lights catch them.
+2. **Impossible parts: light completes them.** The hardware forms everything 3-D
+   allows; where it cannot, the projector fills in.
+   - **Klein bottle.** The real skin cannot pass through itself. It leaves a ring-shaped
+     gap where the immersion would self-intersect, and the cells in that band are drawn
+     as **hologram cells** (hologram material, beam from the nearest projector) instead
+     of LED tiles. They are continuous with the LED cells on either side.
+   - **Multi-slab and 4-D+ variants** (cube5, hyper4, T6, 5D). Slab edges that are glued
+     in the variant but cannot touch in 3-D are joined by **light bridges**: thin beams
+     between the two edges, in that seam's axis colour (the same colours as the seam
+     legend). A piece crossing such a seam becomes a hologram and travels along the
+     bridge.
+   - **The rule:** hardware where possible, light where impossible. Never a physical
+     surface passing through another.
+3. **Cues** (the user chose these three; there is **no** unlatch beat):
+   - **visible ribs** (above);
+   - **seam latch flash:** when two edges meet, for example a cylinder's seam closing or
+     a torus's ring closing, magnetic edge latches click shut. A short flash runs along
+     the seam in its axis colour (0.25 s, LED vocabulary: hard steps, it is hardware);
+   - **the gantry rearranges slabs:** for multi-slab variants, changing the layout view
+     makes the gantry physically move and turn the slabs on their masts, with the mass and
+     settle of `slabPath`. Nothing teleports.
+
+These are **complex 3-D manipulations**: per the user, Codex **gpt-6-astra** implements
+them (M24.5b and M24.6), not gpt-6.1-sol.
+
 ## Rules for every M24 slice
 
 Every slice file repeats what it needs, but these hold throughout:
@@ -423,8 +476,9 @@ Every slice file repeats what it needs, but these hold throughout:
 | M24.4a | `docs/plan/M24.4a-stations-and-camera-moves.md` | Screens as stations, menu ↔ menu camera flights, hologram collapse/grow, salience | behind `labScene` |
 | M24.4b | `docs/plan/M24.4b-implant-layer.md` | Synaptic hue, implant composite: organic form/dissolve, afterimage, heartbeat, saccadic dip | behind `labScene`; at the end of M24.4b, switch `labScene` to default **on** for interactive play (captures stay off) |
 | M24.4c | `docs/plan/M24.4c-living-vision.md` | Living vision: lens warp, frameless glowing panels, peripheral softening, gaze wander with focus shift (depth of field), micro-tremor; the main-menu hologram takes a fifth of the screen | behind `livingVision` (on the lab path only) |
-| M24.5 | to be written after M24.4b lands | Deploy and stow: the game in the lab | yes |
-| M24.6 | to be written | Multi-slab gantry | yes |
+| M24.5 | to be written after M24.4b lands | Deploy and stow: the game in the lab (gpt-6-astra) | yes |
+| M24.5b | to be written after M24.5 lands | The slab's skin: physical in-game morphs, stretch, ribs, seam latches, light-completed Klein (gpt-6-astra) | yes |
+| M24.6 | to be written | Multi-slab gantry, light bridges, layout changes as gantry moves (gpt-6-astra) | yes |
 | M24.7 | to be written | Geometry view projector, the first-launch wake-up and implant handshake | yes |
 | M24.8 | to be written | Cleanup | yes |
 
@@ -465,13 +519,17 @@ is in. The outlines below are binding on **what** gets built.
 - Departures overlap.
 - 5D: a new timeline's slab arrives and boots, joined to its parent by a light-guide
   connector (`TimelineLink`).
+- Light bridges between glued slab edges that cannot touch in 3-D, in seam-axis colours.
+  Pieces crossing them travel as holograms ("Morphs in the game", item 2).
+- Changing the layout view moves and turns the slabs on their masts; nothing teleports.
 - **Tests:** every shipped variant fits; no mast collisions; one arrival per branch;
   captures for standard, cube5, hyper4, t6 and 5D.
 
 ### M24.7 Geometry view, first launch (outline)
 
-- In the geometry view, the slabs retract to the gantry top and a ceiling projector shows
-  the formed surface as a hologram LED surface.
+- The geometry view is the **physical** morph of M24.5b (the skin on ribs), not a
+  hologram. This replaces the earlier outline, in which the slabs retracted and a ceiling
+  projector showed the formed surface. Only the impossible parts are light.
 - The first-launch wake-up exactly as in "First launch: waking up": `view::wakeState`,
   eyelids and defocus in the post composite before the implant layer, `--wake-t`, `wake`.
 - The implant handshake: phosphenes and a log-polar ring wave via `ImplantParams::globalSync`
