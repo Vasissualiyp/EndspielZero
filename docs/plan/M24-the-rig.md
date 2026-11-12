@@ -478,7 +478,7 @@ Every slice file repeats what it needs, but these hold throughout:
 | M24.4c | `docs/plan/M24.4c-living-vision.md` | Living vision: lens warp, frameless glowing panels, peripheral softening, gaze wander with focus shift (depth of field), micro-tremor; the main-menu hologram takes a fifth of the screen | behind `livingVision` (on the lab path only) |
 | M24.5 | `docs/plan/M24.5-deploy-and-stow.md` | Deploy and stow: the game in the lab (gpt-6-astra) | yes |
 | M24.5b | `docs/plan/M24.5b-slab-skin.md` | The slab's skin: physical in-game morphs, stretch, ribs, seam latches, light-completed Klein (gpt-6-astra) | yes |
-| M24.6 | to be written | Multi-slab gantry, light bridges, layout changes as gantry moves (gpt-6-astra) | yes |
+| M24.6 | `docs/plan/M24.6-multi-slab-gantry.md` | Multi-slab gantry, light bridges, layout changes as gantry moves (gpt-6-astra) | yes |
 | M24.7 | to be written | Geometry view projector, the first-launch wake-up and implant handshake | yes |
 | M24.8 | to be written | Cleanup | yes |
 
