@@ -12,6 +12,7 @@
 
 #include "io/obj_mesh.hpp"
 #include "render/image_io.hpp"
+#include "render/lab_light.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/post_process.hpp"
@@ -316,6 +317,7 @@ class BoardRenderer {
   }
 
   [[nodiscard]] const BoardOptions& options() const noexcept { return options_; }
+  void setLights(const GpuLightBlock& b) noexcept { lights_ = b; }
   void setOptions(const BoardOptions& o) noexcept { options_ = o; }
 
   /// Cells the engine says were part of the last move, drawn with a lingering mark so a
@@ -392,6 +394,8 @@ class BoardRenderer {
   /// Create the effect buffer's descriptor layout and pool; the sets are written when a
   /// frame's buffer is first made or grown.
   Result<void> buildFxDescriptors();
+  /// Upload the frame's local lights; its slot fence protects host writes.
+  Result<void> uploadLights(std::uint32_t frame);
   /// Make the frame's effect buffer hold `set`'s records (or the one neutral record) and
   /// its globals.
   Result<void> uploadFx(std::uint32_t frame, const InstanceSet& set);
@@ -452,7 +456,11 @@ class BoardRenderer {
   std::array<VkImageView, kFramesInFlight> blurBoundColor_{};
   float blur_{0.0f};
 
-  // The per-cell effect records (M23.10), one storage buffer per frame in flight.
+  // Local lighting (M24.2), one uniform buffer per frame in flight.
+  GpuLightBlock lights_{neutralLightBlock()};
+  std::array<VkBuffer, kFramesInFlight> lightBuffer_{};
+  std::array<VkDeviceMemory, kFramesInFlight> lightMem_{};
+  // Per-cell effects share the descriptor set with local lighting.
   VkDescriptorSetLayout fxSetLayout_{VK_NULL_HANDLE};
   VkDescriptorPool fxPool_{VK_NULL_HANDLE};
   std::array<VkDescriptorSet, kFramesInFlight> fxSets_{};

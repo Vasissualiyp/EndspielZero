@@ -54,6 +54,7 @@ std::string gThemeOverride;
 std::string gSeamHover;
 bool gMatteCapture = false;
 bool gDevOverlay = false;
+float gRoomLightOverride = -1.0f;
 float gUiScaleOverride = -1.0f;
 bool gUiAuto = false;
 int gHudFraming = -1;
@@ -1079,6 +1080,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->pinTransitionAge(gTransitionT >= 0 ? std::optional<float>(gTransitionT)
                                               : std::nullopt);
     (*ui)->tick(dt);
+    (*ui)->setLabDoc(labEnabled(*shell) ? &gLabScene->doc() : nullptr);
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
@@ -1158,6 +1160,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
+    renderer->setLights(room ? render::labLightBlock(gLabScene->doc(), *gLabScene,
+                                                     gRoomLightOverride >= 0
+                                                         ? gRoomLightOverride
+                                                         : shell->settings().roomLight,
+                                                     render::kLabKey)
+                             : render::neutralLightBlock());
     if (room) {
       gLabScene->appendTo(instances, renderer->theme());
       camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())
@@ -1636,6 +1644,7 @@ int main(int argc, char** argv) {
           "--from SCREEN --transition-t SECONDS pins the screen move from SCREEN (menu, "
           "game, "
           "pause, newgame, watch) to --screen at that age (M23.11 section 6).\n"
+          "--room-light 0..2 scales the room practicals for this run only.\n"
           "--lab 0|1 toggles the static lab room; --station <name> requires --lab 1.\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
@@ -1713,6 +1722,19 @@ int main(int argc, char** argv) {
       if (*end != '\0' || !std::isfinite(gBloomOverride) || gBloomOverride < 0.0f ||
           gBloomOverride > 4.0f) {
         std::fprintf(stderr, "--bloom requires a scale from 0 to 4\n");
+        return 1;
+      }
+    } else if (arg == "--room-light") {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "--room-light requires a scale from 0 to 2\n");
+        return 1;
+      }
+      char* end = nullptr;
+      const char* value = argv[++i];
+      gRoomLightOverride = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(gRoomLightOverride) ||
+          gRoomLightOverride < 0 || gRoomLightOverride > 2) {
+        std::fprintf(stderr, "--room-light requires a scale from 0 to 2\n");
         return 1;
       }
     } else if (arg == "--boot-t" && i + 1 < argc) {
@@ -2493,6 +2515,7 @@ int main(int argc, char** argv) {
     }
     (*ui)->setRenderStatus(renderStatus, renderPid > 0);
     (*ui)->tick(dt);
+    (*ui)->setLabDoc(labEnabled(*shell) ? &gLabScene->doc() : nullptr);
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, fps);
@@ -2712,6 +2735,12 @@ int main(int argc, char** argv) {
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
+    renderer->setLights(room ? render::labLightBlock(gLabScene->doc(), *gLabScene,
+                                                     gRoomLightOverride >= 0
+                                                         ? gRoomLightOverride
+                                                         : shell->settings().roomLight,
+                                                     render::kLabKey)
+                             : render::neutralLightBlock());
     if (room) {
       gLabScene->appendTo(instances, renderer->theme());
       camera = *gLabScene->station(gStation.empty() ? stationFor(shell->screen())

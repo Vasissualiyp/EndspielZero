@@ -49,6 +49,29 @@ struct Reader {
     if (!a || a->size() != 3) bad(n, "expected three numbers");
     return {number(*a->get(0)), number(*a->get(1)), number(*a->get(2))};
   }
+  view::Rgba color(const toml::node& n, bool linearHex = false) const {
+    if (n.is_string()) {
+      const auto s = string(n);
+      std::uint32_t rgb{};
+      if (s.size() != 7 || s[0] != '#') bad(n, "color needs #RRGGBB");
+      auto [end, ec] = std::from_chars(s.data() + 1, s.data() + 7, rgb, 16);
+      if (ec != std::errc{} || end != s.data() + 7) bad(n, "invalid color");
+      auto c = view::Rgba::hex(rgb);
+      if (linearHex) {
+        const auto linear = [](float x) {
+          return x <= .04045f ? x / 12.92f : std::pow((x + .055f) / 1.055f, 2.4f);
+        };
+        c.r = linear(c.r);
+        c.g = linear(c.g);
+        c.b = linear(c.b);
+      }
+      return c;
+    }
+    const auto c = triple(n);
+    for (auto x : c)
+      if (x < 0 || x > 1) bad(n, "color outside 0..1");
+    return {c[0], c[1], c[2], 1};
+  }
   void keys(const toml::table& t, std::initializer_list<std::string_view> allowed) const {
     for (const auto& [k, v] : t)
       if (std::find(allowed.begin(), allowed.end(), k.str()) == allowed.end())
@@ -69,7 +92,7 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
   try {
     auto root = toml::parse(text, sourceName);
     Reader r{std::string(sourceName)};
-    r.keys(root, {"version", "anchors", "part", "station"});
+    r.keys(root, {"version", "anchors", "part", "station", "light"});
     if (r.need(root, "version").value<int>() != 1)
       r.bad(r.need(root, "version"), "version must be 1");
     LabDoc doc;
@@ -109,27 +132,13 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
         if (auto* v = t->get("fallback")) p.fallback = r.mesh(*v, true);
         if (auto* v = t->get("material")) {
           const auto s = r.string(*v);
-          const std::array<std::string_view, 6> materials{"matte", "metal",    "glass",
-                                                          "glow",  "hologram", "led"};
+          const std::array<std::string_view, 7> materials{
+              "matte", "metal", "glass", "glow", "hologram", "led", "sky"};
           auto it = std::find(materials.begin(), materials.end(), s);
           if (it == materials.end()) r.bad(*v, "unknown material '" + s + "'");
           p.material = static_cast<LabMaterial>(it - materials.begin());
         }
-        if (auto* v = t->get("color")) {
-          if (v->is_string()) {
-            auto s = r.string(*v);
-            std::uint32_t rgb{};
-            if (s.size() != 7 || s[0] != '#') r.bad(*v, "color needs #RRGGBB");
-            auto [end, ec] = std::from_chars(s.data() + 1, s.data() + 7, rgb, 16);
-            if (ec != std::errc{} || end != s.data() + 7) r.bad(*v, "invalid color");
-            p.color = view::Rgba::hex(rgb);
-          } else {
-            const auto c = r.triple(*v);
-            for (auto x : c)
-              if (x < 0 || x > 1) r.bad(*v, "color outside 0..1");
-            p.color = {c[0], c[1], c[2], 1};
-          }
-        }
+        if (auto* v = t->get("color")) p.color = r.color(*v);
         if (p.mesh == LabMesh::File) {
           const auto path = std::filesystem::path(r.string(r.need(*t, "mesh")).substr(5));
           if (path.is_absolute()) r.bad(r.need(*t, "mesh"), "file path must be relative");
@@ -152,6 +161,50 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
           }
         }
         doc.parts.push_back(std::move(p));
+      }
+    }
+    names.clear();
+    if (const auto* n = root.get("light")) {
+      r.context = std::string(sourceName) + " lights";
+      const auto* list = n->as_array();
+      if (!list) r.bad(*n, "light must be an array of tables");
+      if (list->size() > 8) r.bad(*list->get(8), "at most 8 lights");
+      for (const auto& item : *list) {
+        const auto* t = item.as_table();
+        if (!t) r.bad(item, "light must be a table");
+        LabLight l;
+        l.name = r.string(r.need(*t, "name"));
+        r.context = std::string(sourceName) + " light '" + l.name + "'";
+        if (l.name.empty() || !names.insert(l.name).second)
+          r.bad(item, "empty or duplicate name");
+        r.keys(*t, {"name", "kind", "pos", "dir", "cone", "soft", "color", "intensity",
+                    "radius", "group"});
+        const auto kind = r.string(r.need(*t, "kind"));
+        if (kind == "spot")
+          l.kind = LabLight::Kind::Spot;
+        else if (kind != "point")
+          r.bad(r.need(*t, "kind"), "unknown light kind");
+        l.pos = r.triple(r.need(*t, "pos"));
+        if (auto* v = t->get("color")) l.color = r.color(*v, true);
+        if (auto* v = t->get("intensity")) l.intensity = r.number(*v);
+        l.radius = r.number(r.need(*t, "radius"));
+        if (l.radius <= 0) r.bad(r.need(*t, "radius"), "radius must be positive");
+        if (l.intensity < 0)
+          r.bad(r.need(*t, "intensity"), "intensity must be nonnegative");
+        if (auto* v = t->get("group")) l.group = r.string(*v);
+        if (l.group != "room" && l.group != "machine")
+          r.bad(r.need(*t, "group"), "group must be room or machine");
+        if (l.kind == LabLight::Kind::Spot) {
+          l.dir = r.triple(r.need(*t, "dir"));
+          if (l.dir == std::array<float, 3>{})
+            r.bad(r.need(*t, "dir"), "spot direction must be nonzero");
+          if (auto* v = t->get("cone")) l.cone = r.number(*v);
+          if (auto* v = t->get("soft")) l.soft = r.number(*v);
+          if (l.cone <= 0 || l.cone > 89)
+            r.bad(r.need(*t, "cone"), "cone outside (0,89]");
+          if (l.soft < 0 || l.soft > 45) r.bad(r.need(*t, "soft"), "soft outside [0,45]");
+        }
+        doc.lights.push_back(std::move(l));
       }
     }
     names.clear();

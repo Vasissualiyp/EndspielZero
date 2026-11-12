@@ -88,6 +88,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.postProcess = asBool(value);
     else if (key == "bloom_scale")
       s.bloomScale = asFloat(value, s.bloomScale);
+    else if (key == "room_light")
+      s.roomLight = asFloat(value, s.roomLight);
     else if (key == "presentation_intensity")
       s.presentationIntensity = asFloat(value, s.presentationIntensity);
     else if (key == "vsync")
@@ -230,6 +232,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "dev_overlay = " << boolText(devOverlay) << '\n';
   out << "post_process = " << boolText(postProcess) << '\n';
   out << "bloom_scale = " << bloomScale << '\n';
+  out << "room_light = " << roomLight << '\n';
   out << "presentation_intensity = " << presentationIntensity << '\n';
   out << "vsync = " << boolText(vsync) << '\n';
   out << "frame_cap = " << frameCap << '\n';
@@ -295,6 +298,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
 }
 
 void Settings::sanitize() {
+  roomLight = std::isfinite(roomLight) ? std::clamp(roomLight, 0.0f, 2.0f) : 1.0f;
   bloomScale = std::isfinite(bloomScale) ? std::clamp(bloomScale, 0.0f, 4.0f) : 1.0f;
   presentationIntensity = std::isfinite(presentationIntensity)
                               ? std::clamp(presentationIntensity, 0.0f, 1.0f)

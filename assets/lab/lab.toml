@@ -126,7 +126,7 @@ name = "skylight.glass"
 mesh = "box"
 pos = [0, 0.4, 2.78]
 size = [1.6, 1.6, 0.02]
-material = "glass"
+material = "sky"
 color = "#0A0E18"
 group = "room"
 
@@ -713,4 +713,82 @@ target = [0, -2.6, 1.3]
 distance = 2.4
 yaw = 180
 pitch = 6
+fov = 50
+
+[[light]]
+name = "ceiling"
+kind = "point"
+pos = [0, 0.3, 2.62]
+color = "#C8D2E6"
+intensity = 8.0
+radius = 6
+group = "room"
+
+[[light]]
+name = "strip.a"
+kind = "point"
+pos = [-1.2, 2.88, 1.45]
+color = "#FFC890"
+intensity = 0.3
+radius = 1.4
+group = "room"
+
+[[light]]
+name = "strip.b"
+kind = "point"
+pos = [0.6, 2.88, 1.45]
+color = "#FFC890"
+intensity = 0.3
+radius = 1.4
+group = "room"
+
+[[light]]
+name = "lamp"
+kind = "spot"
+pos = [0.7, 2.6, 1.45]
+color = "#FFD2A0"
+intensity = 1.2
+radius = 2
+group = "room"
+dir = [0, 0.1, -1]
+cone = 35
+soft = 12
+
+[[light]]
+name = "projector"
+kind = "point"
+pos = [-0.6, 2.62, 1.15]
+color = "#6FE3FF"
+intensity = 0.45
+radius = 1.2
+group = "machine"
+
+[[light]]
+name = "magazine"
+kind = "point"
+pos = [2.25, 1.8, 1.3]
+color = "#6FE3FF"
+intensity = 0.2
+radius = 0.9
+group = "machine"
+
+[[light]]
+name = "moon"
+kind = "spot"
+pos = [0, 0.4, 2.7]
+color = "#8FA6D8"
+intensity = 1.2
+radius = 4
+group = "room"
+dir = [0.15, 0.1, -1]
+cone = 40
+soft = 15
+
+# Debug station: camera below the skylight, looking upward at its centre.
+[[station]]
+name = "sky"
+target = [0, 0.4, 2.78]
+distance = 1.6
+yaw = 0
+pitch = -60
 fov = 50

@@ -200,6 +200,13 @@ float bayer4(vec2 p) {
     return (m[q.y * 4 + q.x] + 0.5) / 16.0;
 }
 
+struct Light { vec4 posRadius; vec4 colorIntensity; vec4 dirCone; };
+layout(std140, set = 0, binding = 1) uniform LightBlock {
+    vec4 header;
+    vec4 softCos[2];
+    Light lights[8];
+} lightBuf;
+
 void main() {
     int matId = int(fragMaterial);
     uint fxIndex = uint(fragFx.x);
@@ -223,12 +230,38 @@ void main() {
     vec3 warm = vec3(1.06, 0.96, 0.84);
     vec3 cool = vec3(0.80, 0.85, 1.00);
     vec3 shade = mix(cool * 0.52, warm, lambert);
+    shade *= lightBuf.header.y;
 
     // Pieces darken slightly toward the foot: a tall piece should read as standing on
     // the board rather than floating above a flat blob.
     shade *= mix(0.80, 1.06, clamp(fragHeight, 0.0, 1.0));
 
     vec3 rgb = fragColor.rgb * shade;
+    int lightCount = int(lightBuf.header.x + 0.5);
+    if (lightCount > 0 && (matId == 0 || matId == 1 || matId == 2 || matId == 3 || matId == 6)) {
+        vec3 sum = vec3(0.0);
+        vec3 toEye = normalize(push.eyePos.xyz - fragWorld);
+        for (int i = 0; i < lightCount; ++i) {
+            Light L = lightBuf.lights[i];
+            vec3 d = L.posRadius.xyz - fragWorld;
+            float dist = length(d);
+            vec3 l = d / max(dist, 1e-4);
+            float dm = dist * lightBuf.header.z;
+            float x = dm / L.posRadius.w;
+            float win = clamp(1.0 - x*x*x*x, 0.0, 1.0);
+            float att = win * win / (dm * dm + 0.25);
+            if (L.dirCone.w > -1.5) {
+                float cosA = dot(-l, L.dirCone.xyz);
+                float soft = lightBuf.softCos[i / 4][i % 4];
+                att *= soft == L.dirCone.w ? step(L.dirCone.w, cosA) : smoothstep(soft, L.dirCone.w, cosA);
+            }
+            float ndl = max(dot(n, l), 0.0);
+            vec3 h = normalize(l + toEye);
+            float spec = pow(max(dot(n, h), 0.0), 32.0) * 0.25;
+            sum += L.colorIntensity.rgb * L.colorIntensity.w * att * (ndl + spec);
+        }
+        rgb += fragColor.rgb * sum;
+    }
     // Evaluate footprints before material/face branches so derivatives remain defined.
     vec2 panelPitch = fragPanel.xy * 24.0;
     vec2 panelFootprint = max(fwidth(panelPitch), vec2(0.0001));
@@ -547,5 +580,23 @@ void main() {
         }
     }
 
+    if (matId == 8) {
+        vec3 v = normalize(fragWorld - push.eyePos.xyz);
+        vec3 sky = vec3(0.010, 0.012, 0.022);
+        for (int o = 0; o < 3; ++o) {
+            float scale = 140.0 * pow(2.1, float(o));
+            vec3 p = v * scale;
+            vec3 cell = floor(p);
+            float h = hash13(cell + float(o) * 17.0);
+            if (h > 0.985) {
+                vec3 c = cell + 0.5 + 0.35 * (vec3(hash13(cell + 1.3), hash13(cell + 2.7), hash13(cell + 4.1)) - 0.5);
+                float dd = length(p - c);
+                float tw = 0.75 + 0.25 * sin(push.visual.x * (1.0 + 3.0 * h) + h * 40.0);
+                sky += vec3(0.85, 0.9, 1.0) * smoothstep(0.22, 0.0, dd) * (h - 0.985) * 60.0 * tw;
+            }
+        }
+        sky += vec3(0.05, 0.03, 0.02) * smoothstep(0.2, -0.3, v.y);
+        rgb = sky;
+    }
     outColor = vec4(rgb, fragColor.a);
 }

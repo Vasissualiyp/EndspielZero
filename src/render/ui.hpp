@@ -192,6 +192,7 @@ class Ui {
   void setTheme(const view::Theme& t) noexcept;
   /// Presentation seconds for live controls, independent of transitions/background.
   void setVisualTime(double seconds) noexcept;
+  void setLabDoc(const io::LabDoc* doc) noexcept { console_.setLabDoc(doc); }
   void setLabBackdrop(bool enabled) noexcept { labBackdrop_ = enabled; }
   /// The HUD panels' share of the board's presentation (M23.10 section 7): `draw` traces
   /// the panel edges on (boot, 0..1), `content` fades what is inside them in, `level`

@@ -102,6 +102,7 @@ float shaderMaterial(view::Material m, Cut cut, float variation) {
   if (m == view::Material::Hologram) return 4.0f;
   if (m == view::Material::Glow) return 5.0f;
   if (m == view::Material::Led) return 7.0f;
+  if (m == view::Material::Sky) return 8.0f;
   return 0.0f;
 }
 
@@ -798,20 +799,25 @@ Result<void> BoardRenderer::buildFxDescriptors() {
   binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
   VkDescriptorSetLayoutCreateInfo lci{};
   lci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  lci.bindingCount = 1;
-  lci.pBindings = &binding;
+  const std::array<VkDescriptorSetLayoutBinding, 2> bindings{
+      binding, VkDescriptorSetLayoutBinding{1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+                                            VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
+  lci.bindingCount = static_cast<std::uint32_t>(bindings.size());
+  lci.pBindings = bindings.data();
   if (const VkResult r =
           vkCreateDescriptorSetLayout(ctx_->device(), &lci, nullptr, &fxSetLayout_);
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal,
                 "cannot create the effect set layout: " + describe(r));
   }
-  const VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight};
+  const VkDescriptorPoolSize sizes[]{
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight}};
   VkDescriptorPoolCreateInfo pci{};
   pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   pci.maxSets = kFramesInFlight;
-  pci.poolSizeCount = 1;
-  pci.pPoolSizes = &size;
+  pci.poolSizeCount = 2;
+  pci.pPoolSizes = sizes;
   if (const VkResult r = vkCreateDescriptorPool(ctx_->device(), &pci, nullptr, &fxPool_);
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal, "cannot create the effect pool: " + describe(r));
@@ -827,6 +833,34 @@ Result<void> BoardRenderer::buildFxDescriptors() {
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal, "cannot allocate the effect sets: " + describe(r));
   }
+  return {};
+}
+
+Result<void> BoardRenderer::uploadLights(std::uint32_t frame) {
+  if (lightBuffer_[frame] == VK_NULL_HANDLE) {
+    if (auto r = makeBuffer(
+            *ctx_, sizeof(GpuLightBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            lightBuffer_[frame], lightMem_[frame]);
+        !r)
+      return r;
+    const VkDescriptorBufferInfo info{lightBuffer_[frame], 0, sizeof(GpuLightBlock)};
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = fxSets_[frame];
+    write.dstBinding = 1;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    write.pBufferInfo = &info;
+    vkUpdateDescriptorSets(ctx_->device(), 1, &write, 0, nullptr);
+  }
+  void* mapped = nullptr;
+  const auto result =
+      vkMapMemory(ctx_->device(), lightMem_[frame], 0, sizeof(GpuLightBlock), 0, &mapped);
+  if (result != VK_SUCCESS)
+    return fail(ErrorCode::Internal, "cannot map lights: " + describe(result));
+  std::memcpy(mapped, &lights_, sizeof(lights_));
+  vkUnmapMemory(ctx_->device(), lightMem_[frame]);
   return {};
 }
 
@@ -2384,6 +2418,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   }
 
   if (auto r = uploadFx(frame, set); !r.has_value()) return r;
+  if (auto r = uploadLights(frame); !r.has_value()) return r;
   if (auto r = ensureSurfaceCapacity(frame, set.surfaceVertices.size(),
                                      set.surfaceIndices.size());
       !r.has_value()) {
@@ -2948,6 +2983,9 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(fxSetLayout_, o.fxSetLayout_);
   std::swap(fxPool_, o.fxPool_);
   std::swap(fxSets_, o.fxSets_);
+  std::swap(lights_, o.lights_);
+  std::swap(lightBuffer_, o.lightBuffer_);
+  std::swap(lightMem_, o.lightMem_);
   std::swap(fxBuffer_, o.fxBuffer_);
   std::swap(fxMem_, o.fxMem_);
   std::swap(fxCapacity_, o.fxCapacity_);
@@ -3000,6 +3038,7 @@ BoardRenderer::~BoardRenderer() {
   for (std::uint32_t f = 0; f < kFramesInFlight; ++f) {
     destroyBuffer(instanceBuffer_[f], instanceMem_[f]);
     destroyBuffer(fxBuffer_[f], fxMem_[f]);
+    destroyBuffer(lightBuffer_[f], lightMem_[f]);
     destroyBuffer(surfaceVertexBuffer_[f], surfaceVertexMem_[f]);
     destroyBuffer(surfaceIndexBuffer_[f], surfaceIndexMem_[f]);
   }

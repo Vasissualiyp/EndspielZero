@@ -99,9 +99,10 @@ void LabScene::appendTo(InstanceSet& set, const view::Theme& theme) const {
     std::copy(q.begin(), q.end(), i.quat);
     const auto color = p.color.array();
     std::copy(color.begin(), color.end(), i.color);
-    constexpr std::array<view::Material, 6> materials{
+    constexpr std::array<view::Material, 7> materials{
         view::Material::Matte, view::Material::Metal,    view::Material::Glass,
-        view::Material::Glow,  view::Material::Hologram, view::Material::Led};
+        view::Material::Glow,  view::Material::Hologram, view::Material::Led,
+        view::Material::Sky};
     i.material =
         shaderMaterial(materials[static_cast<std::size_t>(p.material)], Cut::Plank, 0);
     // AO remains authored metadata: the LCD response contract requires this payload

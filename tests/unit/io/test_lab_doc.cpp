@@ -214,3 +214,104 @@ TEST_CASE("lab file parts resolve beside the document and diagnose broken OBJ",
   CHECK(bad.error().message.find("line 2") != std::string::npos);
   std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("lab point and spot lights parse with validated metre fields",
+          "[unit][io][lab][light]") {
+  const std::string point = R"(
+[[light]]
+name = "ceiling"
+kind = "point"
+pos = [0, 0.3, 2.62]
+color = "#C8D2E6"
+intensity = 0.35
+radius = 6
+)";
+  const std::string spot = R"(
+[[light]]
+name = "lamp"
+kind = "spot"
+pos = [0.7, 2.6, 1.45]
+dir = [0, 0.1, -1]
+cone = 35
+soft = 12
+color = [1, 0.5, 0.2]
+intensity = 1.2
+radius = 2
+group = "machine"
+)";
+  auto d = io::parseLabDoc(minimal + point + spot, "lights.toml");
+  REQUIRE(d.has_value());
+  REQUIRE(d->lights.size() == 2);
+  CHECK(d->lights[0].kind == io::LabLight::Kind::Point);
+  CHECK(d->lights[0].pos == std::array<float, 3>{0, .3f, 2.62f});
+  CHECK(d->lights[0].color.r == Catch::Approx(.5775805f));
+  CHECK(d->lights[0].intensity == .35f);
+  CHECK(d->lights[0].radius == 6);
+  CHECK(d->lights[0].group == "room");
+  CHECK(d->lights[1].kind == io::LabLight::Kind::Spot);
+  CHECK(d->lights[1].dir == std::array<float, 3>{0, .1f, -1});
+  CHECK(d->lights[1].cone == 35);
+  CHECK(d->lights[1].soft == 12);
+  CHECK(d->lights[1].color.g == .5f);
+  CHECK(d->lights[1].group == "machine");
+  for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
+           {"radius = 2", "radius = 0"},
+           {"intensity = 1.2", "intensity = -1"},
+           {"dir = [0, 0.1, -1]", ""},
+           {"dir = [0, 0.1, -1]", "dir = [0,0,0]"},
+           {"cone = 35", "cone = 0"},
+           {"cone = 35", "cone = 90"},
+           {"soft = 12", "soft = -1"},
+           {"soft = 12", "soft = 46"},
+           {"group = \"machine\"", "group = \"invalid\""},
+           {"kind = \"spot\"", "kind = \"invalid\""}}) {
+    auto bad = spot;
+    bad.replace(bad.find(from), from.size(), to);
+    const auto result = io::parseLabDoc(minimal + bad, "bad-light.toml");
+    CAPTURE(to);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().line > 0);
+  }
+  CHECK_FALSE(io::parseLabDoc(minimal + spot + spot, "duplicate.toml"));
+  auto nine = minimal;
+  for (int i = 0; i < 9; ++i) {
+    auto next = point;
+    next.replace(next.find("ceiling"), 7, "light" + std::to_string(i));
+    nine += next;
+  }
+  const auto invalid = io::parseLabDoc(nine, "nine.toml");
+  REQUIRE_FALSE(invalid);
+  CHECK(invalid.error().line > 0);
+}
+TEST_CASE("the shipped lab has five to eight practical lights",
+          "[unit][io][lab][light]") {
+  const auto d =
+      io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(d);
+  CHECK(d->lights.size() >= 5);
+  CHECK(d->lights.size() <= 8);
+}
+
+TEST_CASE("light hex colours decode sRGB while linear triples pass through",
+          "[unit][io][lab][light]") {
+  const auto d = io::parseLabDoc(R"(version=1
+[[light]]
+name="hex"
+kind="point"
+pos=[0,0,0]
+radius=1
+color="#808008"
+[[light]]
+name="linear"
+kind="point"
+pos=[0,0,0]
+radius=1
+color=[0.5,0.25,0.1]
+)",
+                                 "colour.toml");
+  REQUIRE(d);
+  CHECK(d->lights[0].color.r == Catch::Approx(.2158605f));
+  CHECK(d->lights[0].color.b == Catch::Approx(.002428216f));
+  CHECK(d->lights[1].color.r == .5f);
+  CHECK(d->lights[1].color.g == .25f);
+}

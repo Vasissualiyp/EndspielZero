@@ -7,6 +7,7 @@
 
 #include "app/debug_console.hpp"
 #include "app/shell.hpp"
+#include "io/lab_doc.hpp"
 #include "io/variant_toml.hpp"
 #include "support/variants.hpp"
 
@@ -300,4 +301,41 @@ TEST_CASE("lab setting and command work without a game", "[unit][app][lab]") {
   CHECK(app::Settings::load(path).labScene);
   std::filesystem::remove(path);
   CHECK(DebugConsole::help().find("lab [on|off]") != std::string::npos);
+}
+
+TEST_CASE("room light setting clamps and survives saving without a game",
+          "[unit][app][light]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(shell->settings().roomLight == 1);
+  CHECK(c.run(*shell, "get roomLight") == "room_light = 1");
+  CHECK(c.run(*shell, "set roomLight 0.35") == "roomLight is now 0.35");
+  CHECK(shell->settings().roomLight == .35f);
+  const auto path = std::filesystem::path(CB_BINARY_DIR) / "room-light-settings.conf";
+  REQUIRE(shell->settings().save(path));
+  CHECK(Settings::load(path).roomLight == .35f);
+  std::filesystem::remove(path);
+  (void)c.run(*shell, "set room_light 3");
+  CHECK(shell->settings().roomLight == 2);
+  (void)c.run(*shell, "set roomLight -1");
+  CHECK(shell->settings().roomLight == 0);
+  (void)c.run(*shell, "set roomLight nan");
+  CHECK(shell->settings().roomLight == 1);
+}
+TEST_CASE("lights console dumps the loaded lab independently of a running game",
+          "[unit][app][light]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(c.run(*shell, "lights") == "lab is off");
+  const auto doc =
+      io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  c.setLabDoc(&*doc);
+  const auto text = c.run(*shell, "lights");
+  CHECK(has(text, "lamp spot (0.70, 2.60, 1.45) r 2.0 m  i 1.20  room"));
+  CHECK(has(text, "projector point"));
+  CHECK(has(text, "machine"));
+  CHECK(has(DebugConsole::help(), "lights"));
+  c.setLabDoc(nullptr);
+  CHECK(c.run(*shell, "lights") == "lab is off");
 }

@@ -29,7 +29,8 @@ enum class Material : std::uint8_t {
   Glass = 3,
   Hologram = 4,
   Glow = 5,
-  Led = 7
+  Led = 7,
+  Sky = 8
 };
 
 struct Materials {
@@ -171,8 +172,8 @@ struct Theme {
     t.panelStyle = PanelStyle::Brackets;
     t.monoLabels = true;
     t.liveControls = true;
-    // Neutral near-black with a trace of violet, so the cyan board separates from the room
-    // by hue as well as by value (M23.9 B).
+    // Neutral near-black with a trace of violet, so the cyan board separates from the
+    // room by hue as well as by value (M23.9 B).
     t.ink = Rgba::hex(0x07060C);
     t.soot = Rgba::hex(0x0C0B14);
     t.panel = Rgba::hex(0x10192A);

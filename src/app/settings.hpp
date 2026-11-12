@@ -28,6 +28,8 @@ struct Settings {
   /// Frame within HUD clearance; debug A/B for material and camera captures.
   bool hudFraming{true};
   bool labScene{false};
+  /// Practical room lights only, independent of machine emitters; finite [0,2].
+  float roomLight{1.0f};
   bool fullscreen{false};
   /// Developer-only presentation: fps and unfinished menu entries. Console access only.
   bool devOverlay{false};

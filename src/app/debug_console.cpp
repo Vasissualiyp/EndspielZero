@@ -5,8 +5,10 @@
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <optional>
 #include <sstream>
+#include "io/lab_doc.hpp"
 
 #include "app/session.hpp"
 #include "app/settings.hpp"
@@ -87,7 +89,7 @@ std::string perftLines(const VariantSpec& v, const Position& start, int depth,
   return out.str();
 }
 
-std::string execute(Shell& shell, const std::string& line) {
+std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab) {
   const std::vector<std::string> w = words(line);
   if (w.empty()) return {};
   const std::string& cmd = w[0];
@@ -112,6 +114,19 @@ std::string execute(Shell& shell, const std::string& line) {
     return label + (enabled ? "on" : "off");
   }
 
+  if (cmd == "lights") {
+    if (w.size() != 1) return "usage: lights";
+    if (!lab) return "lab is off";
+    std::ostringstream out;
+    for (const auto& l : lab->lights) {
+      if (out.tellp() > 0) out << '\n';
+      out << l.name << (l.kind == io::LabLight::Kind::Spot ? " spot (" : " point (")
+          << std::fixed << std::setprecision(2) << l.pos[0] << ", " << l.pos[1] << ", "
+          << l.pos[2] << ") r " << std::setprecision(1) << l.radius << " m  i "
+          << std::setprecision(2) << l.intensity << "  " << l.group;
+    }
+    return out.str();
+  }
   if (cmd == "load") {
     if (w.size() < 2) return "usage: load <variant>";
     const auto ok = shell.startGame(w[1]);
@@ -164,6 +179,7 @@ std::string execute(Shell& shell, const std::string& line) {
     if (key == "devOverlay") key = "dev_overlay";
     if (key == "postProcess") key = "post_process";
     if (key == "bloomScale") key = "bloom_scale";
+    if (key == "roomLight") key = "room_light";
     if (key == "presentationIntensity") key = "presentation_intensity";
     if (cmd == "get") {
       if (w.size() < 2) return text;
@@ -457,6 +473,8 @@ std::string DebugConsole::help() {
          "stays on in both paths\n"
          "set guiScaleAuto true|false  automatic interface scale; guiScale is its "
          "multiplier\n"
+         "set roomLight 0..2       practical room-light gain (machine lights unchanged)\n"
+         "lights       list the active lab lights (no game needed)\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"
@@ -496,7 +514,8 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
   if (words(text).empty()) return {};
   history_.push_back(text);
   log_.push_back("> " + text);
-  std::string out = words(text)[0] == "clear" ? std::string{} : execute(shell, text);
+  std::string out =
+      words(text)[0] == "clear" ? std::string{} : execute(shell, text, labDoc_);
   if (words(text)[0] == "clear") log_.clear();
   std::istringstream lines(out);
   std::string l;
