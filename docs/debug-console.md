@@ -195,3 +195,14 @@ and EXIT REVIEW. A clicked ledger row jumps to it. REVIEW is also on the result 
 is hidden for a game that cannot be replayed (FEN-started or temporal). Capture a review
 frame with `--script "$MATE" --review 2 --end-t 9`; in a script, `review 2`, `review next`,
 `review prev`, `review off`.
+
+### M24.4c-3d: the library wall projector and rack
+
+With `lab on`, `goto menu` shows the larger bench manifold; `goto newgame`
+selects the wall projector and slides out the selected variant's rack slabs (one
+for standard, five for cube5, eight for hyper4). `projector off` disables either
+projector. `transition menu newgame` and `transition newgame menu` preview the
+handoff, with each subject collapsing into its own lens. Capture these with the
+existing `--lab 1 --screen newgame --from menu --transition-t <seconds>`;
+`--overture-t` still pins the selected variant's formation. Slab motion uses the
+same explicit transition age, and calm presentation snaps the slabs to their targets.

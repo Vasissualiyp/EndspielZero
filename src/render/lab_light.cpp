@@ -23,7 +23,8 @@ GpuLightBlock neutralLightBlock() noexcept {
 }
 GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene, float roomLight,
                             float keyFactor, std::string_view lightName,
-                            float intensityScale, const view::Theme& theme) {
+                            float intensityScale, const view::Theme& theme,
+                            float wallProjectorScale) {
   auto b = neutralLightBlock();
   const auto count = std::min<std::size_t>(doc.lights.size(), 8);
   const auto implant = theme.implant.array();
@@ -42,7 +43,8 @@ GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene, float 
     out.colorIntensity[1] = l.color.g;
     out.colorIntensity[2] = l.color.b;
     out.colorIntensity[3] = l.intensity * (l.group == "room" ? roomLight : 1) *
-                            (l.name == lightName ? intensityScale : 1);
+                            (l.name == lightName ? intensityScale : 1) *
+                            (l.name == "wallprojector" ? wallProjectorScale : 1);
     out.dirCone[3] = -2;
     if (l.kind == io::LabLight::Kind::Spot) {
       const float length = std::hypot(l.dir[0], l.dir[1], l.dir[2]);

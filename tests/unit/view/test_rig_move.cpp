@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <numbers>
+#include "support/variants.hpp"
 #include "view/rig_move.hpp"
 using namespace cb::view;
 using Catch::Approx;
@@ -82,4 +83,27 @@ TEST_CASE("rig duration is symmetric bounded and angular speed is explicit",
   b.pitch = .2f;
   CHECK(rigMoveSeconds(a, b, .05f) == Approx(rigMoveSeconds(b, a, .05f)));
   CHECK(rigMoveSeconds(a, b, 1) == kRigMaxSeconds);
+}
+
+TEST_CASE("rack slabs ease out only for selected slots", "[unit][view][rig]") {
+  CHECK(slabSlide(0, 1, 0, 1) == 0);
+  CHECK(slabSlide(0, 1, .125f, 1) == Approx(.03f));
+  CHECK(slabSlide(0, 1, .25f, 1) == .06f);
+  CHECK(slabSlide(0, 1, 1, 1) == .06f);
+  CHECK(slabSlide(1, 1, 1, 1) == 0);
+  CHECK(slabSlide(0, 0, 1, 1) == 0);
+  CHECK(slabSlide(0, 1, 0, 0) == .06f);
+  CHECK(slabSlide(1, 1, 0, 0) == 0);
+}
+
+TEST_CASE("rack count follows flat sections of the layout and caps at eight",
+          "[unit][view][rig]") {
+  for (const auto& item : {std::pair{"standard", 1},
+                           {"cylinder", 1},
+                           {"torus", 1},
+                           {"cube5", 5},
+                           {"hyper4", 8}}) {
+    const auto spec = cb::test::loadVariant(item.first);
+    CHECK(rackSlabCount(spec.dims) == item.second);
+  }
 }

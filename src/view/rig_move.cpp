@@ -49,4 +49,16 @@ float rigAngularSpeed(const OrbitCamera& from, const OrbitCamera& to, float age,
              std::clamp(dot(direction(age - .005f), direction(age + .005f)), -1.f, 1.f)) /
          .01f;
 }
+int rackSlabCount(const DimSpec& dims) {
+  const auto cfg = ViewConfig::forBoard(dims);
+  int count = 1;
+  for (std::size_t i = 2; i < cfg.screenAxes.size(); ++i)
+    count = std::min(8, count * dims.extent(cfg.screenAxes[i]));
+  for (const auto axis : cfg.gridAxes) count = std::min(8, count * dims.extent(axis));
+  return count;
+}
+float slabSlide(int slot, int count, float ageSinceChange, float intensity) noexcept {
+  if (slot < 0 || slot >= count) return 0;
+  return .06f * (intensity < .5f ? 1.f : rigEase(ageSinceChange / .25f));
+}
 }  // namespace cb::view

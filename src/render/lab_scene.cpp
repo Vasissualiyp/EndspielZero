@@ -74,7 +74,8 @@ std::optional<view::OrbitCamera> LabScene::station(std::string_view name) const 
   return c;
 }
 void LabScene::appendTo(InstanceSet& set, const view::Theme& theme,
-                        const std::function<float(std::string_view)>& salience) const {
+                        const std::function<float(std::string_view)>& salience,
+                        const std::array<float, 8>& slabSlides) const {
   (void)theme;  // Authored part colours/materials are independent of the theme.
   set.lab.clear();
   set.labBatches = {};
@@ -98,6 +99,19 @@ void LabScene::appendTo(InstanceSet& set, const view::Theme& theme,
     const auto q =
         quatFromYawPitchRoll(radians(p.rot[0]), radians(p.rot[1]), radians(p.rot[2]));
     std::copy(q.begin(), q.end(), i.quat);
+    if (p.name.starts_with("magazine.slab.") && p.name.size() == 15 &&
+        p.name.back() >= '0' && p.name.back() <= '7') {
+      // Local +Y points out of the authored slot (world -X at the rack pose).
+      const view::Vec3 axis{q[0], q[1], q[2]}, local{0, 1, 0};
+      const auto t = view::cross(axis, local) * 2;
+      const auto out = local + t * q[3] + view::cross(axis, t);
+      const auto offset =
+          out *
+          (slabSlides[static_cast<std::size_t>(p.name.back() - '0')] * kCellsPerMetre);
+      i.center[0] += offset.x;
+      i.center[1] += offset.y;
+      i.center[2] += offset.z;
+    }
     const auto color = p.color.array();
     std::copy(color.begin(), color.end(), i.color);
     constexpr std::array<view::Material, 7> materials{

@@ -6,6 +6,7 @@ version = 1
 [anchors]
 "gantry.centre" = [0.0, 0.6, 1.05]
 "projector.lens" = [-0.6, 2.62, 1.015]
+"wallprojector.lens" = [2.225, 2.65, 1.55]
 "magazine.front" = [2.245, 1.8, 1.3]
 "door.centre" = [0.0, -2.98, 1.2]
 "bench.top" = [-0.3, 2.65, 0.925]
@@ -685,10 +686,10 @@ group = "clutter"
 
 [[station]]
 name = "menu"
-target = [-0.15, 2.55, 1.2]
-distance = 1.55
+target = [-0.1495, 2.4012, 1.3518]
+distance = 1.1153
 yaw = 12
-pitch = 14
+pitch = 11.7746
 fov = 50
 
 [[station]]
@@ -701,11 +702,11 @@ fov = 50
 
 [[station]]
 name = "library"
-target = [2.8, 2.2, 2.4]
-distance = 4.0
-yaw = -10
-pitch = 0
-fov = 65
+target = [1.9095, 1.4131, 1.2759]
+distance = 3.0438
+yaw = -112.534
+pitch = 3.6237
+fov = 47.8809
 
 [[station]]
 name = "watch"
@@ -808,3 +809,56 @@ distance = 1.6
 yaw = 0
 pitch = -60
 fov = 50
+
+# Wall-mounted copy of the bench projector; +Z becomes world -X.
+[[part]]
+name = "wallprojector.bracket"
+focus = "wallprojector"
+mesh = "bevel"
+pos = [2.40, 2.65, 1.55]
+size = [0.20, 0.06, 0.06]
+material = "metal"
+color = "#1C1F24"
+group = "rig"
+
+[[part]]
+name = "wallprojector.body"
+focus = "wallprojector"
+mesh = "file:models/projector_body.obj"
+pos = [2.30, 2.65, 1.55]
+size = [1, 1, 1]
+rot = [0, -90, 0]
+material = "matte"
+color = "#1C1F24"
+group = "rig"
+
+[[part]]
+name = "wallprojector.lens"
+focus = "wallprojector"
+mesh = "file:models/projector_lens.obj"
+pos = [2.30, 2.65, 1.55]
+size = [1, 1, 1]
+rot = [0, -90, 0]
+material = "glass"
+color = "#203040"
+group = "rig"
+
+[[part]]
+name = "wallprojector.leds"
+focus = "wallprojector"
+mesh = "file:models/projector_leds.obj"
+pos = [2.30, 2.65, 1.55]
+size = [1, 1, 1]
+rot = [0, -90, 0]
+material = "glow"
+color = "#6FE3FF"
+group = "rig"
+
+[[light]]
+name = "wallprojector"
+kind = "point"
+pos = [2.225, 2.65, 1.55]
+color = "#6FE3FF"
+intensity = 0.45
+radius = 1.2
+group = "machine"

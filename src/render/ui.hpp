@@ -29,6 +29,11 @@ union SDL_Event;
 
 namespace cb::render {
 
+/// The manifold is the menu centrepiece; other bench previews retain their radius.
+inline constexpr float kMenuHologramRadiusMetres = .26f;
+inline constexpr float kHologramRadiusMetres = .20f;
+inline constexpr float kWallHologramRadiusMetres = .42f;
+
 struct HologramRequest {
   enum Kind { None, Manifold, Overture, Tesseract } kind{None};
   float seconds{0};
@@ -36,6 +41,8 @@ struct HologramRequest {
   float alpha{1};
   float scale{1};
   float squashZ{1};
+  enum class Projector { Bench, Wall } projector{Projector::Bench};
+  float radiusMetres{kHologramRadiusMetres};
 };
 
 /// The window of the authoring plane an outline editor shows, in permille. The body's
@@ -231,6 +238,7 @@ class Ui {
   [[nodiscard]] float salience(std::string_view focus) const;
   [[nodiscard]] std::string_view stationPin() const { return console_.stationPin(); }
   [[nodiscard]] HologramRequest hologramRequest() const;
+  [[nodiscard]] std::array<float, 8> rackSlides() const;
   [[nodiscard]] const OvertureScene* overtureScene() const {
     if (move_ == app::ScreenMove::Station && intensity_ >= .5f && enter_ < .4f &&
         leavingHologram_.kind == HologramRequest::Overture)
@@ -302,6 +310,10 @@ class Ui {
   OvertureScene overtureLeaving_;
   std::string leavingVariant_;
   HologramRequest hologramRequest_{};
+  std::array<float, 8> rackFrom_{};
+  int rackCount_{0};
+  float rackAge_{0};
+  bool rackScreenChange_{false};
   Ui() = default;
   bool forceDevOverlay_{false};
   std::optional<std::uint8_t> seamHover_;

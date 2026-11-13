@@ -20,7 +20,7 @@ struct HologramPlacement {
   float yaw{0};
   float alpha{1};
   float scale{1};
-  float squashZ{1};
+  float squashZ{1};  ///< Historical name: squash along lens-to-centre, about the lens.
   view::Vec3 lens{};
 };
 /// Columns of a right-handed orthonormal frame; quaternion order is x,y,z,w.

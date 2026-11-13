@@ -174,15 +174,20 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
   renderer.setImplant(p);
 }
 
-float appendProjector(const render::Ui& ui, const app::Settings& settings,
-                      render::InstanceSet& instances, const view::Theme& theme) {
-  if (!(gProjector >= 0 ? gProjector == 1 : settings.projector)) return 0;
+std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& settings,
+                                     render::InstanceSet& instances,
+                                     const view::Theme& theme) {
+  if (!(gProjector >= 0 ? gProjector == 1 : settings.projector)) return {};
   const auto req = ui.hologramRequest();
-  auto lens = *gLabScene->doc().anchor("projector.lens");
+  const bool wall = req.projector == render::HologramRequest::Projector::Wall;
+  auto lens = *gLabScene->doc().anchor(wall ? "wallprojector.lens" : "projector.lens");
   const auto source = gLabScene->toWorld(lens);
-  lens[2] += .32f;
+  if (wall)
+    lens[0] -= .10f + req.radiusMetres;
+  else
+    lens[2] += .32f - .20f + req.radiusMetres;
   const render::HologramPlacement at{gLabScene->toWorld(lens),
-                                     .20f * render::kCellsPerMetre,
+                                     req.radiusMetres * render::kCellsPerMetre,
                                      req.yaw,
                                      req.alpha,
                                      req.scale,
@@ -203,13 +208,13 @@ float appendProjector(const render::Ui& ui, const app::Settings& settings,
     case render::HologramRequest::None:
       break;
   }
-  if (!h.any()) return 0;
+  if (!h.any()) return {};
   instances.holo = std::move(h.quads);
   instances.holo.insert(instances.holo.end(), h.lines.begin(), h.lines.end());
   instances.holoTokens = std::move(h.tokens);
   instances.holoTokenBatches = h.tokenBatches;
   instances.holoBeam.push_back(render::projectorBeam(source, at, theme));
-  return req.alpha;
+  return wall ? std::array{0.f, req.alpha} : std::array{req.alpha, 0.f};
 }
 #endif
 
@@ -1300,11 +1305,13 @@ int captureFrame(const std::string& variantName, const std::string& path,
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
-    float projected = 0;
+    std::array<float, 2> projected{};
     if (room) {
 #ifdef CB_HAVE_IMGUI
-      gLabScene->appendTo(instances, renderer->theme(),
-                          [&](std::string_view focus) { return (*ui)->salience(focus); });
+      gLabScene->appendTo(
+          instances, renderer->theme(),
+          [&](std::string_view focus) { return (*ui)->salience(focus); },
+          (*ui)->rackSlides());
 #else
       gLabScene->appendTo(instances, renderer->theme());
 #endif
@@ -1324,8 +1331,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                    gLabScene->doc(), *gLabScene,
                                    gRoomLightOverride >= 0 ? gRoomLightOverride
                                                            : shell->settings().roomLight,
-                                   render::kLabKey, "projector", .5f + .5f * projected,
-                                   renderer->theme())
+                                   render::kLabKey, "projector", .5f + .5f * projected[0],
+                                   renderer->theme(), .5f + .5f * projected[1])
                              : render::neutralLightBlock());
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
@@ -2953,11 +2960,13 @@ int main(int argc, char** argv) {
     auto labOptions = renderer->options();
     labOptions.labMode = room;
     renderer->setOptions(labOptions);
-    float projected = 0;
+    std::array<float, 2> projected{};
     if (room) {
 #ifdef CB_HAVE_IMGUI
-      gLabScene->appendTo(instances, renderer->theme(),
-                          [&](std::string_view focus) { return (*ui)->salience(focus); });
+      gLabScene->appendTo(
+          instances, renderer->theme(),
+          [&](std::string_view focus) { return (*ui)->salience(focus); },
+          (*ui)->rackSlides());
 #else
       gLabScene->appendTo(instances, renderer->theme());
 #endif
@@ -2976,8 +2985,8 @@ int main(int argc, char** argv) {
                                    gLabScene->doc(), *gLabScene,
                                    gRoomLightOverride >= 0 ? gRoomLightOverride
                                                            : shell->settings().roomLight,
-                                   render::kLabKey, "projector", .5f + .5f * projected,
-                                   renderer->theme())
+                                   render::kLabKey, "projector", .5f + .5f * projected[0],
+                                   renderer->theme(), .5f + .5f * projected[1])
                              : render::neutralLightBlock());
     const auto overlay = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI

@@ -33,6 +33,6 @@ static_assert(offsetof(GpuLightBlock, implant) == 432);
 [[nodiscard]] GpuLightBlock labLightBlock(
     const io::LabDoc& doc, const LabScene& scene, float roomLight, float keyFactor,
     std::string_view lightName = {}, float intensityScale = 1,
-    const view::Theme& theme = view::Theme::manifold());
+    const view::Theme& theme = view::Theme::manifold(), float wallProjectorScale = 1);
 [[nodiscard]] GpuLightBlock neutralLightBlock() noexcept;
 }  // namespace cb::render

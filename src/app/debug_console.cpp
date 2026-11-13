@@ -488,7 +488,7 @@ std::string DebugConsole::help() {
          "station <name>|off  pin the lab camera to a station\n"
          "salience <focus>|off  pin a lab object salience glow\n"
          "lights       list the active lab lights (no game needed)\n"
-         "projector [on|off] toggle the bench hologram (also get/set projector)\n"
+         "projector [on|off] toggle the bench/wall hologram (also get/set projector)\n"
          "implant [on|off] toggle organic menu perception (also get/set implantFx)\n"
          "heartbeat [on|off] toggle the implant double pulse\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"

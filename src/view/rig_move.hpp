@@ -17,4 +17,9 @@ inline constexpr float kRigMaxSeconds = 1.1f;
 /// Angular speed in rad/s, sampled across +/-5 ms, zero outside the move.
 [[nodiscard]] float rigAngularSpeed(const OrbitCamera& from, const OrbitCamera& to,
                                     float age, float seconds) noexcept;
+/// Flat two-dimensional sections of the existing layout, capped to the eight bays.
+[[nodiscard]] int rackSlabCount(const DimSpec& dims);
+/// Selected rack slots slide 60 mm over 250 ms; calm snaps to the target.
+[[nodiscard]] float slabSlide(int slot, int count, float ageSinceChange,
+                              float intensity) noexcept;
 }  // namespace cb::view

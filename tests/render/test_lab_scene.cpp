@@ -142,7 +142,8 @@ TEST_CASE("lab station framing keeps the hardware visible and eyes inside the ro
     CHECK(eye.z > 0);
     CHECK(eye.z < 2.7f);
     if (st.name == "menu" || st.name == "library" || st.name == "watch") {
-      for (auto anchor : {"projector.lens", "magazine.front"}) {
+      for (auto anchor : {st.name == "library" ? "wallprojector.lens" : "projector.lens",
+                          "magazine.front"}) {
         if (st.name == "menu" && std::string_view(anchor) == "magazine.front") continue;
         CAPTURE(anchor);
         const auto projected = view::transformPoint(camera.viewProj(16.f / 9),
@@ -299,5 +300,158 @@ TEST_CASE("menu station flights keep their eyes within the room", "[unit][render
         CHECK(eye.z < 2.7f);
       }
     }
+}
+
+TEST_CASE("wall projector reuses mounted hardware with its lens facing minus X",
+          "[unit][render][lab]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  const auto part = [&](std::string_view name) -> const io::LabPart& {
+    auto p = std::find_if(doc->parts.begin(), doc->parts.end(),
+                          [&](const auto& item) { return item.name == name; });
+    REQUIRE(p != doc->parts.end());
+    return *p;
+  };
+  for (const auto suffix : {"body", "lens", "leds"}) {
+    const auto& bench = part(std::string("projector.") + suffix);
+    const auto& wall = part(std::string("wallprojector.") + suffix);
+    CHECK(wall.file == bench.file);
+    CHECK(wall.material == bench.material);
+    CHECK(wall.group == "rig");
+    CHECK(wall.focus == "wallprojector");
+    CHECK(wall.rot == std::array<float, 3>{0, -90, 0});
+  }
+  const auto& body = part("wallprojector.body");
+  const auto& bracket = part("wallprojector.bracket");
+  CHECK(bracket.pos[0] + bracket.size[0] / 2 == Catch::Approx(2.5f));
+  CHECK(bracket.pos[0] - bracket.size[0] / 2 == Catch::Approx(body.pos[0]));
+  const auto lens = doc->anchor("wallprojector.lens");
+  REQUIRE(lens);
+  CHECK((*lens)[0] == Catch::Approx(body.pos[0] - .075f));
+  CHECK((*lens)[1] == body.pos[1]);
+  CHECK((*lens)[2] == body.pos[2]);
+}
+
+TEST_CASE("rack offsets move selected slabs toward the room only",
+          "[unit][render][lab]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  InstanceSet parked, moved;
+  lab->appendTo(parked, view::Theme::manifold());
+  std::array<float, 8> slides{};
+  slides[0] = .06f;
+  lab->appendTo(moved, view::Theme::manifold(), {}, slides);
+  REQUIRE(parked.lab.size() == moved.lab.size());
+  int changed = 0;
+  for (std::size_t i = 0; i < parked.lab.size(); ++i) {
+    CHECK(moved.lab[i].center[1] == parked.lab[i].center[1]);
+    CHECK(moved.lab[i].center[2] == parked.lab[i].center[2]);
+    if (moved.lab[i].center[0] != parked.lab[i].center[0]) {
+      ++changed;
+      CHECK(moved.lab[i].center[0] == Catch::Approx(parked.lab[i].center[0] - 1.2f));
+    }
+  }
+  CHECK(changed == 1);
+}
+namespace {
+struct ProjectedBox {
+  float left{1}, right{0}, top{1}, bottom{0};
+  void add(const view::OrbitCamera& cam, float aspect, view::Vec3 point) {
+    const auto p = view::transformPoint(cam.viewProj(aspect), point);
+    left = std::min(left, .5f + .5f * p.x);
+    right = std::max(right, .5f + .5f * p.x);
+    top = std::min(top, .5f + .5f * p.y);
+    bottom = std::max(bottom, .5f + .5f * p.y);
+  }
+  void cube(const view::OrbitCamera& cam, float aspect, view::Vec3 lo, view::Vec3 hi) {
+    for (int i = 0; i < 8; ++i)
+      add(cam, aspect, {i & 1 ? hi.x : lo.x, i & 2 ? hi.y : lo.y, i & 4 ? hi.z : lo.z});
+  }
+  float area() const { return (right - left) * (bottom - top); }
+};
+void partBox(ProjectedBox& box, const LabScene& lab, const view::OrbitCamera& cam,
+             float aspect, std::string_view name) {
+  const auto& parts = lab.doc().parts;
+  const auto p = std::find_if(parts.begin(), parts.end(),
+                              [&](const auto& part) { return part.name == name; });
+  REQUIRE(p != parts.end());
+  std::ifstream file(p->file);
+  const std::string text((std::istreambuf_iterator<char>(file)), {});
+  auto mesh = io::parseObj(text, p->file.string());
+  REQUIRE(mesh);
+  view::Vec3 lo{1e9f, 1e9f, 1e9f}, hi{-1e9f, -1e9f, -1e9f};
+  const float rad = std::numbers::pi_v<float> / 180;
+  const auto q = quatFromYawPitchRoll(p->rot[0] * rad, p->rot[1] * rad, p->rot[2] * rad);
+  for (const auto& v : mesh->positions) {
+    const view::Vec3 raw{v[0] * p->size[0], v[1] * p->size[1], v[2] * p->size[2]};
+    const view::Vec3 axis{q[0], q[1], q[2]};
+    const auto t = view::cross(axis, raw) * 2;
+    const auto r = raw + t * q[3] + view::cross(axis, t);
+    const auto w = lab.toWorld({p->pos[0] + r.x, p->pos[1] + r.y, p->pos[2] + r.z});
+    lo = {std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
+    hi = {std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
+  }
+  box.cube(cam, aspect, lo, hi);
+}
+}  // namespace
+TEST_CASE("menu projector is a fifth of the viewport and clears its panel",
+          "[unit][render][lab]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto cam = *lab->station("menu");
+  auto lens = *doc->anchor("projector.lens");
+  lens[2] += .32f - .20f + .26f;
+  const auto centre = lab->toWorld(lens);
+  const view::Vec3 r{5.2f, 5.2f, 5.2f};
+  for (float aspect : {16.f / 9, 16.f / 10, 4.f / 3}) {
+    ProjectedBox box;
+    box.cube(cam, aspect, centre - r, centre + r);
+    partBox(box, *lab, cam, aspect, "projector.body");
+    CAPTURE(aspect, box.left, box.right, box.top, box.bottom, box.area());
+    if (aspect == 16.f / 9) {
+      CHECK(box.area() >= .17f);
+      CHECK(box.area() <= .23f);
+      CHECK(box.left >= .05f);
+      CHECK(box.right <= .47f);
+      CHECK(box.top >= .04f);
+    } else
+      CHECK(box.right <= .50f);
+  }
+}
+TEST_CASE("library looks into the rack beside a large wall hologram",
+          "[unit][render][lab]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto cam = *lab->station("library");
+  const auto direction = view::normalize(cam.target - cam.eye());
+  CHECK(direction.x >= std::cos(35.f * std::numbers::pi_v<float> / 180));
+  CHECK(std::abs(cam.pitch) <= 8.f * std::numbers::pi_v<float> / 180);
+  const auto origin = *doc->anchor("gantry.centre");
+  const float eyeZ = cam.eye().z / kCellsPerMetre + origin[2];
+  CHECK(eyeZ >= 1.3f);
+  CHECK(eyeZ <= 1.5f);
+  const auto front = lab->toWorld(*doc->anchor("magazine.front"));
+  CHECK(view::dot(view::normalize(cam.eye() - front), view::Vec3{-1, 0, 0}) >=
+        std::cos(50.f * std::numbers::pi_v<float> / 180));
+  auto lens = doc->anchor("wallprojector.lens");
+  REQUIRE(lens);
+  (*lens)[0] -= .52f;
+  const auto centre = lab->toWorld(*lens);
+  const view::Vec3 r{8.4f, 8.4f, 8.4f};
+  ProjectedBox holo, rack;
+  holo.cube(cam, 16.f / 9, centre - r, centre + r);
+  partBox(rack, *lab, cam, 16.f / 9, "magazine.frame");
+  CAPTURE(holo.left, holo.right, holo.area(), rack.left, rack.right);
+  CHECK(holo.left >= .04f);
+  CHECK(holo.right <= .50f);
+  CHECK(holo.area() >= .15f);
+  CHECK(rack.left >= .04f);
+  CHECK(rack.right <= .50f);
 }
 #endif

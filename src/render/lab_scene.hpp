@@ -15,7 +15,8 @@ class LabScene {
   [[nodiscard]] view::Vec3 toWorld(std::array<float, 3> metres) const noexcept;
   [[nodiscard]] std::optional<view::OrbitCamera> station(std::string_view name) const;
   void appendTo(InstanceSet& set, const view::Theme& theme,
-                const std::function<float(std::string_view)>& salience = {}) const;
+                const std::function<float(std::string_view)>& salience = {},
+                const std::array<float, 8>& slabSlides = {}) const;
   [[nodiscard]] const io::LabDoc& doc() const noexcept { return doc_; }
   [[nodiscard]] const std::vector<io::ObjMesh>& fileMeshes() const noexcept {
     return fileMeshes_;

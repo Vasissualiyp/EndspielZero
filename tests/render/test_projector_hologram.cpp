@@ -65,7 +65,9 @@ TEST_CASE("library projector keeps a1 on the near left corner",
       overtureScene(app::Overture::Standard, 0, false, view::Theme::manifold()),
       view::Theme::manifold(), at);
   REQUIRE(h.quads.size() == 64);
-  const auto camera = *lab->station("library");
+  // This pins M24.3's bench-preview orientation. M24.4c's Library uses the wall
+  // projector and a different station; Watch retains this original bench view.
+  const auto camera = *lab->station("watch");
   const auto a1 = centre(h.quads[0]), a8 = centre(h.quads[7]), h1 = centre(h.quads[56]);
   CHECK(camera.project(a1, 16.f / 9, 1920, 1080).x <
         camera.project(h1, 16.f / 9, 1920, 1080).x);
@@ -157,6 +159,12 @@ TEST_CASE("projector idle light only halves the named machine light",
   REQUIRE(doc);
   auto lab = LabScene::create(*doc);
   REQUIRE(lab);
+  const auto wall = labLightBlock(*doc, *lab, 1, kLabKey, "projector", .5f,
+                                  view::Theme::manifold(), .75f);
+  for (std::size_t i = 0; i < doc->lights.size(); ++i)
+    if (doc->lights[i].name == "wallprojector")
+      CHECK(wall.lights[i].colorIntensity[3] ==
+            Catch::Approx(doc->lights[i].intensity * .75f));
   const auto on = labLightBlock(*doc, *lab, 1, kLabKey, "projector", 1);
   const auto off = labLightBlock(*doc, *lab, 1, kLabKey, "projector", .5f);
   for (std::size_t i = 0; i < doc->lights.size(); ++i)
@@ -303,14 +311,19 @@ TEST_CASE("Ui requests projector subjects and refreshes overtures without flat d
       return (*ui)->hologramRequest();
     };
     CHECK(frame().kind == HologramRequest::Manifold);
+    CHECK((*ui)->hologramRequest().radiusMetres == .26f);
     shell->go(app::Screen::Welcome);
     CHECK(frame().kind == HologramRequest::Manifold);
+    CHECK((*ui)->hologramRequest().radiusMetres == .26f);
     shell->go(app::Screen::Settings);
     CHECK(frame().kind == HologramRequest::Tesseract);
+    CHECK((*ui)->hologramRequest().radiusMetres == .20f);
     shell->go(app::Screen::NewGame);
     shell->overtures().jumpTo(app::Overture::Torus);
     shell->overtures().setProgress(0);
     CHECK(frame().kind == HologramRequest::Overture);
+    CHECK((*ui)->hologramRequest().projector == HologramRequest::Projector::Wall);
+    CHECK((*ui)->hologramRequest().radiusMetres == .42f);
     REQUIRE((*ui)->overtureScene());
     const auto flat = (*ui)->overtureScene()->quads.front().p[0];
     shell->overtures().setProgress(1);
@@ -339,5 +352,29 @@ TEST_CASE("Ui requests projector subjects and refreshes overtures without flat d
     CHECK(frame().kind == HologramRequest::None);
   }
   CHECK(ctx->takeValidationMessages().empty());
+}
+
+TEST_CASE("wall projector beam and collapse follow minus X without rotating the subject",
+          "[unit][render][hologram]") {
+  HologramPlacement at;
+  at.lens = {30, 20, 25};
+  at.centre = {19.6f, 20, 25};
+  at.radius = 8.4f;
+  const auto beam = projectorBeam(at.lens, at, view::Theme::manifold());
+  CHECK(beam.center[0] == Catch::Approx(29));
+  CHECK(beam.center[1] == 20);
+  CHECK(beam.center[2] == 25);
+  const auto axis = rotated({0, 0, 1}, beam.quat);
+  CHECK(axis.x == Catch::Approx(-1));
+  const auto normal = tesseractHologram(.3f, view::Theme::manifold(), at);
+  at.squashZ = .25f;
+  const auto collapsed = tesseractHologram(.3f, view::Theme::manifold(), at);
+  REQUIRE(normal.lines.size() == collapsed.lines.size());
+  for (std::size_t n = 0; n < normal.lines.size(); ++n) {
+    CHECK(collapsed.lines[n].center[0] ==
+          Catch::Approx(30 + (normal.lines[n].center[0] - 30) * .25f));
+    CHECK(collapsed.lines[n].center[1] == Catch::Approx(normal.lines[n].center[1]));
+    CHECK(collapsed.lines[n].center[2] == Catch::Approx(normal.lines[n].center[2]));
+  }
 }
 #endif

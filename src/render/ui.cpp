@@ -901,6 +901,7 @@ void Ui::setVisualTime(double seconds) noexcept {
 void Ui::tick(float dt) {
   lastDt_ = dt;
   clock_ += dt;
+  rackAge_ += dt;
   field_.advance(dt);
   boardField_.advance(dt);
   // Ease the arrival rather than run it linearly: a screen that stops dead has not
@@ -980,10 +981,22 @@ float Ui::salience(std::string_view focus) const {
   return value;
 }
 
+std::array<float, 8> Ui::rackSlides() const {
+  auto result = rackFrom_;
+  const float age = rackScreenChange_ && pinnedMoveAge_ ? *pinnedMoveAge_ : rackAge_;
+  const float progress = view::slabSlide(0, 1, age, intensity_) / .06f;
+  for (std::size_t i = 0; i < result.size(); ++i)
+    result[i] =
+        std::lerp(rackFrom_[i], static_cast<int>(i) < rackCount_ ? .06f : 0.f, progress);
+  return result;
+}
+
 HologramRequest Ui::hologramRequest() const {
   auto out = hologramRequest_;
   if (move_ != app::ScreenMove::Station || intensity_ < .5f || enter_ >= 1) return out;
-  if (out.kind == leavingHologram_.kind &&
+  const float radius =
+      std::lerp(leavingHologram_.radiusMetres, out.radiusMetres, smoothstep(enter_));
+  if (out.projector == leavingHologram_.projector && out.kind == leavingHologram_.kind &&
       (out.kind != HologramRequest::Overture || leavingVariant_ == pickedVariant_))
     return out;
   if (enter_ < .4f) {
@@ -998,6 +1011,7 @@ HologramRequest Ui::hologramRequest() const {
     out.scale = out.alpha = smoothstep((enter_ - .5f) / .5f);
     out.squashZ = out.scale;
   }
+  out.radiusMetres = radius;
   return out;
 }
 
@@ -1179,10 +1193,13 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
   hologramRequest_.yaw = objectYaw_;
   if (shell.screen() == app::Screen::NewGame) {
     hologramRequest_.kind = HologramRequest::Overture;
+    hologramRequest_.projector = HologramRequest::Projector::Wall;
+    hologramRequest_.radiusMetres = kWallHologramRadiusMetres;
   } else {
     switch (decoForScreen(static_cast<int>(shell.screen()), shell.showsBoard())) {
       case Deco::Manifold:
         hologramRequest_.kind = HologramRequest::Manifold;
+        hologramRequest_.radiusMetres = kMenuHologramRadiusMetres;
         break;
       case Deco::Tesseract:
         hologramRequest_.kind = HologramRequest::Tesseract;
@@ -1746,10 +1763,13 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
         refreshOvertureCache(shell);
         overtureLeaving_ = overtureCache_;
         leavingHologram_.kind = HologramRequest::Overture;
+        leavingHologram_.projector = HologramRequest::Projector::Wall;
+        leavingHologram_.radiusMetres = kWallHologramRadiusMetres;
       } else {
         switch (decoForScreen(lastScreen_, false)) {
           case Deco::Manifold:
             leavingHologram_.kind = HologramRequest::Manifold;
+            leavingHologram_.radiusMetres = kMenuHologramRadiusMetres;
             break;
           case Deco::Tesseract:
             leavingHologram_.kind = HologramRequest::Tesseract;
@@ -1875,6 +1895,28 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     case app::Screen::Game:
       request = buildGameHud(shell, fps);
       break;
+  }
+  if (previewed && move_ == app::ScreenMove::Station) {
+    // A console/CLI preview starts at its named source, independent of the last
+    // real screen. The ghost Library has now resolved its selected variant.
+    rackCount_ = 0;
+    if (shell.transitionFrom() == app::Screen::NewGame)
+      if (const auto* spec = shell.preview(pickedVariant_))
+        rackCount_ = view::rackSlabCount(spec->dims);
+    for (std::size_t i = 0; i < rackFrom_.size(); ++i)
+      rackFrom_[i] = static_cast<int>(i) < rackCount_ ? .06f : 0.f;
+    rackAge_ = 0;
+    rackScreenChange_ = true;
+  }
+  int rackCount = 0;
+  if (labBackdrop_ && shell.screen() == app::Screen::NewGame)
+    if (const auto* spec = shell.preview(pickedVariant_))
+      rackCount = view::rackSlabCount(spec->dims);
+  if (rackCount != rackCount_) {
+    rackFrom_ = rackSlides();
+    rackCount_ = rackCount;
+    rackAge_ = 0;
+    rackScreenChange_ = enter_ < 1;
   }
   if (waiting) ImGui::EndDisabled();
   drawCheckEdges(shell);
