@@ -143,8 +143,10 @@ other's motion vocabulary, so hardware and brain are always told apart.
   fringe flow, the panel's noise dissolve resolves, and glyphs sharpen. No ring wave. This
   replaces the M23.11 trace-on (edges, fill, scanline), which is an LED motion and now
   belongs to the hardware only. Dissolving reverses it over about 0.25 s: glyphs blur
-  into drifting colour, the panel breaks into a few phosphenes, and the afterimage
-  follows.
+  into drifting colour, the panel melts back towards where the eye was, and the
+  afterimage follows. Panels condense outward from one point (the title, or where you
+  clicked) like an image coming into focus; no sparks or dots (user, 2026-11-12: points
+  read as random flashes). Points of light belong only to the launch handshake.
 - **Afterimage.** When a panel dissolves, a faint negative of it (complementary hue,
   about 8 % strength, slightly blurred) lingers and fades over about 0.3 s, as a bright
   image does on the retina.
