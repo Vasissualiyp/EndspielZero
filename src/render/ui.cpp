@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "render/ui.hpp"
 #include "render/lab_scene.hpp"
+#include "view/implant_fx.hpp"
 #include "view/rig_move.hpp"
 
 #include <algorithm>
@@ -907,6 +908,7 @@ void Ui::tick(float dt) {
   // The new screen moves (section 6) run on the same clock at their own rate: their
   // length in seconds is the whole clock.
   const float seconds = currentMoveSeconds();
+  implantMoveAge_ = pinnedMoveAge_ ? *pinnedMoveAge_ : implantMoveAge_ + dt;
   if (pinnedMoveAge_ && seconds > 0.0f) {
     enter_ = std::clamp(*pinnedMoveAge_ / seconds, 0.0f, 1.0f);
   } else if (enter_ < 1.0f) {
@@ -924,7 +926,32 @@ float Ui::currentMoveSeconds() const noexcept {
   return app::moveSeconds(move_, intensity_);
 }
 
+float Ui::implantPanelAge(bool leaving) const noexcept {
+  return pinnedPanelAge_.value_or(implantMoveAge_ -
+                                  (leaving ? 0.f : .55f * currentMoveSeconds()));
+}
+
+float Ui::saccadicDip() const noexcept {
+  if (move_ != app::ScreenMove::Station || enter_ >= 1 || !fromCam_ || !toCam_) return 0;
+  return view::saccadicDip(
+      view::rigAngularSpeed(*fromCam_, *toCam_, implantMoveAge_, currentMoveSeconds()),
+      intensity_);
+}
+
+void Ui::recordToolRect() {
+  const auto pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+  const auto scale = ImGui::GetIO().DisplayFramebufferScale;
+  const auto origin = ImGui::GetMainViewport()->Pos;
+  toolRects_.push_back({(pos.x - origin.x) * scale.x, (pos.y - origin.y) * scale.y,
+                        (pos.x + size.x - origin.x) * scale.x,
+                        (pos.y + size.y - origin.y) * scale.y});
+}
+
 bool Ui::paneInteractive() const noexcept {
+  if (implantActive_ && move_ == app::ScreenMove::Station &&
+      (enter_ < 1 || pinnedPanelAge_))
+    return !ghosting_ &&
+           view::implantForming(implantPanelAge(false), intensity_).form >= .5f;
   return !ghosting_ && (move_ != app::ScreenMove::Station || moveFx().arriveAlpha > .5f);
 }
 
@@ -1520,6 +1547,12 @@ float Ui::inEase() const noexcept {
 }
 
 Ui::PaneMove Ui::paneMove() const noexcept {
+  if (implantActive_ && move_ == app::ScreenMove::Station) {
+    if (ghosting_) return {1, 1, 1};
+    return {1,
+            (enter_ >= 1 && !pinnedPanelAge_) || implantPanelAge(false) >= 0 ? 1.f : 0.f,
+            1};
+  }
   if (move_ != app::ScreenMove::Cut) {
     // A move into or out of the game (section 6): the panel traces on or off in place,
     // with no grow or swell. Calm moves cross-fade with the edge complete.
@@ -1557,7 +1590,15 @@ void Ui::drawGhost(app::Shell& shell) {
     // Only the moves that take a panel away leave one to draw: the menu off to the game,
     // the pause panel off to the game.
     const app::MoveFx fx = moveFx();
-    if (fx.done || fx.leaveAlpha <= 0.0f ||
+    if (implantActive_ && move_ == app::ScreenMove::Station &&
+        (!view::implantLeaving(implantPanelAge(true), intensity_).visible() ||
+         implantMoveAge_ >= implantLeavingUntil_))
+      return;
+    const bool implantGhost =
+        implantActive_ && move_ == app::ScreenMove::Station &&
+        implantMoveAge_ < implantLeavingUntil_ &&
+        view::implantLeaving(implantPanelAge(true), intensity_).visible();
+    if ((!implantGhost && (fx.done || fx.leaveAlpha <= 0.0f)) ||
         (!isMenuScreen(leaving) &&
          !(move_ == app::ScreenMove::Station && leaving == app::Screen::Welcome)))
       return;
@@ -1618,7 +1659,9 @@ void Ui::drawDebugConsole(app::Shell& shell) {
   if (!consoleOpen_) return;
   ImGui::SetNextWindowSize(ImVec2(640, 360), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
-  if (ImGui::Begin("Debug console (F12)", &consoleOpen_)) {
+  const bool opened = ImGui::Begin("Debug console (F12)", &consoleOpen_);
+  recordToolRect();
+  if (opened) {
     const float footer = ImGui::GetFrameHeightWithSpacing();
     ImGui::BeginChild("scrollback", ImVec2(0, -footer), true,
                       ImGuiWindowFlags_HorizontalScrollbar);
@@ -1663,6 +1706,8 @@ void Ui::drawDebugConsole(app::Shell& shell) {
 }
 
 UiRequest Ui::build(app::Shell& shell, float fps) {
+  implantRecords_.clear();
+  toolRects_.clear();
   seamHover_.reset();
   const widgets::ScopedVisualTime visualTime(visualTime_);
   updateKeyboardNavigation(shell);
@@ -1753,6 +1798,11 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     enter_ = pinnedMoveAge_ && currentMoveSeconds() > 0
                  ? std::clamp(*pinnedMoveAge_ / currentMoveSeconds(), 0.f, 1.f)
                  : 0.f;
+    implantMoveAge_ = pinnedMoveAge_.value_or(0.f);
+    implantLeavingUntil_ =
+        implantActive_ && move_ == app::ScreenMove::Station
+            ? view::kImplantDissolveSeconds + view::kImplantAfterimageSeconds
+            : 0.f;
     lastScreen_ = screen;
     // The library always opens on standard. It is the board every overture departs from,
     // so it is the one that makes the next choice legible - and reopening on whatever
@@ -3204,6 +3254,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
                             ImGuiCond_Always, ImVec2(1.0f, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("##fps", nullptr, overlayFlags);
+    recordToolRect();
     ImGui::PushFont(small);
     ImGui::PushStyleColor(ImGuiCol_Text, col(t.boneFaint, 0.55f));
     ImGui::Text("%3.0f fps", static_cast<double>(fps));

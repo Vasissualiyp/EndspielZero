@@ -245,6 +245,9 @@ Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx,
   r.ctx_ = &ctx;
   r.colorFormat_ = colorFormat;
   r.meshes_ = MeshLibrary::build();
+  auto implant = ImplantLayer::create(ctx, colorFormat);
+  if (!implant) return fail(implant.error().code, implant.error().message);
+  r.implant_ = std::move(*implant);
   if (PostProcess::supported(ctx)) {
     auto post = PostProcess::create(ctx, colorFormat);
     if (!post.has_value()) return fail(post.error().code, post.error().message);
@@ -2939,7 +2942,16 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
 
     // The interface is drawn last and never blurred: the menu in front of a defocused
     // board is the one thing on screen that has to stay sharp.
-    if (overlay) {
+    if (overlay && implant_ && implantParams_) {
+      if (auto r = implant_->prepare(target.width(), target.height(), frame); !r)
+        return r;
+      implant_->beginLayer(cmd, frame);
+      vkCmdSetViewport(cmd, 0, 1, &full);
+      vkCmdSetScissor(cmd, 0, 1, &fullScissor);
+      overlay(cmd);
+      implant_->endLayer(cmd, frame);
+      implant_->composite(cmd, target, *implantParams_, frame);
+    } else if (overlay) {
       VkRenderingAttachmentInfo att{};
       att.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
       att.imageView = target.colorView();
@@ -3000,6 +3012,8 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(postEnabled_, o.postEnabled_);
   std::swap(bloomScale_, o.bloomScale_);
   std::swap(post_, o.post_);
+  std::swap(implant_, o.implant_);
+  std::swap(implantParams_, o.implantParams_);
   std::swap(postUnavailable_, o.postUnavailable_);
   std::swap(blurVert_, o.blurVert_);
   std::swap(blurFrag_, o.blurFrag_);

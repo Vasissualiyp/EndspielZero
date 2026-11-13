@@ -17,10 +17,12 @@
 #include <string>
 #include <vector>
 
+#include <imgui_internal.h>
 #include "io/notation.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/ui.hpp"
 #include "render/ui_widgets.hpp"
+#include "view/implant_fx.hpp"
 
 namespace cb::render {
 namespace {
@@ -45,14 +47,6 @@ float menuPanePadding(const view::Theme& theme, ImVec2 min, ImVec2 max, float sc
   if (!theme.liveControls) return preferred;
   const float width = std::max(0.0f, max.x - min.x);
   return std::min(preferred, (width - std::min(200 * scale, width * 0.84f)) * 0.5f);
-}
-
-/// beginPane plus the screen panel behind its content (M23.11 section 5).
-void beginScreenPane(const view::Theme& theme, float scale, const char* id, ImVec2 min,
-                     ImVec2 max, float transitionScale, float alpha, float trace,
-                     float pad, bool remember, bool fadeFinished = false) {
-  beginPane(id, min, max, transitionScale, alpha, pad, remember, fadeFinished);
-  paneFrame(theme, scale, min, max, trace);
 }
 
 /// The colour a difficulty is advertised with. A switch, not an array lookup, so that
@@ -163,6 +157,41 @@ void drawMoveDiagram(const VariantSpec& v, const PieceTypeDef& piece,
 
 }  // namespace
 
+void Ui::beginScreenPane(const view::Theme& theme, float scale, const char* id,
+                         ImVec2 min, ImVec2 max, float transitionScale, float alpha,
+                         float trace, float pad, bool remember, bool fadeFinished) {
+  beginPane(id, min, max, transitionScale, alpha, pad, remember, fadeFinished);
+  paneFrame(theme, scale, min, max, trace);
+  implantPane_.reset();
+  if (!implantActive_ || move_ != app::ScreenMove::Station ||
+      (!ghosting_ && enter_ >= 1.f && !pinnedPanelAge_))
+    return;
+  const float age = implantPanelAge(ghosting_);
+  if (!ghosting_ && age < 0) return;
+  if (ghosting_ && !view::implantLeaving(age, intensity_).visible()) return;
+  implantPane_ = ImplantRecord{{}, age, ghosting_, ImHashStr(id)};
+  implantPaneMin_ = min;
+  implantPaneMax_ = max;
+}
+
+void Ui::endScreenPane() {
+  if (implantPane_) {
+    const auto rect = paneBounds(scale_, implantPaneMin_, implantPaneMax_, true);
+    const auto& io = ImGui::GetIO();
+    const auto origin = ImGui::GetMainViewport()->Pos;
+    if (rect[2] > rect[0] && rect[3] > rect[1])
+      implantRecords_.push_back({{(rect[0] - origin.x) * io.DisplayFramebufferScale.x,
+                                  (rect[1] - origin.y) * io.DisplayFramebufferScale.y,
+                                  (rect[2] - origin.x) * io.DisplayFramebufferScale.x,
+                                  (rect[3] - origin.y) * io.DisplayFramebufferScale.y},
+                                 implantPane_->age,
+                                 implantPane_->leaving,
+                                 implantPane_->seed});
+    implantPane_.reset();
+  }
+  endPane();
+}
+
 std::vector<MainMenuEntry> mainMenuEntries(bool devOverlay) {
   using app::Screen;
   static constexpr MainMenuEntry kEntries[]{
@@ -210,7 +239,7 @@ UiRequest Ui::buildMainMenu(app::Shell& shell) {
     }
   }
 
-  endPane();
+  endScreenPane();
 
   return request;
 }
@@ -340,7 +369,7 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
     ImGui::PopFont();
   }
 
-  endPane();
+  endScreenPane();
   return request;
 }
 
@@ -412,7 +441,7 @@ UiRequest Ui::buildWelcome(app::Shell& shell) {
     shell.go(app::Screen::NewGame);
   }
 
-  endPane();
+  endScreenPane();
   return request;
 }
 
@@ -445,7 +474,7 @@ UiRequest Ui::buildQuitConfirm(app::Shell& shell) {
   if (button("BACK", t, px(150), true, false, true, actionFont())) shell.back();
   ImGui::SameLine();
   if (button("QUIT", t, px(110), false, false, true, actionFont())) request.quit = true;
-  endPane();
+  endScreenPane();
   return request;
 }
 
@@ -477,7 +506,7 @@ UiRequest Ui::buildPauseQuitConfirm(app::Shell& shell) {
   if (button("BACK", t, px(150), true, false, true, actionFont())) shell.back();
   ImGui::SameLine();
   if (button("QUIT", t, px(110), false, false, true, actionFont())) request.quit = true;
-  endPane();
+  endScreenPane();
   return request;
 }
 
@@ -659,7 +688,7 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
     ImGui::PopStyleColor();
     ImGui::PopFont();
   }
-  endPane();
+  endScreenPane();
   return request;
 }
 
@@ -758,7 +787,7 @@ UiRequest Ui::buildPause(app::Shell& shell) {
       "Esc pause   U undo   R reset   F flat view   Q quit (from the menu)");
   ImGui::PopStyleColor();
   ImGui::PopFont();
-  endPane();
+  endScreenPane();
   return request;
 }
 
@@ -1467,7 +1496,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::EndChild();
   ImGui::PopStyleVar();
   ImGui::PopFont();
-  endPane();
+  endScreenPane();
 
   // Persist whenever anything actually moved, rather than on a Save button nobody
   // should have to find.
@@ -1635,7 +1664,7 @@ UiRequest Ui::buildGameInfo(app::Shell& shell) {
   if (button("BACK", t, px(120), true, false, true, actionFont())) shell.back();
   ImGui::EndChild();
   ImGui::PopStyleVar();
-  endPane();
+  endScreenPane();
   return request;
 }
 
@@ -1780,7 +1809,7 @@ UiRequest Ui::buildPieceMoves(app::Shell& shell) {
   if (button("BACK", t, px(120), true, false, true, actionFont())) shell.back();
   ImGui::EndChild();
   ImGui::PopStyleVar();
-  endPane();
+  endScreenPane();
   return request;
 }
 

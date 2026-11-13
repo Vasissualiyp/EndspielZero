@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Binary P6 captures have identical headers. Compare every byte with a two-code-value
+# tolerance for the transparent UI attachment's extra 8-bit quantisation.
+function(ppm_close first second)
+  file(READ "${first}" a HEX)
+  file(READ "${second}" b HEX)
+  string(LENGTH "${a}" length)
+  string(LENGTH "${b}" other_length)
+  if(NOT length EQUAL other_length)
+    message(FATAL_ERROR "PPM sizes differ: ${first} / ${second}")
+  endif()
+  math(EXPR last "${length} - 2")
+  foreach(i RANGE 0 ${last} 2)
+    string(SUBSTRING "${a}" ${i} 2 av)
+    string(SUBSTRING "${b}" ${i} 2 bv)
+    if(NOT av STREQUAL bv)
+      math(EXPR delta "0x${av} - 0x${bv}")
+      if(delta LESS -2 OR delta GREATER 2)
+        message(FATAL_ERROR "PPM byte ${i}/2 differs by ${delta}: ${first} / ${second}")
+      endif()
+    endif()
+  endforeach()
+endfunction()

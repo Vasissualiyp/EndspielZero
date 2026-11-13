@@ -12,6 +12,7 @@
 
 #include "io/obj_mesh.hpp"
 #include "render/image_io.hpp"
+#include "render/implant_layer.hpp"
 #include "render/lab_light.hpp"
 #include "render/offscreen_target.hpp"
 #include "render/piece_mesh.hpp"
@@ -291,6 +292,9 @@ class BoardRenderer {
   void setTheme(const view::Theme& t) noexcept { theme_ = t; }
   /// Explicit presentation seconds; invalid or negative input resets to zero.
   void setVisualTime(double seconds) noexcept;
+  void setImplant(std::optional<ImplantParams> params) {
+    implantParams_ = std::move(params);
+  }
   /// How far out of focus the board is, 0 to 1.
   ///
   /// Pause steps the camera back and throws the board out of focus so the menu in front
@@ -416,6 +420,8 @@ class BoardRenderer {
   bool postEnabled_{false};
   float bloomScale_{1.0f};
   PostProcess post_;
+  std::optional<ImplantLayer> implant_;
+  std::optional<ImplantParams> implantParams_;
   std::string postUnavailable_;
   MeshLibrary meshes_;
   std::vector<io::ObjMesh> labMeshes_;

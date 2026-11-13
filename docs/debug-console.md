@@ -32,6 +32,8 @@ walk the command history. `help` (or `?`) prints the command list from
 | `lights` | List the loaded lab lights with kind, position in metres, radius, authored intensity and group; prints `lab is off` when disabled; needs no game |
 | `get`/`set roomLight` | Practical room-light gain (`room_light`, persisted, finite 0..2, default 1); machine lights keep their authored intensity |
 | `projector [on\|off]` | Toggle the bench hologram; works without a game. Also `get`/`set projector` (persisted, default on) |
+| `implant [on\|off]` | Toggle organic menu formation, dissolve, afterimage and saccadic dimming on the lab path. Also `get`/`set implantFx` (`implant_fx`, persisted, default on). Violet-white text stays when effects are off |
+| `heartbeat [on\|off]` | Toggle the implant's faint double pulse (`heartbeat`, persisted, default on interactively). Calm intensity always suppresses it |
 | `lab [on\|off]` | Toggle the static lab behind menu screens (default off); works without a game. Also `get`/`set labScene` or `lab_scene` |
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
@@ -118,6 +120,10 @@ groups:
       tutorial project the manifold; Settings projects a tesseract; Library projects
       the selected overture. Drag on the left to turn it about vertical; lab drag
       elevation is ignored. `projector on|off` updates the projector setting.
+    - `--implant 0|1` overrides the implant effects for this run. `--panel-t <seconds>`
+      pins panel record ages during a station preview, including after the camera settles.
+      `--heartbeat 0|1` overrides the double pulse; captures default it off. The renderer
+      keeps the hardware palette; only the lab menu UI uses the synaptic hue.
       With `--lab 1`, `--screen settings` enters Settings from the menu.
     - `--overture-t <0..1>` pins Library progress for captures (alias for `--t`).
     - `--room-light <0..2>` overrides the room practicals for this run only; machine

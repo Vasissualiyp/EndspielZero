@@ -924,20 +924,26 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   currentPaneTop() = ImGui::GetCursorPosY();
 }
 
-void paneFrame(const view::Theme& theme, float scale, ImVec2 limitMin, ImVec2 limitMax,
-               float draw, float level) {
-  if (!currentPaneBuilt()) return;
+std::array<float, 4> paneBounds(float scale, ImVec2 limitMin, ImVec2 limitMax,
+                                bool measured) {
+  if (!currentPaneBuilt()) return {};
   const auto it = paneHeights().find(currentPane());
-  if (it == paneHeights().end()) return;  // first frame: nothing measured to frame yet
+  if (!measured && it == paneHeights().end()) return {};
+  const float height = measured ? ImGui::GetCursorPosY() - currentPaneTop() : it->second;
   const ImVec2 wp = ImGui::GetWindowPos();
   const ImVec2 ws = ImGui::GetWindowSize();
   const float mx = 20.0f * scale, my = 16.0f * scale, edge = 8.0f * scale;
-  const ImVec2 min(std::max(wp.x - mx, limitMin.x + edge),
-                   std::max(wp.y - my, limitMin.y + edge));
-  const ImVec2 max(std::min(wp.x + ws.x + mx, limitMax.x - edge),
-                   std::min(wp.y + it->second + my, limitMax.y - edge));
-  hudPanel(ImGui::GetWindowDrawList(), min, max, theme, scale, draw, level,
-           kScreenPanelCorner);
+  return {std::max(wp.x - mx, limitMin.x + edge), std::max(wp.y - my, limitMin.y + edge),
+          std::min(wp.x + ws.x + mx, limitMax.x - edge),
+          std::min(wp.y + height + my, limitMax.y - edge)};
+}
+
+void paneFrame(const view::Theme& theme, float scale, ImVec2 limitMin, ImVec2 limitMax,
+               float draw, float level) {
+  const auto rect = paneBounds(scale, limitMin, limitMax, false);
+  if (rect[2] <= rect[0] || rect[3] <= rect[1]) return;
+  hudPanel(ImGui::GetWindowDrawList(), {rect[0], rect[1]}, {rect[2], rect[3]}, theme,
+           scale, draw, level, kScreenPanelCorner);
 }
 
 void endPane() {

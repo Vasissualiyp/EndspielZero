@@ -105,6 +105,10 @@ struct Theme {
   Rgba peek{Rgba::hex(0x9B7BEA)};
   /// The implant hue belongs to perception, distinct from the hardware LEDs.
   Rgba implant{Rgba::hex(0xD9D2FF)};
+  Rgba implantDeep{Rgba::hex(0x7E6FD6)};
+  Rgba implantDim{Rgba::hex(0xA69CD9)};
+  Rgba implantFaint{Rgba::hex(0x6C6499)};
+  Rgba implantWarm{Rgba::hex(0xFFB8A0)};
 
   // Difficulty, reserved for the library's entries: one hue per level, from the
   // reassuring green of a game anyone can sit down to, through amber and red, to the
@@ -228,6 +232,19 @@ struct Theme {
 [[nodiscard]] inline Theme themeFromName(std::string_view name) {
   if (name == "manifold") return Theme::manifold();
   return Theme::console();
+}
+
+/// The implant changes perception's accents, preserving hardware and game semantics.
+[[nodiscard]] inline Theme implantTheme(const Theme& base) {
+  Theme t = base;
+  t.bone = t.implant;
+  t.boneDim = t.implantDim;
+  t.boneFaint = t.implantFaint;
+  t.ember = t.implant;
+  t.emberDeep = t.implantDeep;
+  t.rule = t.implantFaint.withAlpha(base.rule.a);
+  t.interfaceRule = t.implantFaint.withAlpha(base.interfaceRule.a);
+  return t;
 }
 
 }  // namespace cb::view

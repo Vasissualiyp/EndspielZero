@@ -159,3 +159,30 @@ TEST_CASE("implant hue is violet white in both themes", "[unit][view][rig]") {
   for (const auto& theme : {Theme::console(), Theme::manifold()})
     CHECK(theme.implant.array() == Rgba::hex(0xD9D2FF).array());
 }
+
+TEST_CASE("implant palette changes perception and preserves hardware and semantics",
+          "[unit][view][implant]") {
+  for (auto base : {Theme::console(), Theme::manifold()}) {
+    base.rule.a = .4f;
+    base.interfaceRule.a = .7f;
+    const auto t = implantTheme(base);
+    CHECK(t.ember.array() == base.implant.array());
+    CHECK(t.emberDeep.array() == base.implantDeep.array());
+    CHECK(t.bone.array() == base.implant.array());
+    CHECK(t.boneDim.array() == base.implantDim.array());
+    CHECK(t.boneFaint.array() == base.implantFaint.array());
+    CHECK(t.rule.array() == base.implantFaint.withAlpha(.4f).array());
+    CHECK(t.interfaceRule.array() == base.implantFaint.withAlpha(.7f).array());
+    CHECK(t.blood.array() == base.blood.array());
+    CHECK(t.ink.array() == base.ink.array());
+    CHECK(t.panel.array() == base.panel.array());
+    CHECK(t.seamHueBegin == base.seamHueBegin);
+    CHECK(t.seamHueEnd == base.seamHueEnd);
+    CHECK(t.seamSaturation == base.seamSaturation);
+    CHECK(t.seamValue == base.seamValue);
+    CHECK(t.mirrorEdge.array() == base.mirrorEdge.array());
+    CHECK(t.materials.cells == base.materials.cells);
+    CHECK(t.whitePiece.array() == base.whitePiece.array());
+    CHECK(t.blackPiece.array() == base.blackPiece.array());
+  }
+}

@@ -40,6 +40,7 @@
 #include "render/panel_response.hpp"
 #include "render/window.hpp"
 #include "view/game_end_fx.hpp"
+#include "view/implant_fx.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"
 #include "render/projector_hologram.hpp"
@@ -61,6 +62,9 @@ bool gUiAuto = false;
 int gHudFraming = -1;
 int gLab = -1;
 int gProjector = -1;
+int gImplant = -1;
+int gHeartbeat = -1;
+std::optional<float> gPanelT;
 std::string gStation;
 bool gLabCapture = false;
 std::optional<render::LabScene> gLabScene;
@@ -112,6 +116,62 @@ std::string_view focusFor(app::Screen screen) {
     default:
       return {};
   }
+}
+
+// Apply perception's palette only when entering/leaving the lab UI. The renderer
+// retains the hardware palette, including the cyan board LEDs and room salience.
+bool configureImplantUi(render::Ui& ui, const app::Shell& shell, const view::Theme& theme,
+                        bool& lastLabTheme, bool hold) {
+  const bool labPath = labBackdrop(shell, hold) && !shell.showsBoard() &&
+                       shell.screen() != app::Screen::Editor &&
+                       shell.screen() != app::Screen::Paused &&
+                       shell.screen() != app::Screen::PauseQuitConfirm;
+  if (lastLabTheme != labPath) {
+    ui.setTheme(labPath ? view::implantTheme(theme) : theme);
+    lastLabTheme = labPath;
+  }
+  const bool active =
+      labPath && (gImplant >= 0 ? gImplant == 1 : shell.settings().implantFx);
+  ui.setImplantActive(active);
+  ui.pinPanelAge(gPanelT);
+  return active;
+}
+
+void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
+                     const app::Settings& settings, bool active, double seconds,
+                     std::uint32_t height, bool capture) {
+  if (!active) {
+    renderer.setImplant(std::nullopt);
+    return;
+  }
+  render::ImplantParams p;
+  p.time = static_cast<float>(seconds);
+  p.intensity = renderer.options().presentationIntensity;
+  const bool pulse = gHeartbeat >= 0 ? gHeartbeat == 1 : !capture && settings.heartbeat;
+  p.heartbeat = pulse ? view::heartbeat(seconds, p.intensity) : 1.f;
+  p.dip = ui.saccadicDip();
+  p.pixelScale = static_cast<float>(height) / 1080.f;
+  for (const auto& record : ui.implantRecords()) {
+    if (p.panelCount == p.panels.size()) break;
+    const auto state = record.leaving ? view::implantLeaving(record.age, p.intensity)
+                                      : view::implantForming(record.age, p.intensity);
+    if (record.leaving && !state.visible()) continue;
+    p.panels[p.panelCount++] = {
+        {record.rect[0], record.rect[1], record.rect[2], record.rect[3]},
+        state.form,
+        state.dissolve,
+        state.afterimage,
+        static_cast<float>(record.seed % 997)};
+  }
+  for (const auto& rect : ui.toolRects()) {
+    if (p.toolCount == p.toolRects.size()) break;
+    p.toolRects[p.toolCount++] = rect;
+  }
+  const auto warm = renderer.theme().implantWarm.array();
+  const auto body = renderer.theme().implant.array();
+  std::copy(warm.begin(), warm.end(), p.warm);
+  std::copy(body.begin(), body.end(), p.body);
+  renderer.setImplant(p);
 }
 
 float appendProjector(const render::Ui& ui, const app::Settings& settings,
@@ -1078,6 +1138,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
   // Cinema dresses the frame with a grade and a vignette, not an interface (M18.3).
   (*ui)->setCinema(cinema);
+  bool lastLabTheme = false;
   {
     const view::Theme theme = resolveTheme(shell->settings());
     renderer->setTheme(theme);
@@ -1152,6 +1213,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->tick(dt);
     (*ui)->setLabDoc(labEnabled(*shell) ? &gLabScene->doc() : nullptr);
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
+    const bool implantActive = configureImplantUi(**ui, *shell, renderer->theme(),
+                                                  lastLabTheme, holdsBoard(*shell, **ui));
     (*ui)->setStationCamera([&](app::Screen which) -> std::optional<view::OrbitCamera> {
       if (!labEnabled(*shell)) return std::nullopt;
       return gLabScene->station(stationFor(which));
@@ -1160,6 +1223,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
+    setImplantFrame(*renderer, **ui, shell->settings(), implantActive,
+                    visualOrigin + sample.seconds, target->height(), true);
     const render::BoardRect uiRect{request.boardRect[0], request.boardRect[1],
                                    request.boardRect[2], request.boardRect[3]};
     // Cinema is the board and the move and nothing else: the whole frame is the board
@@ -1468,6 +1533,11 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // to size from as well.
   if (!renderFrame(0.0f).has_value()) return 1;
   if (!renderFrame(1.0f).has_value()) return 1;
+  // Lab menus centre a measured pane containing nested scrolling children. Their
+  // scrollbars consume the previous child's content size, one frame after the pane
+  // moves to its measured centre. Settle that last layout dependency as well.
+  if (labBackdrop(*shell, holdsBoard(*shell, **ui)) && !renderFrame(0.0f).has_value())
+    return 1;
 
   // Pointer clicks, one per ';': move, press, release on three frames, so a button sees a
   // real click and the capture shows what the program does with it.
@@ -1739,6 +1809,9 @@ int main(int argc, char** argv) {
           "--projector 0|1 toggles the bench hologram; --overture-t 0..1 pins Library "
           "progress (alias --t).\n"
           "--lab 0|1 toggles the static lab room; --station <name> requires --lab 1.\n"
+          "--implant 0|1 toggles the organic lab menus; --panel-t SECONDS pins panel "
+          "age.\n"
+          "--heartbeat 0|1 toggles the implant double pulse (captures default off).\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
           "--event-t SECONDS pins the HUD turn flip and newest ledger row; --think-t "
@@ -1901,6 +1974,27 @@ int main(int argc, char** argv) {
         return 1;
       }
       gStation = argv[++i];
+    } else if (arg == "--implant" || arg == "--heartbeat") {
+      if (i + 1 >= argc || (std::string_view(argv[i + 1]) != "0" &&
+                            std::string_view(argv[i + 1]) != "1")) {
+        std::fprintf(stderr, "%s requires 0 or 1\n", arg.c_str());
+        return 1;
+      }
+      const int value = std::string_view(argv[++i]) == "1" ? 1 : 0;
+      (arg == "--implant" ? gImplant : gHeartbeat) = value;
+    } else if (arg == "--panel-t") {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "--panel-t requires finite seconds\n");
+        return 1;
+      }
+      char* end = nullptr;
+      const char* value = argv[++i];
+      const float age = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(age)) {
+        std::fprintf(stderr, "--panel-t requires finite seconds\n");
+        return 1;
+      }
+      gPanelT = age;
     } else if (arg == "--ui-auto")
       gUiAuto = true;
     else if (arg == "--ui-scale" && i + 1 < argc)
@@ -2042,6 +2136,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   (*ui)->forceDevOverlay(gDevOverlay);
+  bool lastLabTheme = false;
   (void)(*ui)->setScale(
       resolveUiScale(shell->settings(), static_cast<int>(window->height()), false));
   (*ui)->setIconStyle(render::iconStyleFromName(shell->settings().pieceIcons));
@@ -2632,6 +2727,8 @@ int main(int argc, char** argv) {
     (*ui)->tick(dt);
     (*ui)->setLabDoc(labEnabled(*shell) ? &gLabScene->doc() : nullptr);
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
+    const bool implantActive = configureImplantUi(**ui, *shell, renderer->theme(),
+                                                  lastLabTheme, holdsBoard(*shell, **ui));
     (*ui)->setStationCamera([&](app::Screen which) -> std::optional<view::OrbitCamera> {
       if (!labEnabled(*shell)) return std::nullopt;
       return gLabScene->station(stationFor(which));
@@ -2734,6 +2831,7 @@ int main(int argc, char** argv) {
       const view::Theme theme = resolveTheme(shell->settings());
       renderer->setTheme(theme);
       (*ui)->setTheme(theme);
+      lastLabTheme = false;
       (void)window->setVsync(shell->settings().vsync);
     }
 #ifdef CB_HAVE_IMGUI
@@ -2903,6 +3001,10 @@ int main(int argc, char** argv) {
     // still be on the GPU while this one is recorded. A frame that comes back invalid had
     // the swapchain rebuilt under it; skipping one frame is cheap and correct.
     applyPost(*renderer, shell->settings());
+#ifdef CB_HAVE_IMGUI
+    setImplantFrame(*renderer, **ui, shell->settings(), implantActive, visualSeconds,
+                    window->height(), false);
+#endif
     auto frame = window->beginFrame();
     if (!frame.has_value()) {
       std::fprintf(stderr, "begin frame failed: %s\n", frame.error().format().c_str());

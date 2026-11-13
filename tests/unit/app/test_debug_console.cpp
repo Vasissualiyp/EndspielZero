@@ -356,3 +356,25 @@ TEST_CASE("projector can be disabled without a game and persists",
   CHECK(c.run(*shell, "projector on") == "projector on");
   CHECK(has(DebugConsole::help(), "projector [on|off]"));
 }
+
+TEST_CASE("implant and heartbeat toggles persist and have debug aliases",
+          "[unit][app][implant]") {
+  auto shell = app::Shell::create({"standard"}, {});
+  REQUIRE(shell);
+  app::DebugConsole c;
+  CHECK(shell->settings().implantFx);
+  CHECK(c.run(*shell, "implant off") == "implant off");
+  CHECK(c.run(*shell, "get implantFx") == "implant_fx = false");
+  CHECK(c.run(*shell, "set implantFx true") == "implantFx is now true");
+  CHECK(shell->settings().implantFx);
+  CHECK(c.run(*shell, "heartbeat off") == "heartbeat off");
+  CHECK_FALSE(shell->settings().heartbeat);
+  const auto path = std::filesystem::temp_directory_path() / "cb-implant-settings.conf";
+  REQUIRE(shell->settings().save(path));
+  CHECK(app::Settings::load(path).implantFx);
+  CHECK_FALSE(app::Settings::load(path).heartbeat);
+  std::filesystem::remove(path);
+  CHECK(c.run(*shell, "implant bad") == "usage: implant [on|off]");
+  CHECK(has(app::DebugConsole::help(), "implant [on|off]"));
+  CHECK(has(app::DebugConsole::help(), "heartbeat [on|off]"));
+}

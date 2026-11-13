@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -203,6 +204,21 @@ class Ui {
   /// Presentation seconds for live controls, independent of transitions/background.
   void setVisualTime(double seconds) noexcept;
   void setLabDoc(const io::LabDoc* doc) noexcept { console_.setLabDoc(doc); }
+  struct ImplantRecord {
+    float rect[4];
+    float age;
+    bool leaving;
+    std::uint32_t seed;
+  };
+  void setImplantActive(bool enabled) noexcept { implantActive_ = enabled; }
+  void pinPanelAge(std::optional<float> age) noexcept { pinnedPanelAge_ = age; }
+  [[nodiscard]] std::span<const ImplantRecord> implantRecords() const {
+    return implantRecords_;
+  }
+  [[nodiscard]] std::span<const std::array<float, 4>> toolRects() const {
+    return toolRects_;
+  }
+  [[nodiscard]] float saccadicDip() const noexcept;
   void setLabBackdrop(bool enabled) noexcept { labBackdrop_ = enabled; }
   void setStationCamera(
       std::function<std::optional<view::OrbitCamera>(app::Screen)> camera) {
@@ -236,7 +252,11 @@ class Ui {
   void setPresentationIntensity(float v) noexcept { intensity_ = v; }
   /// Complete the running screen move at once (a click or key). The shell's one clock
   /// jumps to its end, which is exactly the cut's state.
-  void skipTransition() noexcept { enter_ = 1.0f; }
+  void skipTransition() noexcept {
+    enter_ = 1.f;
+    implantMoveAge_ = currentMoveSeconds();
+    implantLeavingUntil_ = 0;
+  }
   /// Pin the running move to `seconds` of its own age (captures and tests); nullopt frees
   /// it.
   void pinTransitionAge(std::optional<float> seconds) noexcept {
@@ -363,6 +383,12 @@ class Ui {
     float trace{1.0f};  ///< how much of the panel's edge is drawn (M23.11 section 6)
   };
   [[nodiscard]] PaneMove paneMove() const noexcept;
+  void beginScreenPane(const view::Theme& theme, float scale, const char* id, ImVec2 min,
+                       ImVec2 max, float transitionScale, float alpha, float trace,
+                       float pad, bool remember, bool fadeFinished = false);
+  void endScreenPane();
+  [[nodiscard]] float implantPanelAge(bool leaving) const noexcept;
+  void recordToolRect();
   /// The two halves of the transition clock. The departing screen runs first and is
   /// finished before the arriving one begins, so the two moves are a sequence rather
   /// than a cross-fade; `outEase` reaches 1 while `inEase` is still 0.
@@ -556,6 +582,14 @@ class Ui {
   /// True only while drawGhost is building the departing pane, so drawShellFrame skips
   /// the background it already drew and beginPane uses the departing move.
   bool ghosting_{false};
+  bool implantActive_{false};
+  float implantMoveAge_{0};
+  float implantLeavingUntil_{0};
+  std::optional<float> pinnedPanelAge_;
+  std::vector<ImplantRecord> implantRecords_;
+  std::optional<ImplantRecord> implantPane_;
+  ImVec2 implantPaneMin_{}, implantPaneMax_{};
+  std::vector<std::array<float, 4>> toolRects_;
   /// The half of the frame the object owns, remembered by drawShellFrame so a screen can
   /// put its own thing there: the piece reference draws its move diagrams, not a deco.
   ImVec2 decoMin_{0, 0};

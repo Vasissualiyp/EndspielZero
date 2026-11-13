@@ -191,6 +191,10 @@ void endPane();
 /// transition scales it with the rest.
 void paneFrame(const view::Theme& theme, float scale, ImVec2 limitMin, ImVec2 limitMax,
                float draw = 1.0f, float level = 1.0f);
+/// The same bounds using this frame's completed content when measured is true.
+/// Call before endPane, while the window and layout cursor are current.
+[[nodiscard]] std::array<float, 4> paneBounds(float scale, ImVec2 limitMin,
+                                              ImVec2 limitMax, bool measured);
 
 void beginPlate(const char* id, const view::Theme& theme, ImVec2 size,
                 float yBias = 0.5f);

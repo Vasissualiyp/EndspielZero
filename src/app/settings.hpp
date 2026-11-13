@@ -29,6 +29,8 @@ struct Settings {
   bool hudFraming{true};
   bool labScene{false};
   bool projector{true};
+  bool implantFx{true};
+  bool heartbeat{true};
   /// Practical room lights only, independent of machine emitters; finite [0,2].
   float roomLight{1.0f};
   bool fullscreen{false};
