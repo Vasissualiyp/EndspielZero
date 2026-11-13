@@ -378,3 +378,30 @@ TEST_CASE("implant and heartbeat toggles persist and have debug aliases",
   CHECK(has(app::DebugConsole::help(), "implant [on|off]"));
   CHECK(has(app::DebugConsole::help(), "heartbeat [on|off]"));
 }
+
+TEST_CASE("living gaze controls are inspectable and living preference persists", "[unit][app][living]") {
+  auto shell=app::Shell::create({"standard"},{}); REQUIRE(shell);
+  app::DebugConsole c;
+  CHECK(shell->settings().livingVision);
+  CHECK(c.run(*shell,"living off")=="living off");
+  CHECK(c.run(*shell,"get livingVision")=="living_vision = false");
+  CHECK(c.run(*shell,"tremor off")=="tremor off");
+  CHECK(c.run(*shell,"wander off")=="wander off");
+  CHECK(c.run(*shell,"gaze .3 .8")=="gaze pinned");
+  REQUIRE(shell->settings().gazePin); CHECK((*shell->settings().gazePin)[0]==.3f);
+  CHECK(c.run(*shell,"gaze ui")=="gaze ui");
+  CHECK(shell->settings().gazeUi==1);
+  CHECK(c.run(*shell,"gaze off")=="gaze off");
+  CHECK_FALSE(shell->settings().gazePin);
+  CHECK(c.run(*shell,"warp .02")=="warp set");
+  CHECK(shell->settings().warpOverride==.02f);
+  CHECK(c.run(*shell,"warp default")=="warp default");
+  CHECK_FALSE(shell->settings().warpOverride);
+  CHECK(has(c.run(*shell,"gaze"),"focus"));
+  CHECK(has(c.run(*shell,"gaze nan .1"),"usage"));
+  CHECK(has(c.run(*shell,"warp inf"),"usage"));
+  const auto path=std::filesystem::temp_directory_path()/"cb-living-settings.conf";
+  REQUIRE(shell->settings().save(path));
+  CHECK_FALSE(app::Settings::load(path).livingVision);
+  std::filesystem::remove(path);
+}

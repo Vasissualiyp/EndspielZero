@@ -2,7 +2,7 @@
 include("${WORKDIR}/tools/ppm_close.cmake")
 file(MAKE_DIRECTORY "${OUT_DIR}/implant")
 set(common standard --theme manifold --lab 1 --width 480 --height 270 --ui-auto
-           --heartbeat 0 --screen newgame --overture-t 0.5)
+           --heartbeat 0 --living 0 --screen newgame --overture-t 0.5)
 function(shot name)
   execute_process(COMMAND "${GUI}" ${common} ${ARGN}
     --shot "${OUT_DIR}/implant/${name}.ppm"

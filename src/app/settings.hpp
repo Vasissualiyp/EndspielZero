@@ -2,6 +2,8 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
+#include "view/living_vision.hpp"
 #include <string>
 
 #include "base/result.hpp"
@@ -31,6 +33,15 @@ struct Settings {
   bool projector{true};
   bool implantFx{true};
   bool heartbeat{true};
+  bool livingVision{true};
+  // Run-only perception controls, shared by CLI, console and the frame loop.
+  bool tremor{true}, gazeWander{true};
+  std::optional<view::Vec2f> gazePin;
+  int gazeUi{-1};
+  std::string gazeTarget;
+  std::optional<float> warpOverride;
+  view::GazeState gazeState;
+
   /// Practical room lights only, independent of machine emitters; finite [0,2].
   float roomLight{1.0f};
   bool fullscreen{false};

@@ -7,6 +7,7 @@
 
 #include "shaders.hpp"
 #include "view/implant_fx.hpp"
+#include "view/living_vision.hpp"
 
 namespace cb::render {
 namespace {
@@ -20,10 +21,11 @@ struct GpuParams {
   float counts[4];  // panelCount, toolCount, afterimageMax, reserved
   float warm[4];
   float body[4];
+  float living[4], gazeTremor[4], periphery[4], optics[4], deep[4];
 };
-static_assert(sizeof(ImplantParams::Panel) == 32);
-static_assert(offsetof(GpuParams, timing) == 576);
-static_assert(sizeof(GpuParams) == 656);
+static_assert(sizeof(ImplantParams::Panel) == 48);
+static_assert(offsetof(GpuParams, timing) == 832);
+static_assert(sizeof(GpuParams) == 992);
 struct Gpu {
   VkImage image{VK_NULL_HANDLE};
   VkDeviceMemory memory{VK_NULL_HANDLE};
@@ -132,6 +134,8 @@ void barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayo
 struct ImplantLayer::Impl {
   struct Slot {
     Gpu image;
+    std::array<Gpu, 4> blur;
+    std::array<VkDescriptorSet, 4> blurSets{};
     VkBuffer uniform{};
     VkDeviceMemory memory{};
     void* mapped{};
@@ -139,22 +143,25 @@ struct ImplantLayer::Impl {
   };
   const VulkanContext* ctx{};
   VkFormat format{};
-  VkShaderModule vert{}, frag{};
+  VkShaderModule vert{}, frag{}, blurFrag{};
   VkSampler sampler{};
   VkDescriptorSetLayout setLayout{};
   VkDescriptorPool pool{};
   VkPipelineLayout layout{};
-  VkPipeline composite{};
+  VkPipeline composite{}, gaussian{};
   std::array<Slot, kFrames> slots{};
   ~Impl() {
     if (!ctx) return;
     const auto d = ctx->device();
     for (auto& slot : slots) {
       destroy(d, slot.image);
+      for (auto& image:slot.blur) destroy(d,image);
       if (slot.mapped) vkUnmapMemory(d, slot.memory);
       if (slot.uniform) vkDestroyBuffer(d, slot.uniform, nullptr);
       if (slot.memory) vkFreeMemory(d, slot.memory, nullptr);
     }
+    if (gaussian) vkDestroyPipeline(d, gaussian, nullptr);
+    if (blurFrag) vkDestroyShaderModule(d, blurFrag, nullptr);
     if (composite) vkDestroyPipeline(d, composite, nullptr);
     if (layout) vkDestroyPipelineLayout(d, layout, nullptr);
     if (pool) vkDestroyDescriptorPool(d, pool, nullptr);
@@ -163,7 +170,7 @@ struct ImplantLayer::Impl {
     if (vert) vkDestroyShaderModule(d, vert, nullptr);
     if (frag) vkDestroyShaderModule(d, frag, nullptr);
   }
-  Result<VkPipeline> pipeline(VkFormat targetFormat) {
+  Result<VkPipeline> pipeline(VkFormat targetFormat, bool blur = false) {
     VkPipelineVertexInputStateCreateInfo vi{};
     vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     VkPipelineInputAssemblyStateCreateInfo ia{};
@@ -187,7 +194,7 @@ struct ImplantLayer::Impl {
     blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     {
-      blend.blendEnable = VK_TRUE;
+      blend.blendEnable = !blur;
       blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
       blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
       blend.colorBlendOp = VK_BLEND_OP_ADD;
@@ -211,7 +218,7 @@ struct ImplantLayer::Impl {
     stages[0].module = vert;
     stages[0].pName = "main";
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = frag;
+    stages[1].module = blur ? blurFrag : frag;
     stages[1].pName = "main";
     VkPipelineRenderingCreateInfo rendering{};
     rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
@@ -260,6 +267,9 @@ Result<ImplantLayer> ImplantLayer::create(const VulkanContext& ctx,
   auto frag = makeShader(ctx, spv::implant_frag_spv_span());
   if (!frag) return fail(frag.error().code, frag.error().message);
   m.frag = *frag;
+  auto blurFrag = makeShader(ctx, spv::implant_blur_frag_spv_span());
+  if (!blurFrag) return fail(blurFrag.error().code,blurFrag.error().message);
+  m.blurFrag = *blurFrag;
   VkSamplerCreateInfo sci{};
   sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
   sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
@@ -267,40 +277,44 @@ Result<ImplantLayer> ImplantLayer::create(const VulkanContext& ctx,
       VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   if (auto r = vkCreateSampler(d, &sci, nullptr, &m.sampler); r != VK_SUCCESS)
     return fail(ErrorCode::Internal, "cannot create implant sampler: " + describe(r));
-  VkDescriptorSetLayoutBinding bindings[2]{};
+  VkDescriptorSetLayoutBinding bindings[4]{};
   bindings[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
                  VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
   bindings[1] = {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT,
                  nullptr};
   VkDescriptorSetLayoutCreateInfo dl{};
   dl.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  dl.bindingCount = 2;
+  bindings[2] = {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+  bindings[3] = {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+  dl.bindingCount = 4;
   dl.pBindings = bindings;
   if (auto r = vkCreateDescriptorSetLayout(d, &dl, nullptr, &m.setLayout);
       r != VK_SUCCESS)
     return fail(ErrorCode::Internal, "cannot create implant set layout: " + describe(r));
   const VkDescriptorPoolSize sizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kFrames},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFrames}};
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kFrames * 15},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFrames * 5}};
   VkDescriptorPoolCreateInfo dp{};
   dp.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  dp.maxSets = kFrames;
+  dp.maxSets = kFrames * 5;
   dp.poolSizeCount = 2;
   dp.pPoolSizes = sizes;
   if (auto r = vkCreateDescriptorPool(d, &dp, nullptr, &m.pool); r != VK_SUCCESS)
     return fail(ErrorCode::Internal, "cannot create implant pool: " + describe(r));
-  const VkDescriptorSetLayout layouts[] = {m.setLayout, m.setLayout};
-  VkDescriptorSet sets[kFrames]{};
+  std::array<VkDescriptorSetLayout, kFrames * 5> layouts{};
+  layouts.fill(m.setLayout);
+  VkDescriptorSet sets[kFrames * 5]{};
   VkDescriptorSetAllocateInfo ai{};
   ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   ai.descriptorPool = m.pool;
-  ai.descriptorSetCount = kFrames;
-  ai.pSetLayouts = layouts;
+  ai.descriptorSetCount = kFrames * 5;
+  ai.pSetLayouts = layouts.data();
   if (auto r = vkAllocateDescriptorSets(d, &ai, sets); r != VK_SUCCESS)
     return fail(ErrorCode::Internal, "cannot allocate implant sets: " + describe(r));
   for (std::uint32_t i = 0; i < kFrames; ++i) {
     auto& slot = m.slots[i];
-    slot.set = sets[i];
+    slot.set = sets[i*5];
+    for (std::uint32_t j=0;j<4;++j) slot.blurSets[j]=sets[i*5+j+1];
     VkBufferCreateInfo bi{};
     bi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bi.size = sizeof(GpuParams);
@@ -330,12 +344,18 @@ Result<ImplantLayer> ImplantLayer::create(const VulkanContext& ctx,
   pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   pl.setLayoutCount = 1;
   pl.pSetLayouts = &m.setLayout;
+  VkPushConstantRange blurPush{VK_SHADER_STAGE_FRAGMENT_BIT,0,16};
+  pl.pushConstantRangeCount=1;
+  pl.pPushConstantRanges=&blurPush;
   if (auto r = vkCreatePipelineLayout(d, &pl, nullptr, &m.layout); r != VK_SUCCESS)
     return fail(ErrorCode::Internal,
                 "cannot create implant pipeline layout: " + describe(r));
   auto pipeline = m.pipeline(targetFormat);
   if (!pipeline) return fail(pipeline.error().code, pipeline.error().message);
   m.composite = *pipeline;
+  auto gaussian=m.pipeline(targetFormat,true);
+  if (!gaussian) return fail(gaussian.error().code,gaussian.error().message);
+  m.gaussian=*gaussian;
   return p;
 }
 
@@ -353,21 +373,29 @@ Result<void> ImplantLayer::prepare(std::uint32_t width, std::uint32_t height,
                        m.format, s.image);
       !r)
     return r;
-  VkDescriptorImageInfo image{m.sampler, s.image.view,
-                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-  VkDescriptorBufferInfo buffer{s.uniform, 0, sizeof(GpuParams)};
-  VkWriteDescriptorSet writes[2]{};
-  for (std::uint32_t i = 0; i < 2; ++i) {
-    writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[i].dstSet = s.set;
-    writes[i].dstBinding = i;
-    writes[i].descriptorCount = 1;
+  for (std::size_t i=0;i<4;++i) {
+    destroy(m.ctx->device(),s.blur[i]);
+    const auto divisor = i<2 ? 2u : 4u;
+    if (auto r=makeGpu(*m.ctx,std::max(1u,width/divisor),std::max(1u,height/divisor),
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,m.format,s.blur[i]); !r) return r;
   }
-  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  writes[0].pImageInfo = &image;
-  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  writes[1].pBufferInfo = &buffer;
-  vkUpdateDescriptorSets(m.ctx->device(), 2, writes, 0, nullptr);
+  for (std::size_t i=0;i<5;++i) {
+    const auto source=i==0 || i==1 || i==3 ? s.image.view : s.blur[i==2 ? 0 : 2].view;
+    const VkDescriptorImageInfo images[]={{m.sampler,source,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {m.sampler,s.blur[1].view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {m.sampler,s.blur[3].view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+    VkDescriptorBufferInfo buffer{s.uniform,0,sizeof(GpuParams)};
+    VkWriteDescriptorSet writes[4]{};
+    for(std::uint32_t j=0;j<4;++j) {
+      writes[j].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[j].dstSet=i==0 ? s.set : s.blurSets[i-1];
+      writes[j].dstBinding=j; writes[j].descriptorCount=1;
+      writes[j].descriptorType=j==1 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      if(j==1) writes[j].pBufferInfo=&buffer;
+      else writes[j].pImageInfo=&images[j==0 ? 0 : j-1];
+    }
+    vkUpdateDescriptorSets(m.ctx->device(),4,writes,0,nullptr);
+  }
   return {};
 }
 
@@ -413,8 +441,40 @@ void ImplantLayer::composite(VkCommandBuffer cmd, const OffscreenTarget& target,
                      static_cast<float>(std::min(params.toolCount, 4u)),
                      view::kImplantAfterimageLevel, 0},
                     {params.warm[0], params.warm[1], params.warm[2], params.warm[3]},
-                    {params.body[0], params.body[1], params.body[2], params.body[3]}};
+                    {params.body[0], params.body[1], params.body[2], params.body[3]},
+                    {params.living,params.warpK,params.uiFocus,params.veil},
+                    {params.gaze[0],params.gaze[1],params.tremor[0],params.tremor[1]},
+                    {view::kPeripheryStart,view::kPeripheryFull,view::kPeripheryDesaturate,view::kPeripheryFringePixels},
+                    {view::kUiAwayAlpha,view::kUiDefocusPixels,view::kPeripheryBlurPixels,0},
+                    {.2086f,.159f,.6724f,1}};
   std::memcpy(s.mapped, &p, sizeof(p));
+  // Two separable Gaussian copies: half-size sigma 4 and quarter-size sigma 14,
+  // both sigmas measured in full-resolution 1080p pixels. No per-pixel Poisson taps.
+  for (std::size_t i=0;i<4;++i) {
+    const auto& dst=s.blur[i];
+    barrier(cmd,dst.image,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,VK_ACCESS_2_MEMORY_READ_BIT,
+      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo a{};
+    a.sType=VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO; a.imageView=dst.view;
+    a.imageLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    a.loadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE; a.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo r{}; r.sType=VK_STRUCTURE_TYPE_RENDERING_INFO;
+    r.renderArea={{0,0},{dst.width,dst.height}}; r.layerCount=1; r.colorAttachmentCount=1; r.pColorAttachments=&a;
+    vkCmdBeginRendering(cmd,&r);
+    VkViewport vp{0,0,static_cast<float>(dst.width),static_cast<float>(dst.height),0,1};
+    vkCmdSetViewport(cmd,0,1,&vp); vkCmdSetScissor(cmd,0,1,&r.renderArea);
+    vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,m.gaussian);
+    vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,m.layout,0,1,&s.blurSets[i],0,nullptr);
+    const float sigma=(i<2 ? 4.f : 14.f)*params.pixelScale;
+    const float push[4]={i%2==0 ? sigma/static_cast<float>(target.width()) : 0,
+      i%2==1 ? sigma/static_cast<float>(target.height()) : 0,0,0};
+    vkCmdPushConstants(cmd,m.layout,VK_SHADER_STAGE_FRAGMENT_BIT,0,16,push);
+    vkCmdDraw(cmd,3,1,0,0); vkCmdEndRendering(cmd);
+    barrier(cmd,dst.image,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+  }
   // The previous scene/blur pass writes the destination; this pass loads and blends it.
   barrier(cmd, target.colorImage(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

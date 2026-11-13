@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -102,23 +103,65 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
   if (cmd == "help" || cmd == "?") return DebugConsole::help();
 
   if (cmd == "dev" || cmd == "post" || cmd == "lab" || cmd == "projector" ||
-      cmd == "implant" || cmd == "heartbeat") {
+      cmd == "implant" || cmd == "heartbeat" || cmd == "living" || cmd == "tremor" || cmd == "wander") {
     if (w.size() > 2 || (w.size() == 2 && w[1] != "on" && w[1] != "off"))
       return "usage: " + cmd + " [on|off]";
-    bool& enabled = cmd == "implant"     ? shell.settings().implantFx
+    bool& enabled = cmd == "living" ? shell.settings().livingVision
+                    : cmd == "tremor" ? shell.settings().tremor
+                    : cmd == "wander" ? shell.settings().gazeWander
+                    : cmd == "implant"     ? shell.settings().implantFx
                     : cmd == "heartbeat" ? shell.settings().heartbeat
                     : cmd == "projector" ? shell.settings().projector
                     : cmd == "lab"       ? shell.settings().labScene
                     : cmd == "dev"       ? shell.settings().devOverlay
                                          : shell.settings().postProcess;
     enabled = w.size() == 1 ? !enabled : w[1] == "on";
-    const std::string label = cmd == "implant"     ? "implant "
+    const std::string label = cmd == "living" || cmd == "tremor" || cmd == "wander" ? cmd + " " : cmd == "implant"     ? "implant "
                               : cmd == "heartbeat" ? "heartbeat "
                               : cmd == "projector" ? "projector "
                               : cmd == "lab"       ? "lab "
                               : cmd == "dev"       ? "dev overlay: "
                                                    : "post processing: ";
     return label + (enabled ? "on" : "off");
+  }
+
+  if (cmd == "warp" || cmd == "gaze") {
+    auto& s = shell.settings();
+    const auto number = [](const std::string& word)->std::optional<float> {
+      float value{};
+      const auto [end, ec] = std::from_chars(word.data(), word.data()+word.size(), value);
+      if (ec != std::errc{} || end != word.data()+word.size() || !std::isfinite(value)) return {};
+      return value;
+    };
+    if (cmd == "warp") {
+      if (w.size()==2 && w[1]=="default") { s.warpOverride.reset(); return "warp default"; }
+      if (w.size()!=2 || !number(w[1])) return "usage: warp <k>|default";
+      s.warpOverride=*number(w[1]); return "warp set";
+    }
+    if (w.size()==1) {
+      std::ostringstream out;
+      out << "gaze " << s.gazeState.pointPx[0] << ' ' << s.gazeState.pointPx[1]
+          << " uiFocus " << s.gazeState.uiFocus << " focus " << s.gazeState.focusDistance
+          << " target " << s.gazeTarget << " index " << s.gazeState.lastTarget;
+      return out.str();
+    }
+    if (w.size()==2 && w[1]=="off") {
+      s.gazePin.reset(); s.gazeUi=-1; s.gazeTarget.clear(); return "gaze off";
+    }
+    if (w.size()==2 && (w[1]=="ui" || w[1]=="room")) {
+      s.gazeUi=w[1]=="ui" ? 1 : 0; return "gaze " + w[1];
+    }
+    if (w.size()==3 && w[1]=="target") {
+      if (!lab || std::none_of(lab->gaze.begin(),lab->gaze.end(),[&](const auto& g){return g.key==w[2];})) return "unknown gaze target";
+      s.gazeTarget=w[2]; s.gazePin.reset(); s.gazeUi=-1; return "gaze target " + w[2];
+    }
+    if (w.size()==3) {
+      const auto x=number(w[1]), y=number(w[2]);
+      if (x && y && *x>=0 && *x<=1 && *y>=0 && *y<=1) {
+        s.gazePin=view::Vec2f{*x,*y}; s.gazeTarget.clear(); return "gaze pinned";
+      }
+    }
+    return "usage: gaze [<x> <y>|off|ui|room|target <key>]";
   }
 
   if (cmd == "lights") {
@@ -183,6 +226,7 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
     const std::string text = settingsText(shell.settings());
     std::string key = w.size() > 1 ? w[1] : std::string{};
     if (key == "guiScaleAuto") key = "gui_scale_auto";
+    if (key == "livingVision") key = "living_vision";
     if (key == "implantFx") key = "implant_fx";
     if (key == "labScene") key = "lab_scene";
     if (key == "hudFraming") key = "hud_framing";
@@ -491,6 +535,10 @@ std::string DebugConsole::help() {
          "projector [on|off] toggle the bench/wall hologram (also get/set projector)\n"
          "implant [on|off] toggle organic menu perception (also get/set implantFx)\n"
          "heartbeat [on|off] toggle the implant double pulse\n"
+         "living [on|off] living vision: lens warp, gaze, focus (M24.4c)\n"
+         "tremor [on|off], wander [on|off] micro-tremor and idle gaze wander\n"
+         "gaze [<x> <y>|off|ui|room|target <key>] show or pin the gaze\n"
+         "warp <k>|default override the lens warp strength\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"

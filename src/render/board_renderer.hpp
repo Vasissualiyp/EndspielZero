@@ -303,6 +303,20 @@ class BoardRenderer {
   void setBlur(float strength) noexcept { blur_ = strength; }
   [[nodiscard]] float blur() const noexcept { return blur_; }
 
+  /// Depth of field for the lab room (M24.4c 4.4): the eye is focused at `focus` world
+  /// units and everything at another depth blurs by up to `maxPx`. On a device that cannot
+  /// read the depth buffer, `fallback` (0..1) drives the uniform defocus instead. The
+  /// pause defocus, when running, wins.
+  struct DepthOfField {
+    float focus{1};
+    float cocScale{0};
+    float maxPx{0};
+    float fallback{0};
+  };
+  void setDepthOfField(std::optional<DepthOfField> dof) noexcept { dof_ = dof; }
+  /// True when depth of field would run the depth-aware pass on this device.
+  [[nodiscard]] bool depthOfFieldAvailable() const noexcept { return ctx_->depthSampleable(); }
+
   /// Post-processing (ADR-0025): render the scene into float colour, bloom its emitters,
   /// tone-map and grain it into the target. Off by default at this level so a bare
   /// renderer is the legacy reference; the application passes `Settings`. `bloomScale`
@@ -395,6 +409,8 @@ class BoardRenderer {
   Result<void> buildPipeline();
   Result<void> buildBackdropPipeline();
   Result<void> buildBlurPipeline();
+  Result<void> buildDofPipeline();
+  Result<void> bindDofTarget(const OffscreenTarget& target, std::uint32_t frame);
   /// Point the frame's two descriptor sets at this target's images. Rewritten only when
   /// the target's colour view changes; the frame slot's fence is what makes that safe
   /// while the previous frame of the same slot may still have been reading them.
@@ -467,6 +483,17 @@ class BoardRenderer {
   std::array<VkDescriptorSet, kFramesInFlight> blurFromScratch_{};
   std::array<VkImageView, kFramesInFlight> blurBoundColor_{};
   float blur_{0.0f};
+  // Depth of field (M24.4c): the same ping-pong as the defocus, but reading depth too.
+  VkShaderModule dofFrag_{VK_NULL_HANDLE};
+  VkPipelineLayout dofLayout_{VK_NULL_HANDLE};
+  VkPipeline dofPipeline_{VK_NULL_HANDLE};
+  VkDescriptorSetLayout dofSetLayout_{VK_NULL_HANDLE};
+  VkDescriptorPool dofPool_{VK_NULL_HANDLE};
+  std::array<VkDescriptorSet, kFramesInFlight> dofFromColor_{};
+  std::array<VkDescriptorSet, kFramesInFlight> dofFromScratch_{};
+  std::array<VkImageView, kFramesInFlight> dofBoundColor_{};
+  std::array<VkImageView, kFramesInFlight> dofBoundDepth_{};
+  std::optional<DepthOfField> dof_;
 
   // Local lighting (M24.2), one uniform buffer per frame in flight.
   GpuLightBlock lights_{neutralLightBlock()};

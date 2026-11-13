@@ -332,3 +332,12 @@ Result<void> VulkanContext::submitAndWait(
 }
 
 }  // namespace cb::render
+
+namespace cb::render {
+bool VulkanContext::depthSampleable() const noexcept {
+  if (physical_ == VK_NULL_HANDLE) return false;
+  VkPhysicalDeviceProperties props{};
+  vkGetPhysicalDeviceProperties(physical_, &props);
+  return (props.limits.sampledImageDepthSampleCounts & VK_SAMPLE_COUNT_4_BIT) != 0;
+}
+}  // namespace cb::render

@@ -14,9 +14,14 @@ struct ImplantParams {
   float heartbeat{1};
   float dip{0};
   float pixelScale{1};
+  float living{0}, warpK{0}, uiFocus{1}, veil{.45f};
+  float tremor[2]{}, gaze[2]{};
+
   struct Panel {
     float rect[4];
     float form, dissolve, afterimage, seed;
+    float origin[2]{};
+    float age{-1}, settled{0};
   };
   std::array<Panel, 16> panels{};
   std::uint32_t panelCount{0};

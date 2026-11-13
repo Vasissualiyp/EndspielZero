@@ -110,7 +110,7 @@ TEST_CASE("implant composite preserves settled UI and confines organic effects",
   p.toolCount = 0;
   p.heartbeat = 1;
   p.dip = 0;
-  const auto state = view::implantLeaving(.35f, 1);
+  const auto state = view::implantLeaving(.3f, 1);
   p.panels[0].form = state.form;
   p.panels[0].dissolve = state.dissolve;
   p.panels[0].afterimage = state.afterimage;

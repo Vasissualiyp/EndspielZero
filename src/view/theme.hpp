@@ -57,6 +57,7 @@ enum class PanelStyle : std::uint8_t { Plate, Brackets };
 /// Being a struct rather than constants means a variant, or eventually a Workshop
 /// package, can carry its own without anyone touching the renderer.
 struct Theme {
+  bool implantFrameless{false};
   float bloomStrength{0.0f};
   float grainAmount{0.6f};
   Materials materials{Material::Wood, Material::Wood, Material::Wood};
@@ -235,15 +236,17 @@ struct Theme {
 }
 
 /// The implant changes perception's accents, preserving hardware and game semantics.
-[[nodiscard]] inline Theme implantTheme(const Theme& base) {
+[[nodiscard]] inline Theme implantTheme(const Theme& base, [[maybe_unused]] bool living = false) {
   Theme t = base;
+  t.implantFrameless = true;
+  t.panel.a = t.panelHi.a = 0;
   t.bone = t.implant;
   t.boneDim = t.implantDim;
   t.boneFaint = t.implantFaint;
   t.ember = t.implant;
   t.emberDeep = t.implantDeep;
-  t.rule = t.implantFaint.withAlpha(base.rule.a);
-  t.interfaceRule = t.implantFaint.withAlpha(base.interfaceRule.a);
+  t.rule = t.implantFaint.withAlpha(base.rule.a * .5f);
+  t.interfaceRule = t.implantFaint.withAlpha(base.interfaceRule.a * .5f);
   return t;
 }
 

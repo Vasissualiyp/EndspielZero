@@ -36,8 +36,14 @@ struct LabStation {
   std::array<float, 3> target{};
   float distance{1}, yaw{0}, pitch{0}, fov{50};
 };
+struct LabGaze {
+  std::string key;
+  std::array<float, 3> at{};
+  float weight{0};
+};
 struct LabDoc {
   std::vector<LabPart> parts;
+  std::vector<LabGaze> gaze;
   std::vector<LabLight> lights;
   std::vector<LabStation> stations;
   std::vector<std::pair<std::string, std::array<float, 3>>> anchors;

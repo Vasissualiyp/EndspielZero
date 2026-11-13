@@ -34,6 +34,10 @@ walk the command history. `help` (or `?`) prints the command list from
 | `projector [on\|off]` | Toggle the bench hologram; works without a game. Also `get`/`set projector` (persisted, default on) |
 | `implant [on\|off]` | Toggle organic menu formation, dissolve, afterimage and saccadic dimming on the lab path. Also `get`/`set implantFx` (`implant_fx`, persisted, default on). Violet-white text stays when effects are off |
 | `heartbeat [on\|off]` | Toggle the implant's faint double pulse (`heartbeat`, persisted, default on interactively). Calm intensity always suppresses it |
+| `living [on\|off]` | Living vision on the lab menu (M24.4c): lens warp, gaze, focus shift, depth of field (`livingVision`, persisted, default on) |
+| `tremor [on\|off]`, `wander [on\|off]` | Run-only: the 0.8 px glow tremor and the idle gaze wander (captures default both off) |
+| `gaze` | Print the gaze point, `uiFocus`, focus distance and target. `gaze <x> <y>` pins it (fractions of the viewport), `gaze ui\|room` pins menu or room focus, `gaze target <key>` fixates a `[[gaze]]` target of `lab.toml`, `gaze off` releases |
+| `warp <k>\|default` | Override the lens warp strength (default 0.030) |
 | `lab [on\|off]` | Toggle the static lab behind menu screens (default off); works without a game. Also `get`/`set labScene` or `lab_scene` |
 | `dev [on\|off]` | Show or hide developer presentation (fps and unfinished main-menu entries); no argument toggles it. Default off. Also reachable through `get`/`set devOverlay` or `dev_overlay` |
 | `boot` | Replay the board's power-on sequence (M23.10 section 3) from now; needs a loaded game. The front end stamps it on its next game-screen frame. The first click or key completes it |
@@ -122,7 +126,7 @@ groups:
       elevation is ignored. `projector on|off` updates the projector setting.
     - `--implant 0|1` overrides the implant effects for this run. `--panel-t <seconds>`
       pins panel record ages during a station preview, including after the camera settles.
-      `--heartbeat 0|1` overrides the double pulse; captures default it off. The renderer
+      `--living 0|1`, `--tremor 0|1`, `--gaze-wander 0|1`, `--gaze X,Y`, `--gaze-ui 0|1`, `--gaze-target KEY` and `--warp K` drive living vision (M24.4c); `--heartbeat 0|1` overrides the double pulse; captures default it off. The renderer
       keeps the hardware palette; only the lab menu UI uses the synaptic hue.
       With `--lab 1`, `--screen settings` enters Settings from the menu.
     - `--overture-t <0..1>` pins Library progress for captures (alias for `--t`).

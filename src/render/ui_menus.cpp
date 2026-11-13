@@ -163,13 +163,13 @@ void Ui::beginScreenPane(const view::Theme& theme, float scale, const char* id,
   beginPane(id, min, max, transitionScale, alpha, pad, remember, fadeFinished);
   paneFrame(theme, scale, min, max, trace);
   implantPane_.reset();
-  if (!implantActive_ || move_ != app::ScreenMove::Station ||
-      (!ghosting_ && enter_ >= 1.f && !pinnedPanelAge_))
-    return;
-  const float age = implantPanelAge(ghosting_);
+  if (!implantActive_) return;
+  const bool settled = !ghosting_ && enter_ >= 1.f && !pinnedPanelAge_;
+  if (settled && !living_) return;
+  const float age = settled ? view::kImplantFormSeconds : implantPanelAge(ghosting_);
   if (!ghosting_ && age < 0) return;
   if (ghosting_ && !view::implantLeaving(age, intensity_).visible()) return;
-  implantPane_ = ImplantRecord{{}, age, ghosting_, ImHashStr(id)};
+  implantPane_ = ImplantRecord{{}, age, ghosting_, ImHashStr(id), settled};
   implantPaneMin_ = min;
   implantPaneMax_ = max;
 }
@@ -186,7 +186,7 @@ void Ui::endScreenPane() {
                                   (rect[3] - origin.y) * io.DisplayFramebufferScale.y},
                                  implantPane_->age,
                                  implantPane_->leaving,
-                                 implantPane_->seed});
+                                 implantPane_->seed, implantPane_->settled});
     implantPane_.reset();
   }
   endPane();
@@ -294,7 +294,16 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
     const bool clicked = ImGui::InvisibleButton("##row", ImVec2(rowW, rowH));
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (active) {
+    if (t.implantFrameless) {
+      if (active || hovered)
+        for (int i = 0; i < 5; ++i) {
+          const float grow = static_cast<float>(4 - i) * px(2.5f);
+          dl->AddRectFilled(ImVec2(min.x - grow, min.y - grow),
+                            ImVec2(max.x + grow, max.y + grow),
+                            u32(t.implantDeep, (active ? 0.30f : 0.15f) / 5.0f),
+                            px(8) + grow);
+        }
+    } else if (active) {
       dl->AddRectFilled(min, max, u32(t.emberDeep, 0.88f), px(4));
     } else if (hovered) {
       dl->AddRectFilled(min, max, u32(t.panelHi), px(4));
@@ -603,12 +612,22 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
     const bool clicked = ImGui::InvisibleButton("##row", ImVec2(rowW, rowH));
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (active) {
+    if (t.implantFrameless) {
+      // BCI brief 2: selection is brightness and a feathered wash, never a coloured bar.
+      if (active || hovered)
+        for (int i = 0; i < 5; ++i) {
+          const float grow = static_cast<float>(4 - i) * px(2.5f);
+          dl->AddRectFilled(ImVec2(min.x - grow, min.y - grow),
+                            ImVec2(max.x + grow, max.y + grow),
+                            u32(t.implantDeep, (active ? 0.30f : 0.15f) / 5.0f),
+                            px(8) + grow);
+        }
+    } else if (active) {
       dl->AddRectFilled(min, max, u32(diff, 0.88f), px(4));
     } else if (hovered) {
       dl->AddRectFilled(min, max, u32(t.panelHi), px(4));
     }
-    const float tabW = px(5.0f);
+    const float tabW = t.implantFrameless ? px(3.0f) : px(5.0f);
     dl->AddRectFilled(ImVec2(min.x, min.y + px(3)), ImVec2(min.x + tabW, max.y - px(3)),
                       u32(diff, active ? 1.0f : 0.78f), px(2));
     const ImU32 textCol = u32(active ? t.bone : (hovered ? t.bone : t.boneDim));

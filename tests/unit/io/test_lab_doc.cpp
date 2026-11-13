@@ -326,3 +326,34 @@ TEST_CASE("lab focus is optional free text", "[unit][io][rig]") {
   REQUIRE(d);
   CHECK(d->parts[0].focus == "any object");
 }
+
+TEST_CASE("lab gaze targets validate keys weights and anchor references", "[unit][io][living]") {
+  const std::string text=R"(version=1
+[anchors]
+lens=[0,1,2]
+[[gaze]]
+key="hologram"
+weight=0.4
+[[gaze]]
+key="lamp"
+at=[1,2,3]
+weight=0.1
+[[gaze]]
+key="projector"
+at="lens"
+weight=0.1
+)";
+  auto doc=io::parseLabDoc(text,"gaze.toml");
+  REQUIRE(doc);
+  REQUIRE(doc->gaze.size()==3);
+  CHECK(doc->gaze[0].key=="hologram");
+  CHECK(doc->gaze[1].at==std::array<float,3>{1,2,3});
+  CHECK(doc->gaze[2].at==std::array<float,3>{0,1,2});
+  for(const auto& [from,to]:std::vector<std::pair<std::string,std::string>>{
+    {"key=\"lamp\"",""},{"weight=0.4","weight=-1"},{"at=\"lens\"","at=\"missing\""},
+    {"key=\"lamp\"","key=\"\""},{"key=\"lamp\"","key=\"hologram\""}}) {
+    auto bad=text; bad.replace(bad.find(from),from.size(),to);
+    const auto result=io::parseLabDoc(bad,"bad-gaze.toml");
+    CAPTURE(to); REQUIRE_FALSE(result); CHECK(result.error().line>0);
+  }
+}

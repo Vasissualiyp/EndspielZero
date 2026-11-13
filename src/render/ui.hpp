@@ -18,6 +18,7 @@
 #include "app/shell.hpp"
 #include "assets/piece_model.hpp"
 #include "render/deco.hpp"
+#include "view/living_vision.hpp"
 #include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
@@ -216,7 +217,13 @@ class Ui {
     float age;
     bool leaving;
     std::uint32_t seed;
+    bool settled{false};
   };
+  void setLivingVision(bool enabled) noexcept { living_ = enabled; }
+  [[nodiscard]] bool livingVision() const noexcept { return living_; }
+  [[nodiscard]] bool mouseOverImplantPanel() const;
+  [[nodiscard]] view::Vec2f implantPanelCentre() const;
+  [[nodiscard]] bool moveRunning() const noexcept { return enter_ < 1; }
   void setImplantActive(bool enabled) noexcept { implantActive_ = enabled; }
   void pinPanelAge(std::optional<float> age) noexcept { pinnedPanelAge_ = age; }
   [[nodiscard]] std::span<const ImplantRecord> implantRecords() const {
@@ -595,6 +602,7 @@ class Ui {
   /// the background it already drew and beginPane uses the departing move.
   bool ghosting_{false};
   bool implantActive_{false};
+  bool living_{false};
   float implantMoveAge_{0};
   float implantLeavingUntil_{0};
   std::optional<float> pinnedPanelAge_;

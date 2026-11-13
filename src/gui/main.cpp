@@ -64,6 +64,14 @@ int gLab = -1;
 int gProjector = -1;
 int gImplant = -1;
 int gHeartbeat = -1;
+/// M24.4c: run-only living-vision switches (-1 = use the setting / capture default).
+int gLiving = -1;
+int gTremor = -1;
+int gWander = -1;
+std::optional<view::Vec2f> gCliGazePin;
+int gCliGazeUi = -1;
+std::string gCliGazeTarget;
+std::optional<float> gCliWarp;
 std::optional<float> gPanelT;
 std::string gStation;
 bool gLabCapture = false;
@@ -133,13 +141,34 @@ bool configureImplantUi(render::Ui& ui, const app::Shell& shell, const view::The
   const bool active =
       labPath && (gImplant >= 0 ? gImplant == 1 : shell.settings().implantFx);
   ui.setImplantActive(active);
+  ui.setLivingVision(active && (gLiving >= 0 ? gLiving == 1 : shell.settings().livingVision));
   ui.pinPanelAge(gPanelT);
   return active;
 }
 
+/// What the living-vision step decided for this frame (M24.4c section 4.6).
+struct LivingFrame {
+  bool active{false};
+  float warpK{0};
+  view::Vec2f tremor{};
+  float dip{0};
+  /// Depth of field: the focus in world units and the blend, set when the room is seen.
+  float focus{1};
+};
+/// The warp the input remap of section 4.3 must invert, from the previous frame.
+struct WarpInput {
+  bool active{false};
+  float k{0};
+  view::Vec2f viewport{};
+} gWarpInput;
+/// The hologram centre in metres while one is drawn, for the gaze targets.
+std::optional<std::array<float, 3>> gHoloMetres;
+bool gHoloIsWall = false;
+
 void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
                      const app::Settings& settings, bool active, double seconds,
-                     std::uint32_t height, bool capture) {
+                     std::uint32_t height, bool capture, const LivingFrame& living = {}) {
+  renderer.setDepthOfField(std::nullopt);
   if (!active) {
     renderer.setImplant(std::nullopt);
     return;
@@ -149,19 +178,36 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
   p.intensity = renderer.options().presentationIntensity;
   const bool pulse = gHeartbeat >= 0 ? gHeartbeat == 1 : !capture && settings.heartbeat;
   p.heartbeat = pulse ? view::heartbeat(seconds, p.intensity) : 1.f;
-  p.dip = ui.saccadicDip();
+  p.dip = std::max(ui.saccadicDip(), living.dip);
   p.pixelScale = static_cast<float>(height) / 1080.f;
+  if (living.active) {
+    p.living = 1;
+    p.warpK = living.warpK;
+    p.tremor[0] = living.tremor[0] * p.pixelScale;
+    p.tremor[1] = living.tremor[1] * p.pixelScale;
+    p.gaze[0] = settings.gazeState.pointPx[0];
+    p.gaze[1] = settings.gazeState.pointPx[1];
+    p.uiFocus = settings.gazeState.uiFocus;
+    // The room blurs at every depth but the one the eye is on (section 4.4); where depth
+    // cannot be read, the uniform defocus follows how much the eye is on the menu.
+    renderer.setDepthOfField(render::BoardRenderer::DepthOfField{
+        living.focus, view::cocScaleFor(render::kCellsPerMetre),
+        view::kWorldDefocusPixels * p.pixelScale, .35f * p.uiFocus});
+  }
   for (const auto& record : ui.implantRecords()) {
     if (p.panelCount == p.panels.size()) break;
-    const auto state = record.leaving ? view::implantLeaving(record.age, p.intensity)
-                                      : view::implantForming(record.age, p.intensity);
+    auto state = record.leaving ? view::implantLeaving(record.age, p.intensity)
+                                : view::implantForming(record.age, p.intensity);
     if (record.leaving && !state.visible()) continue;
-    p.panels[p.panelCount++] = {
-        {record.rect[0], record.rect[1], record.rect[2], record.rect[3]},
-        state.form,
-        state.dissolve,
-        state.afterimage,
-        static_cast<float>(record.seed % 997)};
+    if (record.settled) state = {1, 0, 0};
+    auto& panel = p.panels[p.panelCount++];
+    panel = {{record.rect[0], record.rect[1], record.rect[2], record.rect[3]},
+             state.form,
+             state.dissolve,
+             state.afterimage,
+             static_cast<float>(record.seed % 997)};
+    panel.age = record.settled ? -1.f : record.age;
+    panel.settled = record.settled ? 1.f : 0.f;
   }
   for (const auto& rect : ui.toolRects()) {
     if (p.toolCount == p.toolRects.size()) break;
@@ -177,6 +223,7 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
 std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& settings,
                                      render::InstanceSet& instances,
                                      const view::Theme& theme) {
+  gHoloMetres.reset();
   if (!(gProjector >= 0 ? gProjector == 1 : settings.projector)) return {};
   const auto req = ui.hologramRequest();
   const bool wall = req.projector == render::HologramRequest::Projector::Wall;
@@ -209,12 +256,172 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
       break;
   }
   if (!h.any()) return {};
+  if (req.alpha > .05f) {
+    gHoloMetres = lens;
+    gHoloIsWall = wall;
+  }
   instances.holo = std::move(h.quads);
   instances.holo.insert(instances.holo.end(), h.lines.begin(), h.lines.end());
   instances.holoTokens = std::move(h.tokens);
   instances.holoTokenBatches = h.tokenBatches;
   instances.holoBeam.push_back(render::projectorBeam(source, at, theme));
   return wall ? std::array{0.f, req.alpha} : std::array{req.alpha, 0.f};
+}
+
+/// One step of the eye (M24.4c sections 4.5-4.6): choose the gaze, ease the focus, shift
+/// the camera by a fraction of a degree. Called once per frame after the lab camera is
+/// known and before the implant parameters are handed to the renderer.
+LivingFrame stepLiving(render::Ui& ui, app::Shell& shell, view::OrbitCamera& camera,
+                       bool capture, double seconds, float dt, std::uint32_t width,
+                       std::uint32_t height, float intensity) {
+  gWarpInput = {};
+  LivingFrame out;
+  auto& settings = shell.settings();
+  if (!ui.livingVision()) return out;
+  static bool seeded = false;
+  if (!seeded) {
+    seeded = true;
+    if (gCliGazePin) settings.gazePin = gCliGazePin;
+    if (gCliGazeUi >= 0) settings.gazeUi = gCliGazeUi;
+    if (!gCliGazeTarget.empty()) settings.gazeTarget = gCliGazeTarget;
+    if (gCliWarp) settings.warpOverride = gCliWarp;
+  }
+  out.active = true;
+  out.warpK = settings.warpOverride.value_or(view::kLensWarpK);
+  const view::Vec2f viewport{static_cast<float>(width), static_cast<float>(height)};
+  const float aspect = viewport[0] / std::max(1.f, viewport[1]);
+  const auto centre = ui.implantPanelCentre();
+
+  // A clip renders its frames with no interface clock; its visual time is the clock then.
+  static double lastSeconds = -1;
+  if (capture && dt <= 0) dt = lastSeconds >= 0 ? static_cast<float>(std::clamp(seconds - lastSeconds, 0.0, 0.1)) : 0.f;
+  lastSeconds = seconds;
+  const auto eye = camera.eye();
+  view::Vec3 forward, right, up;
+  camera.basis(forward, right, up);
+  const auto viewProj = camera.viewProj(aspect);
+  const auto project = [&](view::Vec3 p) -> std::optional<std::pair<view::Vec2f, float>> {
+    const view::Vec3 d{p.x - eye.x, p.y - eye.y, p.z - eye.z};
+    const float depth = d.x * forward.x + d.y * forward.y + d.z * forward.z;
+    if (depth <= camera.nearZ) return std::nullopt;
+    const auto ndc = view::transformPoint(viewProj, p);
+    return std::pair{view::Vec2f{(ndc.x * .5f + .5f) * viewport[0],
+                                 (ndc.y * .5f + .5f) * viewport[1]},
+                     std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z)};
+  };
+
+  std::vector<view::GazeTarget> targets;
+  if (gLabScene) {
+    for (const auto& g : gLabScene->doc().gaze) {
+      view::GazeTarget t{g.key, {}, g.weight};
+      if (g.key == "hologram" || g.key == "wallholo") {
+        const bool wall = g.key == "wallholo";
+        if (gHoloMetres && gHoloIsWall == wall)
+          t.world = gLabScene->toWorld(*gHoloMetres);
+        else
+          t.weight = 0;
+      } else if (g.key != "menu") {
+        t.world = gLabScene->toWorld(g.at);
+      }
+      targets.push_back(t);
+    }
+  }
+  float defaultDistance = camera.distance;
+  if (gHoloMetres)
+    if (const auto p = project(gLabScene->toWorld(*gHoloMetres))) defaultDistance = p->second;
+
+  float mx = viewport[0] * .5f, my = viewport[1] * .5f;
+  bool inWindow = false;
+  Uint32 buttons = 0;
+  if (!capture) {
+    float x = 0, y = 0;
+    buttons = SDL_GetMouseState(&x, &y);
+    const auto scale = ImGui::GetIO().DisplayFramebufferScale;
+    mx = x * scale.x;
+    my = y * scale.y;
+    inWindow = SDL_GetMouseFocus() != nullptr;
+  }
+  static view::Vec2f lastMouse{};
+  view::GazeInput in;
+  in.dt = dt;
+  in.time = seconds;
+  in.mousePx = capture ? centre : view::Vec2f{mx, my};
+  // A capture has no pointer: it counts as moving, unless wandering is asked for.
+  in.mouseMoved = capture ? !(gWander == 1) : lastMouse != in.mousePx;
+  lastMouse = in.mousePx;
+  in.mouseOverPanel = capture || ui.mouseOverImplantPanel();
+  in.dragging = buttons != 0;
+  in.active = !ui.moveRunning();
+  in.wander = gWander >= 0 ? gWander == 1 : !capture && settings.gazeWander;
+  in.intensity = intensity;
+  in.viewport = viewport;
+  in.panelCentrePx = centre;
+  in.targets = targets;
+  in.project = project;
+  in.defaultDistance = defaultDistance;
+  in.fovY = camera.fovY;
+  in.seed = 0xC0FFEEu;
+  (void)inWindow;
+  auto& gaze = settings.gazeState;
+  const auto previous = gaze;
+  gaze = view::stepGaze(gaze, in);
+  // A capture states the settled gaze outright, so the frame does not depend on how many
+  // warm-up frames preceded it (a finished move equals a cut).
+  if (capture && !in.wander && gaze.saccadeT < 1) {
+    gaze.pointPx = gaze.toPx;
+    gaze.saccadeT = 1;
+  }
+
+  // A pinned fixation is stated outright, with no eased accommodation, and holds even when
+  // the target is off screen (the eye still focuses on it; the point is clamped).
+  const auto pinTarget = [&](std::string_view key) {
+    const auto found = std::find_if(targets.begin(), targets.end(),
+                                    [&](const auto& t) { return t.key == key; });
+    if (found == targets.end()) return;
+    const bool menu = key == "menu";
+    const auto p = menu ? std::optional{std::pair{centre, defaultDistance}} : project(found->world);
+    if (!p) return;
+    gaze.pointPx = view::Vec2f{std::clamp(p->first[0], 0.f, viewport[0]),
+                               std::clamp(p->first[1], 0.f, viewport[1])};
+    gaze.fromPx = gaze.toPx = gaze.pointPx;
+    gaze.saccadeT = 1;
+    gaze.uiFocus = gaze.uiFocusTarget = menu ? 1.f : 0.f;
+    gaze.focusDistance = gaze.focusDistanceTarget = p->second;
+    gaze.eyeShift = gaze.eyeShiftTarget = menu ? view::Vec2f{} : view::eyeShiftToward(p->first, viewport, camera.fovY);
+  };
+  if (!settings.gazeTarget.empty()) {
+    pinTarget(settings.gazeTarget);
+  } else if (settings.gazePin) {
+    gaze.pointPx = {(*settings.gazePin)[0] * viewport[0], (*settings.gazePin)[1] * viewport[1]};
+    gaze.fromPx = gaze.toPx = gaze.pointPx;
+    gaze.saccadeT = 1;
+  }
+  if (settings.gazeUi >= 0) {
+    gaze.uiFocus = gaze.uiFocusTarget = static_cast<float>(settings.gazeUi);
+  }
+
+  camera.yaw += gaze.eyeShift[0];
+  camera.pitch += gaze.eyeShift[1];
+
+  const bool tremorOn = gTremor >= 0 ? gTremor == 1 : !capture && settings.tremor;
+  out.tremor = tremorOn ? view::tremorOffset(seconds, intensity, 0xA11CEu) : view::Vec2f{};
+  // The eye shift's own angular speed joins the camera's, so a wander saccade dims the
+  // layer as real saccadic suppression does: 25 % for the 45 ms it takes (brief 4).
+  const float sx = gaze.eyeShift[0] - previous.eyeShift[0];
+  const float sy = gaze.eyeShift[1] - previous.eyeShift[1];
+  const float speed = dt > 0 ? std::hypot(sx, sy) / dt : 0.f;
+  const bool wanderSaccade = gaze.idle >= view::kIdleBeforeWander && in.wander &&
+                             gaze.saccadeT < 1 && intensity >= .5f;
+  out.dip = std::max(view::saccadicDip(speed, intensity), wanderSaccade ? .25f : 0.f);
+
+  // The room's focus, in dioptres: between the gazed depth and the menu's depth.
+  const float menuFocus = view::kMenuFocusDistanceMetres * render::kCellsPerMetre;
+  const float inv = (1 - gaze.uiFocus) / std::max(gaze.focusDistance, .001f) +
+                    gaze.uiFocus / menuFocus;
+  out.focus = 1.f / std::max(inv, 1e-6f);
+
+  gWarpInput = {true, out.warpK, viewport};
+  return out;
 }
 #endif
 
@@ -1228,8 +1435,6 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
-    setImplantFrame(*renderer, **ui, shell->settings(), implantActive,
-                    visualOrigin + sample.seconds, target->height(), true);
     const render::BoardRect uiRect{request.boardRect[0], request.boardRect[1],
                                    request.boardRect[2], request.boardRect[3]};
     // Cinema is the board and the move and nothing else: the whole frame is the board
@@ -1327,6 +1532,15 @@ int captureFrame(const std::string& variantName, const std::string& path,
       frame = {};
       renderer->setBlur(0);
     }
+#ifdef CB_HAVE_IMGUI
+    {
+      const auto living = stepLiving(**ui, *shell, camera, true, visualOrigin + sample.seconds, dt,
+                                     target->width(), target->height(),
+                                     renderer->options().presentationIntensity);
+      setImplantFrame(*renderer, **ui, shell->settings(), implantActive,
+                      visualOrigin + sample.seconds, target->height(), true, living);
+    }
+#endif
     renderer->setLights(room ? render::labLightBlock(
                                    gLabScene->doc(), *gLabScene,
                                    gRoomLightOverride >= 0 ? gRoomLightOverride
@@ -1819,6 +2033,10 @@ int main(int argc, char** argv) {
           "--implant 0|1 toggles the organic lab menus; --panel-t SECONDS pins panel "
           "age.\n"
           "--heartbeat 0|1 toggles the implant double pulse (captures default off).\n"
+          "--living 0|1 toggles living vision (lens warp, gaze, focus; M24.4c);\n"
+          "--tremor 0|1 and --gaze-wander 0|1 (captures default off); --gaze X,Y pins the\n"
+          "gaze (fractions); --gaze-ui 0|1 pins menu/room focus; --gaze-target KEY pins a\n"
+          "fixation; --warp K overrides the lens warp.\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
           "--event-t SECONDS pins the HUD turn flip and newest ledger row; --think-t "
@@ -1989,6 +2207,43 @@ int main(int argc, char** argv) {
       }
       const int value = std::string_view(argv[++i]) == "1" ? 1 : 0;
       (arg == "--implant" ? gImplant : gHeartbeat) = value;
+    } else if (arg == "--living" || arg == "--tremor" || arg == "--gaze-wander" ||
+               arg == "--gaze-ui") {
+      if (i + 1 >= argc || (std::string_view(argv[i + 1]) != "0" &&
+                            std::string_view(argv[i + 1]) != "1")) {
+        std::fprintf(stderr, "%s requires 0 or 1\n", arg.c_str());
+        return 1;
+      }
+      const int value = std::string_view(argv[++i]) == "1" ? 1 : 0;
+      (arg == "--living"   ? gLiving
+       : arg == "--tremor" ? gTremor
+       : arg == "--gaze-ui" ? gCliGazeUi
+                            : gWander) = value;
+    } else if (arg == "--gaze-target") {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "--gaze-target requires a key\n");
+        return 1;
+      }
+      gCliGazeTarget = argv[++i];
+    } else if (arg == "--gaze") {
+      float x = 0, y = 0;
+      if (i + 1 >= argc || std::sscanf(argv[i + 1], "%f,%f", &x, &y) != 2 ||
+          !std::isfinite(x) || !std::isfinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+        std::fprintf(stderr, "--gaze requires <x>,<y> as fractions of the viewport\n");
+        return 1;
+      }
+      ++i;
+      gCliGazePin = view::Vec2f{x, y};
+    } else if (arg == "--warp") {
+      char* end = nullptr;
+      const char* value = i + 1 < argc ? argv[i + 1] : "";
+      const float k = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(k)) {
+        std::fprintf(stderr, "--warp requires a finite number\n");
+        return 1;
+      }
+      ++i;
+      gCliWarp = k;
     } else if (arg == "--panel-t") {
       if (i + 1 >= argc) {
         std::fprintf(stderr, "--panel-t requires finite seconds\n");
@@ -2545,6 +2800,25 @@ int main(int argc, char** argv) {
           break;
       }
     } while (SDL_PollEvent(&e));
+#ifdef CB_HAVE_IMGUI
+    // The pixel the player sees at p shows layer content from lensWarpSource(p), so ImGui
+    // is told the mouse is there (M24.4c 4.3). Tools are never warped, 3-D picking and
+    // hologram dragging keep the real mouse, and the rects are last frame's.
+    if (gWarpInput.active && SDL_GetMouseFocus() != nullptr) {
+      float x = 0, y = 0;
+      SDL_GetMouseState(&x, &y);
+      auto& io = ImGui::GetIO();
+      const view::Vec2f real{x * io.DisplayFramebufferScale.x, y * io.DisplayFramebufferScale.y};
+      bool tool = false;
+      for (const auto& r : (*ui)->toolRects())
+        tool = tool || (real[0] >= r[0] && real[0] < r[2] && real[1] >= r[1] && real[1] < r[3]);
+      if (!tool) {
+        const auto src = view::lensWarpSource(real, gWarpInput.viewport, gWarpInput.k);
+        io.AddMousePosEvent(src[0] / io.DisplayFramebufferScale.x,
+                            src[1] / io.DisplayFramebufferScale.y);
+      }
+    }
+#endif
     if (hoverDirty && shell->hasGame()) {
       hoverDirty = false;
       const bool inGameNow = shell->screen() == app::Screen::Game;
@@ -3011,8 +3285,13 @@ int main(int argc, char** argv) {
     // the swapchain rebuilt under it; skipping one frame is cheap and correct.
     applyPost(*renderer, shell->settings());
 #ifdef CB_HAVE_IMGUI
-    setImplantFrame(*renderer, **ui, shell->settings(), implantActive, visualSeconds,
-                    window->height(), false);
+    {
+      const auto living = stepLiving(**ui, *shell, camera, false, visualSeconds, dt,
+                                     window->width(), window->height(),
+                                     renderer->options().presentationIntensity);
+      setImplantFrame(*renderer, **ui, shell->settings(), implantActive, visualSeconds,
+                      window->height(), false, living);
+    }
 #endif
     auto frame = window->beginFrame();
     if (!frame.has_value()) {

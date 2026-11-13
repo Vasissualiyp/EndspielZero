@@ -56,6 +56,8 @@ class VulkanContext {
   [[nodiscard]] std::uint32_t queueFamily() const noexcept { return queueFamily_; }
   [[nodiscard]] VkCommandPool commandPool() const noexcept { return pool_; }
   [[nodiscard]] const std::string& deviceName() const noexcept { return deviceName_; }
+  /// Whether a 4x multisampled depth image can be read in a shader (M24.4c depth of field).
+  [[nodiscard]] bool depthSampleable() const noexcept;
   [[nodiscard]] bool validationEnabled() const noexcept {
     return debugMessenger_ != VK_NULL_HANDLE;
   }

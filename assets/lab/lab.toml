@@ -862,3 +862,34 @@ color = "#6FE3FF"
 intensity = 0.45
 radius = 1.2
 group = "machine"
+
+# M24.4c: fixation subjects, in metres; the two holograms resolve dynamically.
+[[gaze]]
+key = "hologram"
+weight = 0.40
+[[gaze]]
+key = "menu"
+weight = 0.25
+[[gaze]]
+key = "projector"
+at = "projector.lens"
+weight = 0.10
+[[gaze]]
+key = "lamp"
+at = [0.7, 2.4327, 1.4455]
+weight = 0.10
+[[gaze]]
+key = "magazine"
+at = "magazine.front"
+weight = 0.08
+[[gaze]]
+key = "monitor"
+at = [0.35, 2.77, 1.175]
+weight = 0.07
+[[gaze]]
+key = "wallholo"
+weight = 0.35
+[[gaze]]
+key = "rack"
+at = "magazine.front"
+weight = 0.15

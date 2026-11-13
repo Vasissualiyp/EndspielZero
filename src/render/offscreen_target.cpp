@@ -97,8 +97,10 @@ Result<void> OffscreenTarget::allocate(const VulkanContext& ctx, bool allocateCo
   }
   // Depth matches the colour sample count: every attachment in a render pass must.
   return makeImage(ctx, width_, height_, kDepthFormat,
-                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT,
-                   kSampleCount, depth_, depthMem_, depthView_);
+                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                       (ctx.depthSampleable() ? static_cast<VkImageUsageFlags>(VK_IMAGE_USAGE_SAMPLED_BIT)
+                              : VkImageUsageFlags{0}),
+                   VK_IMAGE_ASPECT_DEPTH_BIT, kSampleCount, depth_, depthMem_, depthView_);
 }
 
 Result<OffscreenTarget> OffscreenTarget::create(const VulkanContext& ctx,

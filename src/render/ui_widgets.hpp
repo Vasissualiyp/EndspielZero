@@ -182,6 +182,8 @@ bool menuEntry(const char* label, int index, const view::Theme& theme, ImFont* l
 /// a departing ghost: its scaled measurement must not become the height the settled pane
 /// is later centred from. With `fadeFinished`, layout runs at full alpha and endPane
 /// fades all finished vertices, including custom chrome and child windows (Station).
+/// True under the frameless implant theme: pane frames keep a faint outline (M24.4c).
+bool& framelessControls();
 void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
                float pad, bool remember = true, bool fadeFinished = false);
 void endPane();

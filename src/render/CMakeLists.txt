@@ -19,7 +19,7 @@ endif()
 # compiled at runtime and nothing has to be found on disk next to the binary.
 set(CB_SPV_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders.hpp)
 set(CB_SHADERS board.vert board.frag backdrop.vert backdrop.frag blur.vert blur.frag
-               post_down.frag post_up.frag post_composite.frag implant.frag
+               post_down.frag post_up.frag post_composite.frag implant.frag implant_blur.frag dof.frag
                imgui_field.vert imgui_field.frag)
 set(CB_SPV_FILES "")
 foreach(shader IN LISTS CB_SHADERS)

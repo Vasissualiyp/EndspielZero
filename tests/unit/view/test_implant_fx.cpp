@@ -28,25 +28,25 @@ TEST_CASE("implant heartbeat is a calm-safe bounded double pulse",
 
 TEST_CASE("implant saccadic suppression follows angular speed", "[unit][view][implant]") {
   CHECK(saccadicDip(0, 1) == 0);
-  CHECK(saccadicDip(3, 1) == Approx(.6f));
-  CHECK(saccadicDip(9, 1) == Approx(.6f));
+  CHECK(saccadicDip(3, 1) == Approx(.4f));
+  CHECK(saccadicDip(9, 1) == Approx(.4f));
   CHECK(saccadicDip(9, 0) == 0);
-  CHECK(saccadicDip(1.5f, 1) == Approx(.3f));
+  CHECK(saccadicDip(1.5f, 1) == Approx(.2f));
 }
 
 TEST_CASE("implant panels form dissolve and leave a short afterimage",
           "[unit][view][implant]") {
   CHECK(implantForming(0, 1).form == 0);
   CHECK(implantForming(-1, 1).form == 0);
-  CHECK(implantForming(.35f, 1).form == 1);
+  CHECK(implantForming(.45f, 1).form == 1);
   CHECK(implantForming(1, 1).form == 1);
   CHECK(implantForming(.2f, 0).form == 1);
   CHECK(implantLeaving(0, 1).dissolve == 0);
-  CHECK(implantLeaving(.25f, 1).dissolve == 1);
-  CHECK(implantLeaving(.25001f, 1).afterimage == Approx(.08f));
+  CHECK(implantLeaving(.22f, 1).dissolve == 1);
+  CHECK(implantLeaving(.22001f, 1).afterimage == Approx(.06f));
   CHECK(implantLeaving(.4f, 1).afterimage > 0);
-  CHECK(implantLeaving(.55f, 1).afterimage == 0);
-  CHECK_FALSE(implantLeaving(.55f, 1).visible());
+  CHECK(implantLeaving(.58f, 1).afterimage == 0);
+  CHECK_FALSE(implantLeaving(.58f, 1).visible());
   CHECK_FALSE(implantLeaving(1, 1).visible());
   CHECK(implantLeaving(.2f, 0).dissolve == 1);
   CHECK(implantLeaving(.1f, 0).afterimage == 0);

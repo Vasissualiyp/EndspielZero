@@ -87,6 +87,11 @@ void drawPlate(ImDrawList* dl, const ImVec2& pmin, const ImVec2& pmax,
 
 }  // namespace
 
+bool& framelessControls() {
+  static bool on = false;
+  return on;
+}
+
 ScopedVisualTime::ScopedVisualTime(double seconds) noexcept
     : previousContext_(visualInput.context), previousSeconds_(visualInput.seconds) {
   visualInput = {ImGui::GetCurrentContext(),
@@ -118,6 +123,8 @@ void hudPanel(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& theme,
   const float width = max.x - min.x;
   const float height = max.y - min.y;
   if (width <= 0.0f || height <= 0.0f || draw <= 0.0f) return;
+  // The implant is light, not a display: no fill, frame, bracket or raster (BCI brief 2).
+  if (theme.implantFrameless) return;
   const bool led = theme.panelStyle == view::PanelStyle::Brackets;
   const float cut = std::min({6.0f * scale * corner, width * 0.25f, height * 0.25f});
   const ImVec2 outline[8] = {{min.x + cut, min.y}, {max.x - cut, min.y},
@@ -336,6 +343,36 @@ void drawLiveControl(ImDrawList* dl, ImVec2 min, ImVec2 max, const ControlLayout
   const bool hot = hovered || focused;
   const auto accent = mix(theme.bone, theme.ember, 0.20f);
   const auto edge = hot ? theme.boneDim : theme.interfaceRule;
+  if (theme.implantFrameless) {
+    // Selection is brightness plus a soft wash: nested translucent rounded rects stand in
+    // for a 10 px feather, so no edge is visible. The core is full `implant`, the rest dim.
+    const float level = held ? 1.0f : hot ? 0.9f : 0.0f;
+    if (level > 0.0f) {
+      constexpr int layers = 5;
+      for (int i = 0; i < layers; ++i) {
+        const float grow = static_cast<float>(layers - 1 - i) * 2.5f * s;
+        dl->AddRectFilled(ImVec2(min.x - grow, min.y - grow), ImVec2(max.x + grow, max.y + grow),
+                          u32(theme.implantDeep, .30f * level / static_cast<float>(layers)), 12 * s + grow);
+      }
+    }
+    const ImVec2 text(min.x + l.label.x, min.y + l.label.y);
+    if (l.showNumber) {
+      char number[4]{};
+      std::snprintf(number, sizeof(number), "%02d", std::clamp(index, 0, 99));
+      dl->AddText(l.font, l.tailSize, ImVec2(min.x + l.number.x, min.y + l.number.y),
+                  u32(theme.implantFaint), number);
+    }
+    const auto labelColour = !usable ? theme.implantFaint
+                             : cold  ? theme.rift
+                             : (hot || primary || held) ? theme.implant
+                                                         : theme.implantDim;
+    dl->AddText(l.font, l.fontSize, text, u32(labelColour), l.caption.c_str(), nullptr, l.wrap);
+    if (l.showTail)
+      dl->AddText(l.font, l.tailSize, ImVec2(min.x + l.value.x, min.y + l.value.y),
+                  u32(usable ? theme.implantDim : theme.implantFaint), l.tail.c_str(), nullptr,
+                  l.tailWrap);
+    return;
+  }
   dl->PushClipRect(min, max, true);
   const float cut = std::min({6 * s, (max.y - min.y) * 0.15f, (max.x - min.x) * 0.15f});
   const ImVec2 plate[] = {min, ImVec2(max.x - cut, min.y), ImVec2(max.x, min.y + cut),
@@ -903,7 +940,12 @@ void beginPane(const char* id, ImVec2 min, ImVec2 max, float scale, float alpha,
   paneFinishedAlpha() = fadeFinished ? a : -1.f;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
-  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
+  // The pane window has no border of its own (WindowBorderSize is 0), so the colour only
+  // reaches its frames. The frameless implant keeps their faint outline: a checkbox ring,
+  // a slider track, an input field (M24.4c step 3.2).
+  ImGui::PushStyleColor(ImGuiCol_Border, framelessControls()
+                                             ? ImGui::GetStyle().Colors[ImGuiCol_Border]
+                                             : ImVec4(0, 0, 0, 0));
   const bool began =
       ImGui::Begin(id, nullptr,
                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |

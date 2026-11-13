@@ -171,11 +171,11 @@ TEST_CASE("implant palette changes perception and preserves hardware and semanti
     CHECK(t.bone.array() == base.implant.array());
     CHECK(t.boneDim.array() == base.implantDim.array());
     CHECK(t.boneFaint.array() == base.implantFaint.array());
-    CHECK(t.rule.array() == base.implantFaint.withAlpha(.4f).array());
-    CHECK(t.interfaceRule.array() == base.implantFaint.withAlpha(.7f).array());
+    CHECK(t.rule.array() == base.implantFaint.withAlpha(.2f).array());
+    CHECK(t.interfaceRule.array() == base.implantFaint.withAlpha(.35f).array());
     CHECK(t.blood.array() == base.blood.array());
     CHECK(t.ink.array() == base.ink.array());
-    CHECK(t.panel.array() == base.panel.array());
+    CHECK(t.panel.array() == base.panel.withAlpha(0).array());
     CHECK(t.seamHueBegin == base.seamHueBegin);
     CHECK(t.seamHueEnd == base.seamHueEnd);
     CHECK(t.seamSaturation == base.seamSaturation);
@@ -185,4 +185,14 @@ TEST_CASE("implant palette changes perception and preserves hardware and semanti
     CHECK(t.whitePiece.array() == base.whitePiece.array());
     CHECK(t.blackPiece.array() == base.blackPiece.array());
   }
+}
+
+TEST_CASE("BCI implant is frameless with either living switch", "[unit][view][living]") {
+  const auto base=cb::view::Theme::manifold();
+  const auto t=cb::view::implantTheme(base,true);
+  CHECK(t.panel.a==0);
+  CHECK(t.panelHi.a==0);
+  CHECK(t.implantFrameless);
+  CHECK(cb::view::implantTheme(base,false).panel.a==cb::view::implantTheme(base).panel.a);
+  CHECK(cb::view::implantTheme(base,false).ember.array()==cb::view::implantTheme(base).ember.array());
 }

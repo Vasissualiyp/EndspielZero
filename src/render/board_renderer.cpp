@@ -63,6 +63,12 @@ struct BlurPush {
 };
 static_assert(sizeof(BlurPush) == 32);
 
+struct DofPush {
+  float direction[2]{};
+  float focus{1}, cocScale{0}, maxPx{0}, nearZ{0.1f}, farZ{1000.f}, pad{0};
+};
+static_assert(sizeof(DofPush) == 32);
+
 // The contact shadow (M18.2). The disc mesh's radius is half its extent, so an instance
 // scale of 0.68 wants a world radius of 0.34: a touch wider than a piece's own foot
 // (about 0.27) so the contact shows around the base, and still inside the cell (half
@@ -261,6 +267,10 @@ Result<BoardRenderer> BoardRenderer::create(const VulkanContext& ctx,
     return fail(ok.error().code, ok.error().message);
   if (auto ok = r.buildBlurPipeline(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
+  if (ctx.depthSampleable()) {
+    if (auto ok = r.buildDofPipeline(); !ok.has_value())
+      return fail(ok.error().code, ok.error().message);
+  }
   if (auto ok = r.buildBackdropPipeline(); !ok.has_value())
     return fail(ok.error().code, ok.error().message);
   if (auto ok = r.uploadGeometry(); !ok.has_value())
@@ -603,6 +613,148 @@ Result<void> BoardRenderer::buildBlurPipeline() {
       r != VK_SUCCESS) {
     return fail(ErrorCode::Internal, "cannot create the blur pipeline: " + describe(r));
   }
+  return {};
+}
+
+Result<void> BoardRenderer::buildDofPipeline() {
+  const auto fs = makeShader(*ctx_, spv::dof_frag_spv_span());
+  if (!fs.has_value()) return fail(fs.error().code, fs.error().message);
+  dofFrag_ = *fs;
+  VkDescriptorSetLayoutBinding bindings[2]{};
+  for (std::uint32_t i = 0; i < 2; ++i) {
+    bindings[i].binding = i;
+    bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[i].descriptorCount = 1;
+    bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  }
+  VkDescriptorSetLayoutCreateInfo dlci{};
+  dlci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  dlci.bindingCount = 2;
+  dlci.pBindings = bindings;
+  if (const VkResult r =
+          vkCreateDescriptorSetLayout(ctx_->device(), &dlci, nullptr, &dofSetLayout_);
+      r != VK_SUCCESS)
+    return fail(ErrorCode::Internal, "cannot create the depth-of-field set layout: " + describe(r));
+  VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * kFramesInFlight};
+  VkDescriptorPoolCreateInfo dpci{};
+  dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  dpci.maxSets = 2 * kFramesInFlight;
+  dpci.poolSizeCount = 1;
+  dpci.pPoolSizes = &size;
+  if (const VkResult r = vkCreateDescriptorPool(ctx_->device(), &dpci, nullptr, &dofPool_);
+      r != VK_SUCCESS)
+    return fail(ErrorCode::Internal, "cannot create the depth-of-field pool: " + describe(r));
+  std::array<VkDescriptorSetLayout, 2 * kFramesInFlight> layouts{};
+  layouts.fill(dofSetLayout_);
+  VkDescriptorSetAllocateInfo dsai{};
+  dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  dsai.descriptorPool = dofPool_;
+  dsai.descriptorSetCount = static_cast<std::uint32_t>(layouts.size());
+  dsai.pSetLayouts = layouts.data();
+  std::array<VkDescriptorSet, 2 * kFramesInFlight> sets{};
+  if (const VkResult r = vkAllocateDescriptorSets(ctx_->device(), &dsai, sets.data());
+      r != VK_SUCCESS)
+    return fail(ErrorCode::Internal, "cannot allocate the depth-of-field sets: " + describe(r));
+  for (std::uint32_t f = 0; f < kFramesInFlight; ++f) {
+    dofFromColor_[f] = sets[2 * f];
+    dofFromScratch_[f] = sets[2 * f + 1];
+  }
+  VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DofPush)};
+  VkPipelineLayoutCreateInfo plci{};
+  plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  plci.setLayoutCount = 1;
+  plci.pSetLayouts = &dofSetLayout_;
+  plci.pushConstantRangeCount = 1;
+  plci.pPushConstantRanges = &push;
+  if (const VkResult r = vkCreatePipelineLayout(ctx_->device(), &plci, nullptr, &dofLayout_);
+      r != VK_SUCCESS)
+    return fail(ErrorCode::Internal, "cannot create the depth-of-field layout: " + describe(r));
+
+  VkPipelineVertexInputStateCreateInfo vi{};
+  vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  VkPipelineInputAssemblyStateCreateInfo ia{};
+  ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  VkPipelineViewportStateCreateInfo vp{};
+  vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  vp.viewportCount = 1;
+  vp.scissorCount = 1;
+  VkPipelineRasterizationStateCreateInfo rs{};
+  rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rs.polygonMode = VK_POLYGON_MODE_FILL;
+  rs.cullMode = VK_CULL_MODE_NONE;
+  rs.lineWidth = 1.0f;
+  VkPipelineMultisampleStateCreateInfo ms{};
+  ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  VkPipelineDepthStencilStateCreateInfo ds{};
+  ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  VkPipelineColorBlendAttachmentState blend{};
+  blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  VkPipelineColorBlendStateCreateInfo cb{};
+  cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  cb.attachmentCount = 1;
+  cb.pAttachments = &blend;
+  const VkDynamicState dynamics[2]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dy{};
+  dy.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dy.dynamicStateCount = 2;
+  dy.pDynamicStates = dynamics;
+  VkPipelineShaderStageCreateInfo stages[2]{};
+  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].module = blurVert_;
+  stages[0].pName = "main";
+  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  stages[1].module = dofFrag_;
+  stages[1].pName = "main";
+  const VkFormat colorFormat = colorFormat_;
+  VkPipelineRenderingCreateInfo rendering{};
+  rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachmentFormats = &colorFormat;
+  VkGraphicsPipelineCreateInfo gpi{};
+  gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  gpi.pNext = &rendering;
+  gpi.stageCount = 2;
+  gpi.pStages = stages;
+  gpi.pVertexInputState = &vi;
+  gpi.pInputAssemblyState = &ia;
+  gpi.pViewportState = &vp;
+  gpi.pRasterizationState = &rs;
+  gpi.pMultisampleState = &ms;
+  gpi.pDepthStencilState = &ds;
+  gpi.pColorBlendState = &cb;
+  gpi.pDynamicState = &dy;
+  gpi.layout = dofLayout_;
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
+                                                   nullptr, &dofPipeline_);
+      r != VK_SUCCESS)
+    return fail(ErrorCode::Internal, "cannot create the depth-of-field pipeline: " + describe(r));
+  return {};
+}
+
+Result<void> BoardRenderer::bindDofTarget(const OffscreenTarget& target, std::uint32_t frame) {
+  if (dofBoundColor_[frame] == target.colorView() && dofBoundDepth_[frame] == target.depthView())
+    return {};
+  VkDescriptorImageInfo images[3]{
+      {blurSampler_, target.colorView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {blurSampler_, target.scratchView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+      {blurSampler_, target.depthView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL}};
+  VkWriteDescriptorSet writes[4]{};
+  for (std::uint32_t i = 0; i < 4; ++i) {
+    writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[i].dstSet = i < 2 ? dofFromColor_[frame] : dofFromScratch_[frame];
+    writes[i].dstBinding = i % 2;
+    writes[i].descriptorCount = 1;
+    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[i].pImageInfo = i % 2 == 1 ? &images[2] : &images[i / 2];
+  }
+  vkUpdateDescriptorSets(ctx_->device(), 4, writes, 0, nullptr);
+  dofBoundColor_[frame] = target.colorView();
+  dofBoundDepth_[frame] = target.depthView();
   return {};
 }
 
@@ -2451,6 +2603,16 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   }
 
   if (auto r = bindBlurTarget(target, frame); !r.has_value()) return r;
+  // Depth of field (M24.4c): the depth-aware pass where the device can read depth, the
+  // uniform defocus otherwise. The pause defocus, when running, wins over both.
+  const bool dofDepth = dof_ && blur_ <= 0.001f && dofPipeline_ != VK_NULL_HANDLE &&
+                        ctx_->depthSampleable();
+  if (dofDepth) {
+    if (auto r = bindDofTarget(target, frame); !r.has_value()) return r;
+  }
+  const float blurStrength =
+      blur_ > 0.001f ? blur_
+                     : (dof_ && !dofDepth ? std::clamp(dof_->fallback, 0.0f, 1.0f) : 0.0f);
 
   // The effective scene format for this whole recording (ADR-0025): requested and
   // supported. The background callback reads the same answer through `hdrScene()`.
@@ -2576,7 +2738,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     depth.imageView = target.depthView();
     depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.storeOp = dofDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depth.clearValue.depthStencil = {1.0f, 0};
 
     VkRenderingInfo ri{};
@@ -2868,7 +3030,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // Defocus, in two separable passes that ping-pong between the target's two colour
     // images and therefore leave the result back in the first one. Skipped entirely when
     // nothing is out of focus, so a game in play pays for none of this.
-    if (blur_ > 0.001f) {
+    if (blurStrength > 0.001f) {
       const auto blurPass = [&](VkImageView into, VkDescriptorSet from, float dx,
                                 float dy) {
         VkRenderingAttachmentInfo att{};
@@ -2887,7 +3049,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         BlurPush bp{};
         bp.direction[0] = dx;
         bp.direction[1] = dy;
-        bp.strength = std::clamp(blur_, 0.0f, 1.0f);
+        bp.strength = std::clamp(blurStrength, 0.0f, 1.0f);
         // Only the second pass dims: doing it in both would square the effect.
         bp.dim = dy != 0.0f ? 0.22f * bp.strength : 0.0f;
         toFloat4(theme_.ink, bp.ground);
@@ -2938,6 +3100,75 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
       blurPass(target.colorView(), blurFromScratch_[frame], 0.0f,
                radius / static_cast<float>(target.height()));
+    }
+
+    // Depth of field: across into the scratch image, then down back into the colour.
+    if (dofDepth) {
+      const float nearZ = options_.labMode ? camera.nearZ : std::max(camera.nearZ, options_.nearClip);
+      const auto dofPass = [&](VkImageView into, VkDescriptorSet from, float dx, float dy) {
+        VkRenderingAttachmentInfo att{};
+        att.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        att.imageView = into;
+        att.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        att.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        VkRenderingInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        info.renderArea = fullScissor;
+        info.layerCount = 1;
+        info.colorAttachmentCount = 1;
+        info.pColorAttachments = &att;
+        DofPush dp{};
+        dp.direction[0] = dx;
+        dp.direction[1] = dy;
+        dp.focus = dof_->focus;
+        dp.cocScale = dof_->cocScale;
+        dp.maxPx = dof_->maxPx;
+        dp.nearZ = nearZ;
+        dp.farZ = camera.farZ;
+        vkCmdBeginRendering(cmd, &info);
+        vkCmdSetViewport(cmd, 0, 1, &full);
+        vkCmdSetScissor(cmd, 0, 1, &fullScissor);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dofPipeline_);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dofLayout_, 0, 1,
+                                &from, 0, nullptr);
+        vkCmdPushConstants(cmd, dofLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DofPush),
+                           &dp);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmdEndRendering(cmd);
+      };
+      barrier(target.depthImage(), VK_IMAGE_ASPECT_DEPTH_BIT,
+              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+              VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+      barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+      barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+              0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+      dofPass(target.scratchView(), dofFromColor_[frame], 1.0f / static_cast<float>(target.width()),
+              0.0f);
+      barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+      barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+      dofPass(target.colorView(), dofFromScratch_[frame], 0.0f,
+              1.0f / static_cast<float>(target.height()));
     }
 
     // The interface is drawn last and never blurred: the menu in front of a defocused
@@ -3026,6 +3257,16 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(blurFromScratch_, o.blurFromScratch_);
   std::swap(blurBoundColor_, o.blurBoundColor_);
   std::swap(blur_, o.blur_);
+  std::swap(dofFrag_, o.dofFrag_);
+  std::swap(dofLayout_, o.dofLayout_);
+  std::swap(dofPipeline_, o.dofPipeline_);
+  std::swap(dofSetLayout_, o.dofSetLayout_);
+  std::swap(dofPool_, o.dofPool_);
+  std::swap(dofFromColor_, o.dofFromColor_);
+  std::swap(dofFromScratch_, o.dofFromScratch_);
+  std::swap(dofBoundColor_, o.dofBoundColor_);
+  std::swap(dofBoundDepth_, o.dofBoundDepth_);
+  std::swap(dof_, o.dof_);
   std::swap(labMeshes_, o.labMeshes_);
   std::swap(backdropVert_, o.backdropVert_);
   std::swap(backdropFrag_, o.backdropFrag_);
@@ -3080,6 +3321,11 @@ BoardRenderer::~BoardRenderer() {
   if (blurSampler_ != VK_NULL_HANDLE) vkDestroySampler(d, blurSampler_, nullptr);
   if (blurVert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, blurVert_, nullptr);
   if (blurFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, blurFrag_, nullptr);
+  if (dofPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(d, dofPipeline_, nullptr);
+  if (dofLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, dofLayout_, nullptr);
+  if (dofPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, dofPool_, nullptr);
+  if (dofSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(d, dofSetLayout_, nullptr);
+  if (dofFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, dofFrag_, nullptr);
   if (backdropVert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropVert_, nullptr);
   if (backdropFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropFrag_, nullptr);
   if (vert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, vert_, nullptr);

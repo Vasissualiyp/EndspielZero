@@ -92,7 +92,7 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
   try {
     auto root = toml::parse(text, sourceName);
     Reader r{std::string(sourceName)};
-    r.keys(root, {"version", "anchors", "part", "station", "light"});
+    r.keys(root, {"version", "anchors", "part", "station", "light", "gaze"});
     if (r.need(root, "version").value<int>() != 1)
       r.bad(r.need(root, "version"), "version must be 1");
     LabDoc doc;
@@ -230,6 +230,32 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
         if (s.pitch <= -89 || s.pitch >= 89)
           r.bad(r.need(*t, "pitch"), "pitch outside (-89,89)");
         doc.stations.push_back(std::move(s));
+      }
+    }
+    names.clear();
+    if (const auto* n = root.get("gaze")) {
+      const auto* list = n->as_array();
+      if (!list) r.bad(*n, "gaze must be an array of tables");
+      for (const auto& item : *list) {
+        const auto* t = item.as_table();
+        if (!t) r.bad(item, "gaze must be a table");
+        LabGaze g;
+        r.context = std::string(sourceName) + " gaze";
+        g.key = r.string(r.need(*t, "key"));
+        if (g.key.empty() || !names.insert(g.key).second)
+          r.bad(item, "empty or duplicate gaze key");
+        r.keys(*t, {"key", "at", "weight"});
+        g.weight = r.number(r.need(*t, "weight"));
+        if (g.weight < 0) r.bad(r.need(*t, "weight"), "weight must be nonnegative");
+        if (const auto* at = t->get("at")) {
+          if (at->is_string()) {
+            const auto a = doc.anchor(r.string(*at));
+            if (!a) r.bad(*at, "unknown gaze anchor");
+            g.at = *a;
+          } else g.at = r.triple(*at);
+        } else if (g.key != "menu" && g.key != "hologram" && g.key != "wallholo")
+          r.bad(item, "missing 'at'");
+        doc.gaze.push_back(std::move(g));
       }
     }
     return doc;

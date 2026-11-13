@@ -796,7 +796,7 @@ void Ui::applyStyle() {
     s.GrabRounding = 0.0f;
   }
   ImVec4* c = s.Colors;
-  c[ImGuiCol_WindowBg] = col(t.soot, 0.96f);
+  c[ImGuiCol_WindowBg] = col(t.soot, t.implantFrameless ? 0.f : .96f);
   c[ImGuiCol_ChildBg] = col(t.panel, 0.0f);
   c[ImGuiCol_PopupBg] = col(t.panel, 0.99f);
   c[ImGuiCol_Border] = col(t.interfaceRule);
@@ -829,6 +829,22 @@ void Ui::applyStyle() {
   // rest.
   c[ImGuiCol_NavCursor] = col(t.ember);
   c[ImGuiCol_NavWindowingHighlight] = col(t.ember, 0.7f);
+  widgets::framelessControls() = t.implantFrameless;
+  if (t.implantFrameless) {
+    // M24.4c / BCI brief 2: light, not boxes. The frame fills are already clear, so the
+    // checkbox ring, slider track and input field keep a faint outline; the slider knob
+    // is a soft dim dot rather than the brightest block on screen; a selection is a wash.
+    s.ChildBorderSize = 0.0f;
+    s.GrabRounding = 8.0f;
+    s.GrabMinSize = 8.0f;
+    c[ImGuiCol_Border] = col(t.implantFaint, 0.6f);
+    c[ImGuiCol_SliderGrab] = col(t.implantDim, 0.9f);
+    c[ImGuiCol_SliderGrabActive] = col(t.implant);
+    c[ImGuiCol_Header] = col(t.implantDeep, 0.0f);
+    c[ImGuiCol_HeaderHovered] = col(t.implantDeep, 0.30f);
+    c[ImGuiCol_HeaderActive] = col(t.implantDeep, 0.30f);
+    c[ImGuiCol_ScrollbarBg] = col(t.ink, 0.0f);
+  }
 
   // Sizes scale with the interface; colours do not.
   s.ScaleAllSizes(scale_);
@@ -929,7 +945,7 @@ float Ui::currentMoveSeconds() const noexcept {
 
 float Ui::implantPanelAge(bool leaving) const noexcept {
   return pinnedPanelAge_.value_or(implantMoveAge_ -
-                                  (leaving ? 0.f : .55f * currentMoveSeconds()));
+                                  (leaving ? 0.f : .70f * currentMoveSeconds()));
 }
 
 float Ui::saccadicDip() const noexcept {
@@ -937,6 +953,24 @@ float Ui::saccadicDip() const noexcept {
   return view::saccadicDip(
       view::rigAngularSpeed(*fromCam_, *toCam_, implantMoveAge_, currentMoveSeconds()),
       intensity_);
+}
+
+view::Vec2f Ui::implantPanelCentre() const {
+  const auto& io = ImGui::GetIO();
+  view::Vec2f centre{io.DisplaySize.x*.5f, io.DisplaySize.y*.5f};
+  float largest=0;
+  for (const auto& r:implantRecords_) {
+    const float area=(r.rect[2]-r.rect[0])*(r.rect[3]-r.rect[1]);
+    if (r.settled && area>largest) { largest=area; centre={(r.rect[0]+r.rect[2])*.5f,(r.rect[1]+r.rect[3])*.5f}; }
+  }
+  return centre;
+}
+bool Ui::mouseOverImplantPanel() const {
+  float x{},y{}; SDL_GetMouseState(&x,&y);
+  const auto contains=[&](const auto& r,float grow) { return x>=r[0]-grow && x<r[2]+grow && y>=r[1]-grow && y<r[3]+grow; };
+  for (const auto& r:toolRects_) if(contains(r,0)) return false;
+  for (const auto& r:implantRecords_) if(r.settled && contains(r.rect,8)) return true;
+  return false;
 }
 
 void Ui::recordToolRect() {
@@ -952,7 +986,7 @@ bool Ui::paneInteractive() const noexcept {
   if (implantActive_ && move_ == app::ScreenMove::Station &&
       (enter_ < 1 || pinnedPanelAge_))
     return !ghosting_ &&
-           view::implantForming(implantPanelAge(false), intensity_).form >= .5f;
+           implantPanelAge(false) >= (intensity_ < .5f ? .1f : .25f);
   return !ghosting_ && (move_ != app::ScreenMove::Station || moveFx().arriveAlpha > .5f);
 }
 
@@ -1676,7 +1710,10 @@ void Ui::drawDebugConsole(app::Shell& shell) {
   if (!consoleOpen_) return;
   ImGui::SetNextWindowSize(ImVec2(640, 360), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
+  // A tool stays legible under the frameless implant theme: it keeps its own backing.
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, col(theme_.soot, 0.96f));
   const bool opened = ImGui::Begin("Debug console (F12)", &consoleOpen_);
+  ImGui::PopStyleColor();
   recordToolRect();
   if (opened) {
     const float footer = ImGui::GetFrameHeightWithSpacing();
