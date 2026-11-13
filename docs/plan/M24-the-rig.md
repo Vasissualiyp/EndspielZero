@@ -119,6 +119,11 @@ other's motion vocabulary, so hardware and brain are always told apart.
 - **Panels** stay screen-space (unchanged widgets, `hudPanel`, auto UI scale) and are
   perfectly stable. There is no lag and no frame, because nothing physical carries
   them.
+- **The BCI look (user, 2026-11-12).** `docs/plan/M24-bci-look.md` refines everything
+  below about how the implant looks and moves, and wins where they differ. Notably: text
+  is the panel (no boxes or frames), panels lock in coarse-to-fine from the gaze point,
+  the negative afterimage became a faint **positive persistence**, and the handshake's
+  ring wave became **phosphene mapping** (a spiral of soft blobs, then one front).
 - **Activation: the handshake.** At first launch only (§7), after the room lights come
   up:
   1. A few soft phosphenes appear near the centre of view: blurred points of light in the
