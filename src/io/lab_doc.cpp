@@ -92,7 +92,7 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
   try {
     auto root = toml::parse(text, sourceName);
     Reader r{std::string(sourceName)};
-    r.keys(root, {"version", "anchors", "part", "station", "light"});
+    r.keys(root, {"version", "anchors", "part", "station", "light", "deploy"});
     if (r.need(root, "version").value<int>() != 1)
       r.bad(r.need(root, "version"), "version must be 1");
     LabDoc doc;
@@ -207,6 +207,31 @@ Result<LabDoc> parseLabDoc(std::string_view text, std::string_view sourceName) {
         }
         doc.lights.push_back(std::move(l));
       }
+    }
+    if (const auto* n = root.get("deploy")) {
+      r.context = std::string(sourceName) + " deploy";
+      const auto* t = n->as_table();
+      if (!t) r.bad(*n, "deploy must be a table");
+      r.keys(*t, {"min", "max", "rail_z", "mast_edge_gap", "yoke_drop", "slab_bay"});
+      LabDeploy d;
+      d.min = r.triple(r.need(*t, "min"));
+      d.max = r.triple(r.need(*t, "max"));
+      d.railZ = r.number(r.need(*t, "rail_z"));
+      d.mastEdgeGap = r.number(r.need(*t, "mast_edge_gap"));
+      d.yokeDrop = r.number(r.need(*t, "yoke_drop"));
+      d.slabBay = r.string(r.need(*t, "slab_bay"));
+      for (std::size_t a = 0; a < 3; ++a)
+        if (!(d.min[a] < d.max[a])) r.bad(r.need(*t, "max"), "min must be below max");
+      if (!(d.railZ > d.max[2])) r.bad(r.need(*t, "rail_z"), "rail_z must be above max");
+      if (d.mastEdgeGap < 0 || d.yokeDrop < 0)
+        r.bad(*n, "mast_edge_gap and yoke_drop must be nonnegative");
+      if (d.slabBay.empty()) r.bad(r.need(*t, "slab_bay"), "slab_bay must be named");
+      const auto centre = doc.anchor("gantry.centre");
+      if (!centre) r.bad(*n, "needs anchor 'gantry.centre'");
+      for (std::size_t a = 0; a < 3; ++a)
+        if ((*centre)[a] < d.min[a] || (*centre)[a] > d.max[a])
+          r.bad(*n, "gantry.centre lies outside the volume");
+      doc.deploy = std::move(d);
     }
     names.clear();
     if (const auto* n = root.get("station")) {

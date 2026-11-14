@@ -378,3 +378,40 @@ TEST_CASE("implant and heartbeat toggles persist and have debug aliases",
   CHECK(has(app::DebugConsole::help(), "implant [on|off]"));
   CHECK(has(app::DebugConsole::help(), "heartbeat [on|off]"));
 }
+
+TEST_CASE("deploy, stow, focus, rig and wallfade reach the lab game (M24.5)",
+          "[unit][app][rig]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(has(c.run(*shell, "deploy"), "lab is off"));
+  io::LabDoc doc;
+  c.setLabDoc(&doc);
+  CHECK(has(c.run(*shell, "deploy"), "no game"));
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK(c.run(*shell, "deploy") == "deploy");
+  CHECK(shell->screen() == Screen::Game);
+  CHECK(shell->transitionFrom() == Screen::MainMenu);
+  CHECK(c.run(*shell, "stow") == "stow");
+  CHECK(shell->screen() == Screen::MainMenu);
+  CHECK(shell->transitionFrom() == Screen::Game);
+
+  CHECK_FALSE(c.focusPin().has_value());
+  CHECK(c.run(*shell, "focus 0.4") == "focus 0.40");
+  REQUIRE(c.focusPin().has_value());
+  CHECK(*c.focusPin() == 0.4f);
+  CHECK(has(c.run(*shell, "focus 2"), "usage"));
+  CHECK(c.run(*shell, "focus auto") == "focus auto");
+  CHECK_FALSE(c.focusPin().has_value());
+
+  CHECK(c.wallFade());
+  CHECK(c.run(*shell, "wallfade off") == "wallfade off");
+  CHECK_FALSE(c.wallFade());
+  CHECK(c.run(*shell, "wallfade on") == "wallfade on");
+  CHECK(c.wallFade());
+
+  CHECK(has(c.run(*shell, "rig"), "no game in the lab"));
+  c.setRigReport([] { return std::string("labScale 1"); });
+  CHECK(c.run(*shell, "rig") == "labScale 1");
+  for (const char* word : {"deploy", "stow", "focus", "rig", "wallfade"})
+    CHECK(has(DebugConsole::help(), word));
+}

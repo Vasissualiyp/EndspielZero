@@ -1900,8 +1900,9 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       if (!e.seen) continue;
       byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinthInstance(
           view::Vec3{(e.minX + e.maxX) * 0.5f, (e.minY + e.maxY) * 0.5f, 0.0f},
-          (e.maxX - e.minX) * 0.5f + 0.78f, (e.maxY - e.minY) * 0.5f + 0.78f,
-          e.z - half.z, 0.13f, e.present, half, theme_));
+          (e.maxX - e.minX) * 0.5f + kPlinthOutset,
+          (e.maxY - e.minY) * 0.5f + kPlinthOutset, e.z - half.z, kPlinthDepth, e.present,
+          half, theme_));
     }
   }
 

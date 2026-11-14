@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/debug_console.hpp"
 
+#include <cstdio>
+
 #include <algorithm>
 #include <charconv>
 #include <filesystem>
@@ -492,6 +494,10 @@ std::string DebugConsole::help() {
          "implant [on|off] toggle organic menu perception (also get/set implantFx)\n"
          "heartbeat [on|off] toggle the implant double pulse\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
+         "deploy | stow  replay the current game's slab deploy / stow in the lab\n"
+         "focus <0..1>|auto  pin the room-light focus level during a lab game\n"
+         "rig          lab scale, mast groups, slab centres and their current poses\n"
+         "wallfade on|off  fade walls between the eye and the board (default on)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"
          "boot                     replay the board's power-on sequence\n"
@@ -529,6 +535,58 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
   const std::string text(line);
   if (words(text).empty()) return {};
   const auto args = words(text);
+  if (args[0] == "deploy" || args[0] == "stow" || args[0] == "focus" ||
+      args[0] == "rig" || args[0] == "wallfade") {
+    std::string result;
+    const auto& cmd = args[0];
+    if (cmd == "deploy" || cmd == "stow") {
+      // Replay the lab's game move for the current game (M24.5).
+      if (args.size() != 1)
+        result = "usage: " + cmd;
+      else if (!labDoc_)
+        result = "lab is off";
+      else if (!shell.hasGame())
+        result = "no game loaded";
+      else {
+        if (cmd == "deploy")
+          shell.previewTransition(Screen::MainMenu, Screen::Game);
+        else
+          shell.previewTransition(Screen::Game, Screen::MainMenu);
+        result = cmd;
+      }
+    } else if (cmd == "focus") {
+      float level = -1;
+      if (args.size() == 2 && args[1] == "auto") {
+        focusPin_.reset();
+        result = "focus auto";
+      } else if (args.size() == 2 &&
+                 std::sscanf(args[1].c_str(), "%f", &level) == 1 && level >= 0 &&
+                 level <= 1) {
+        focusPin_ = level;
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "focus %.2f", static_cast<double>(level));
+        result = buf;
+      } else {
+        result = "usage: focus <0..1>|auto";
+      }
+    } else if (cmd == "wallfade") {
+      if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
+        result = "usage: wallfade on|off";
+      else {
+        wallFade_ = args[1] == "on";
+        result = "wallfade " + args[1];
+      }
+    } else {
+      const std::string report = rigReport_ ? rigReport_() : std::string{};
+      result = args.size() != 1    ? "usage: rig"
+               : report.empty()    ? "no game in the lab"
+                                   : report;
+    }
+    history_.push_back(text);
+    log_.push_back("> " + text);
+    log_.push_back(result);
+    return result;
+  }
   if (args[0] == "station" || args[0] == "salience") {
     const bool station = args[0] == "station";
     auto& pin = station ? stationPin_ : saliencePin_;

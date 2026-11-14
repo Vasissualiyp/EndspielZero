@@ -203,8 +203,8 @@ float bayer4(vec2 p) {
 struct Light { vec4 posRadius; vec4 colorIntensity; vec4 dirCone; };
 layout(std140, set = 0, binding = 1) uniform LightBlock {
     vec4 header;
-    vec4 softCos[2];
-    Light lights[8];
+    vec4 softCos[3];
+    Light lights[12];
     vec4 implant;
 } lightBuf;
 
@@ -219,6 +219,9 @@ void main() {
     // A piece is revealed from its foot up; whatever is above the reveal height is not
     // there yet.
     if (isPiece && fx.a.z < 1.0 && fragHeight >= fx.a.z) discard;
+    // A lab part between the eye and the board fades by screen door (M24.5); its settled
+    // colour-transition marker carries the cut below -1.5. Nothing else sets it.
+    if (fragPanelPrev.w < -1.5 && bayer4(gl_FragCoord.xy) < -2.0 - fragPanelPrev.w) discard;
     float matVar = fragMaterial - float(matId);
     // Two-sided: turn the normal toward the viewer before lighting, so a fragment on
     // either side of the surface is shaded the same.
@@ -238,7 +241,7 @@ void main() {
     shade *= mix(0.80, 1.06, clamp(fragHeight, 0.0, 1.0));
 
     vec3 rgb = fragColor.rgb * shade;
-    int lightCount = int(lightBuf.header.x + 0.5);
+    int lightCount = min(int(lightBuf.header.x + 0.5), 12);
     if (lightCount > 0 && (matId == 0 || matId == 1 || matId == 2 || matId == 3 || matId == 6)) {
         vec3 sum = vec3(0.0);
         vec3 toEye = normalize(push.eyePos.xyz - fragWorld);

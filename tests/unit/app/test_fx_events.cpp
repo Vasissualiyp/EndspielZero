@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Presentation events (M23.10 sections 4 and 5): the session counts check and end events,
 // the front end's FxTimeline stamps them with presentation time.
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/fx_timeline.hpp"
@@ -325,4 +326,22 @@ TEST_CASE("the timeline stamps turn, move and thinking events and swallows them"
   act(*s, ActionKind::Reset);
   t.observe(s.get(), 6.05, true, false);
   CHECK_FALSE(t.turnAge(6.06));
+}
+
+TEST_CASE("a deploy holds the boot until the last slab locks (M24.5)", "[unit][app][rig]") {
+  auto s = open();
+  FxTimeline t;
+  t.holdBootUntil(11.62);
+  t.observe(s.get(), 10.0, true, false);
+  // Before the gate the board is dark and powered off: the boot has not begun.
+  REQUIRE(t.bootAge(10.5).has_value());
+  CHECK(*t.bootAge(10.5) == 0.0f);
+  CHECK(*t.bootAge(11.62) == 0.0f);
+  CHECK(*t.bootAge(12.12) == Catch::Approx(0.5f));
+  // A skip opens the gate now; a later boot (rematch) is not held.
+  t.holdBootUntil(0);
+  CHECK(*t.bootAge(10.5) == Catch::Approx(0.5f));
+  FxTimeline plain;
+  plain.observe(s.get(), 10.0, true, false);
+  CHECK(*plain.bootAge(10.5) == Catch::Approx(0.5f));
 }

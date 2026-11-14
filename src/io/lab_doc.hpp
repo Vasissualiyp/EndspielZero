@@ -36,8 +36,17 @@ struct LabStation {
   std::array<float, 3> target{};
   float distance{1}, yaw{0}, pitch{0}, fov{50};
 };
+/// The gantry's deployment volume (M24.5), in metres: where slabs can hang.
+struct LabDeploy {
+  std::array<float, 3> min{}, max{};
+  float railZ{0};        ///< carriage underside: masts start here
+  float mastEdgeGap{0};  ///< slab's far bezel edge to the mast axis
+  float yokeDrop{0};     ///< the yoke's centre below the slab's back face
+  std::string slabBay;   ///< prefix of the parked stand-ins, 0..7
+};
 struct LabDoc {
   std::vector<LabPart> parts;
+  std::optional<LabDeploy> deploy;
   std::vector<LabLight> lights;
   std::vector<LabStation> stations;
   std::vector<std::pair<std::string, std::array<float, 3>>> anchors;

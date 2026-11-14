@@ -918,12 +918,27 @@ void Ui::tick(float dt) {
 }
 
 app::MoveFx Ui::moveFx() const noexcept {
+  if ((move_ == app::ScreenMove::Deploy || move_ == app::ScreenMove::Stow) &&
+      intensity_ >= .5f)
+    return app::moveFx(move_, enter_ * rigTotal_, intensity_, rigTotal_, rigLock_);
   return app::moveFx(move_, enter_ * currentMoveSeconds(), intensity_,
                      currentMoveSeconds());
 }
 
+std::optional<Ui::RigMove> Ui::rigMove() const noexcept {
+  if (move_ != app::ScreenMove::Deploy && move_ != app::ScreenMove::Stow)
+    return std::nullopt;
+  const float total = currentMoveSeconds();
+  const bool calm = intensity_ < .5f;
+  return RigMove{move_,       enter_ * total, total, calm ? 0.f : rigLock_,
+                 calm ? 0.f : rigShutdown_, enter_ >= 1,    rigFrom_};
+}
+
 float Ui::currentMoveSeconds() const noexcept {
   if (move_ == app::ScreenMove::Station && intensity_ >= .5f) return stationSeconds_;
+  if ((move_ == app::ScreenMove::Deploy || move_ == app::ScreenMove::Stow) &&
+      intensity_ >= .5f)
+    return rigTotal_;
   return app::moveSeconds(move_, intensity_);
 }
 
@@ -993,6 +1008,25 @@ std::array<float, 8> Ui::rackSlides() const {
 
 HologramRequest Ui::hologramRequest() const {
   auto out = hologramRequest_;
+  if (intensity_ >= .5f && enter_ < 1) {
+    const float age = enter_ * currentMoveSeconds();
+    if (move_ == app::ScreenMove::Deploy) {
+      // The bench hologram collapses into its lens as the menu dissolves (M24.5).
+      if (age >= app::kDeployMenuOffSeconds) return {};
+      out = leavingHologram_;
+      out.seconds = clock_;
+      out.scale = out.alpha = 1 - smoothstep(age / app::kDeployMenuOffSeconds);
+      out.squashZ = out.scale * out.scale;
+      return out;
+    }
+    if (move_ == app::ScreenMove::Stow) {
+      // ...and grows out of it once the slabs are home.
+      if (age < rigLock_) return {};
+      out.scale = out.alpha = smoothstep((age - rigLock_) / app::kStowMenuSeconds);
+      out.squashZ = out.scale;
+      return out;
+    }
+  }
   if (move_ != app::ScreenMove::Station || intensity_ < .5f || enter_ >= 1) return out;
   const float radius =
       std::lerp(leavingHologram_.radiusMetres, out.radiusMetres, smoothstep(enter_));
@@ -1782,6 +1816,19 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     move_ = lastScreen_ < 0 ? app::ScreenMove::Cut
                             : app::classifyMove(static_cast<app::Screen>(lastScreen_),
                                                 shell.screen());
+    // The lab's game moves (M24.5): the slabs travel, so the clock runs their length.
+    if (lastScreen_ >= 0) rigFrom_ = static_cast<app::Screen>(lastScreen_);
+    if (rigEnabled_ && move_ == app::ScreenMove::MenuToGame) {
+      move_ = app::ScreenMove::Deploy;
+      rigLock_ = rigDeployLock_;
+      rigShutdown_ = 0;
+      rigTotal_ = std::max(app::kDeploySeconds, rigDeployLock_ + 1.0f);
+    } else if (rigEnabled_ && move_ == app::ScreenMove::GameToMenu) {
+      move_ = app::ScreenMove::Stow;
+      rigShutdown_ = rigStowShutdown_;
+      rigLock_ = rigShutdown_ + std::max(rigStowTravel_, app::kStowFlightMinSeconds);
+      rigTotal_ = rigLock_ + app::kStowMenuSeconds;
+    }
     labLeaving_ = labLast_;
     if (previewed && stationCamera_ && lastScreen_ >= 0) {
       const auto from = static_cast<app::Screen>(lastScreen_);
@@ -1846,7 +1893,8 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
 
   // Game to menu: for the first 0.8 s the board powers down and the menu is not there
   // yet. Nothing is built, so nothing can be clicked; any key or click skips to the menu.
-  if (move_ == app::ScreenMove::GameToMenu && moveFx().holdsBoard) {
+  if ((move_ == app::ScreenMove::GameToMenu || move_ == app::ScreenMove::Stow) &&
+      moveFx().holdsBoard) {
     UiRequest held;
     held.boardRect[0] = 0;
     held.boardRect[1] = 0;

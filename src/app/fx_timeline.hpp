@@ -26,6 +26,10 @@ class FxTimeline {
   [[nodiscard]] bool booting(double now) const { return bootAge(now).has_value(); }
   /// The first click, key or engine move completes the boot at once.
   void skipBoot() noexcept { bootStart_.reset(); }
+  /// Hold the boot until `visualSeconds` (M24.5: the deploy's last lock): a boot stamps
+  /// at max(now, gate), and until then the board is dark and powered off (age 0). The
+  /// gate survives a new session, since a deploy starts one. 0 releases it.
+  void holdBootUntil(double visualSeconds) noexcept { bootGate_ = visualSeconds; }
 
   /// A newly captured tray icon scans on for 0.35 s; absent for settled captures.
   [[nodiscard]] std::optional<float> captureAge(double now) const;
@@ -61,6 +65,7 @@ class FxTimeline {
   std::uint64_t sessionId_{0};
   std::uint64_t bootSeen_{0};
   std::optional<double> bootStart_;
+  double bootGate_{0};
   std::uint64_t captureSeen_{0};
   std::optional<double> captureStart_;
   std::uint64_t turnSeen_{0};

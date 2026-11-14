@@ -45,7 +45,7 @@ add_custom_command(OUTPUT ${CB_SPV_HEADER}
 set(CB_RENDER_SOURCES
   vulkan_context.cpp offscreen_target.cpp board_renderer.cpp image_io.cpp
   piece_mesh.cpp piece_icon.cpp panel_response.cpp panel_alive.cpp board_glow.cpp
-  post_params.cpp post_process.cpp implant_layer.cpp board_fx.cpp lab_scene.cpp lab_light.cpp hud_layout.cpp
+  post_params.cpp post_process.cpp implant_layer.cpp board_fx.cpp lab_scene.cpp lab_light.cpp lab_rig.cpp hud_layout.cpp
   ${CB_SPV_HEADER})
 
 # SDL3 supplies the window and the surface; Dear ImGui supplies the panels. Without

@@ -17,6 +17,8 @@ enum class ScreenMove : std::uint8_t {
   GameToPause,  ///< the pause panel traces on over the blur
   PauseToGame,  ///< the pause panel traces off while the blur releases
   GameToMenu,   ///< a quick power-down of the board, then the menu traces on
+  Deploy,  ///< lab: menu to game - slabs fly from the rack, the camera follows (M24.5)
+  Stow,    ///< lab: game to menu - shutdown, slabs back to the rack, the menu forms
 };
 
 inline constexpr float kMenuOffSeconds = 0.3f;
@@ -25,6 +27,17 @@ inline constexpr float kPauseOffSeconds = 0.2f;
 inline constexpr float kPowerDownSeconds = 0.8f;  ///< the board's compressed power-down
 inline constexpr float kMenuOnSeconds = 0.3f;
 inline constexpr float kCalmFadeSeconds = 0.3f;  ///< every calm move is one cross-fade
+/// M24.5: a deploy lasts max(3.0, lastLock + 1.0), which is 3.0 for up to four mast
+/// groups; the menu dissolves in its first 0.3 s and the HUD forms after the last lock.
+inline constexpr float kDeploySeconds = 3.0f;
+inline constexpr float kDeployMenuOffSeconds = 0.3f;
+inline constexpr float kDeployDefaultLock = 1.62f;  ///< one mast group's lock
+/// A stow: the compressed shutdown (live games only), the flight home while the slabs
+/// return, then the projector grows and the menu forms.
+inline constexpr float kStowShutdownSeconds = 1.0f;
+inline constexpr float kStowFlightMinSeconds = 1.8f;
+inline constexpr float kStowMenuSeconds = 1.0f;
+inline constexpr float kStowSeconds = kStowFlightMinSeconds + kStowMenuSeconds;
 
 [[nodiscard]] ScreenMove classifyMove(Screen from, Screen to) noexcept;
 
@@ -47,6 +60,10 @@ struct MoveFx {
 
 [[nodiscard]] MoveFx moveFx(ScreenMove move, float age, float intensity,
                             float seconds) noexcept;
+/// `lock` is where a rig move hands over: the deploy's last slab lock (the HUD forms
+/// after it) or the stow's arrival home (the menu forms after it).
+[[nodiscard]] MoveFx moveFx(ScreenMove move, float age, float intensity, float seconds,
+                            float lock) noexcept;
 
 /// The age on the end power-down's own timeline (`view::powerDown`) that a move's
 /// `powerDown` progress stands for: the decisive look with no hold, compressed.

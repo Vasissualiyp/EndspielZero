@@ -168,6 +168,12 @@ class Session {
   /// about that. Handing out the stored camera is how the board once pulled away while
   /// the pieces drawn on top of it stayed put.
   [[nodiscard]] view::OrbitCamera camera() const noexcept;
+  /// Cap the player's orbit so its effective (pulled-back) distance is at most
+  /// `maxDistance`: the lab's walls (M24.5). Zoom stays free inside the cap.
+  void limitOrbitDistance(float maxDistance) noexcept {
+    const float stored = maxDistance / (1.0f + 0.18f * pullBack_);
+    if (camera_.distance > stored) camera_.distance = stored;
+  }
   /// Set the stored orbit camera directly, bypassing the ordinary drag/zoom actions.
   /// Used by the camera-keyframe track (M13.9 Part E) to drive the view from a recorded
   /// pose instead of the player's own input - the one place something other than `apply`

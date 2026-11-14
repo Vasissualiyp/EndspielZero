@@ -9,6 +9,9 @@
 #include "support/variants.hpp"
 using namespace cb;
 using namespace cb::render;
+namespace {
+constexpr float kFocusLevelForTest = .15f;
+}
 TEST_CASE("local light falloff has a finite peak and an exact radius",
           "[unit][render][light]") {
   constexpr float r = 2;
@@ -275,5 +278,37 @@ TEST_CASE("GPU salience affects only the focused projector rectangle", "[render]
     CHECK(outside == 0);
   }
   CHECK(ctx->takeValidationMessages().empty());
+}
+TEST_CASE("game lights: focus dims the room group, slab glows join, all placed",
+          "[unit][render][light][rig]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto plain = labLightBlock(*doc, *lab, 1, kLabKey);
+  GpuLight glow{};
+  glow.posRadius[3] = 2.5f;
+  glow.colorIntensity[3] = .6f;
+  glow.dirCone[3] = -2;
+  const std::array<GpuLight, 2> extra{glow, glow};
+  const view::RigXform x{{2, 3, 4}, 1.5f};
+  const auto game = labLightBlock(*doc, *lab, 1, kLabKey, {}, 1, view::Theme::manifold(),
+                                  1, kFocusLevelForTest, &x, extra);
+  const auto authored = static_cast<std::size_t>(plain.header[0]);
+  CHECK(game.header[0] == static_cast<float>(authored + 2));
+  CHECK(game.header[2] == Catch::Approx(1 / (20 * 1.5f)));
+  for (std::size_t i = 0; i < authored; ++i) {
+    CAPTURE(doc->lights[i].name);
+    const float scale = doc->lights[i].group == "room" ? kFocusLevelForTest : 1;
+    CHECK(game.lights[i].colorIntensity[3] ==
+          Catch::Approx(plain.lights[i].colorIntensity[3] * scale));
+    const auto p = x.toBoard(
+        {plain.lights[i].posRadius[0], plain.lights[i].posRadius[1],
+         plain.lights[i].posRadius[2]});
+    CHECK(game.lights[i].posRadius[0] == Catch::Approx(p.x));
+    CHECK(game.lights[i].posRadius[2] == Catch::Approx(p.z));
+    CHECK(game.lights[i].posRadius[3] == plain.lights[i].posRadius[3]);
+  }
+  CHECK(game.lights[authored].colorIntensity[3] == .6f);
 }
 #endif

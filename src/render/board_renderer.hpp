@@ -94,6 +94,13 @@ struct BoardRect {
   [[nodiscard]] bool valid() const noexcept { return width > 0 && height > 0; }
 };
 
+/// A slice's slab (its plinth) reaches this far beyond its outermost cell centres, and
+/// is this deep under the cells (its half height; the box is twice that). The bezel
+/// margin beyond the cell's own half width is what the rig measures slabs with (M24.5).
+inline constexpr float kPlinthOutset = 0.78f;
+inline constexpr float kPlinthDepth = 0.13f;
+inline constexpr float kBezelMargin = 0.28f;  ///< kPlinthOutset - the cell's half pitch
+
 inline constexpr float kSeamHoverGain = 1.8f;  ///< hovered axis: colour multiplier
 inline constexpr float kSeamHoverDim = 0.55f;  ///< other glued axes
 

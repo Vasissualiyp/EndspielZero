@@ -24,9 +24,13 @@ GpuLightBlock neutralLightBlock() noexcept {
 GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene, float roomLight,
                             float keyFactor, std::string_view lightName,
                             float intensityScale, const view::Theme& theme,
-                            float wallProjectorScale) {
+                            float wallProjectorScale, float roomGroupScale,
+                            const view::RigXform* xform, std::span<const GpuLight> extra) {
   auto b = neutralLightBlock();
   const auto count = std::min<std::size_t>(doc.lights.size(), 8);
+  // During a game the lab is placed around the board: positions go through the rig
+  // transform and distances convert back to the lab's metres (radii stay in metres).
+  if (xform) b.header[2] = 1 / (kCellsPerMetre * xform->labScale);
   const auto implant = theme.implant.array();
   std::copy(implant.begin(), implant.end(), b.implant);
   b.header[0] = static_cast<float>(count);
@@ -34,7 +38,7 @@ GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene, float 
   for (std::size_t i = 0; i < count; ++i) {
     const auto& l = doc.lights[i];
     auto& out = b.lights[i];
-    const auto p = scene.toWorld(l.pos);
+    const auto p = xform ? xform->toBoard(scene.toWorld(l.pos)) : scene.toWorld(l.pos);
     out.posRadius[0] = p.x;
     out.posRadius[1] = p.y;
     out.posRadius[2] = p.z;
@@ -42,7 +46,7 @@ GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene, float 
     out.colorIntensity[0] = l.color.r;
     out.colorIntensity[1] = l.color.g;
     out.colorIntensity[2] = l.color.b;
-    out.colorIntensity[3] = l.intensity * (l.group == "room" ? roomLight : 1) *
+    out.colorIntensity[3] = l.intensity * (l.group == "room" ? roomLight * roomGroupScale : 1) *
                             (l.name == lightName ? intensityScale : 1) *
                             (l.name == "wallprojector" ? wallProjectorScale : 1);
     out.dirCone[3] = -2;
@@ -54,6 +58,12 @@ GpuLightBlock labLightBlock(const io::LabDoc& doc, const LabScene& scene, float 
       b.softCos[i] = std::cos((l.cone + l.soft) * rad);
     }
   }
+  std::size_t n = count;
+  for (const auto& l : extra) {
+    if (n >= kMaxLabLights) break;
+    b.lights[n++] = l;
+  }
+  b.header[0] = static_cast<float>(n);
   return b;
 }
 }  // namespace cb::render

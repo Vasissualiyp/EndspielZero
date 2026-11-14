@@ -9,6 +9,7 @@
 #include "render/lab_scene.hpp"
 #include "render/vulkan_context.hpp"
 #include "support/variants.hpp"
+#include "view/rig_deploy.hpp"
 #include "view/rig_move.hpp"
 #ifdef CB_HAVE_IMGUI
 #include <SDL3/SDL.h>
@@ -61,7 +62,11 @@ TEST_CASE("lab coordinates cameras and batches use metres", "[unit][render][lab]
   lab->setFileRanges(ranges);
   InstanceSet set;
   lab->appendTo(set, view::Theme::manifold());
-  REQUIRE(set.lab.size() == doc->parts.size());
+  // Rig templates (M24.5) are drawn only as per-mast copies.
+  REQUIRE(set.lab.size() ==
+          doc->parts.size() - static_cast<std::size_t>(std::count_if(
+                                  doc->parts.begin(), doc->parts.end(),
+                                  [](const auto& p) { return p.group == "template"; })));
   std::size_t count = 0;
   for (auto b : set.labBatches) {
     CHECK(b.first == count);
@@ -190,7 +195,8 @@ TEST_CASE("every lab station renders a nonuniform room", "[render][lab]") {
   REQUIRE(doc.has_value());
   auto lab = LabScene::create(*doc);
   REQUIRE(lab.has_value());
-  REQUIRE(lab->fileMeshes().size() == 14);
+  // 14 room models plus the three rig templates of M24.5 (masts, slab back).
+  REQUIRE(lab->fileMeshes().size() == 17);
   auto ctx = VulkanContext::create();
   REQUIRE(ctx.has_value());
   auto renderer = BoardRenderer::create(*ctx);
@@ -446,5 +452,98 @@ TEST_CASE("library looks into the rack beside a large wall hologram",
   CHECK(rack.right <= .56f);
   CHECK(rack.area() >= .07f);
   CHECK(rack.area() <= .25f);
+}
+namespace {
+LabScene shippedLab() {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  std::vector<std::uint32_t> ranges(lab->fileMeshes().size());
+  std::iota(ranges.begin(), ranges.end(), 0u);
+  lab->setFileRanges(ranges);
+  return std::move(*lab);
+}
+}  // namespace
+TEST_CASE("a carriage copy reuses the template's mesh and material (M24.5)",
+          "[unit][render][lab][rig]") {
+  const auto lab = shippedLab();
+  InstanceSet set;
+  lab.appendTo(set, view::Theme::manifold());
+  const auto before = set.lab.size();
+  const auto beforeFiles = set.labFileBatches;
+  const auto beforeShapes = set.labBatches;
+  InstanceSet only;
+  lab.appendCopy(only, "gantry.carriage.0", {0.5f, 0.2f, 2.46f}, {0, 0, 0, 1}, {1, 1, 1});
+  REQUIRE(only.lab.size() == 1);
+  lab.appendCopy(set, "gantry.carriage.0", {0.5f, 0.2f, 2.46f}, {0, 0, 0, 1}, {1, 1, 1});
+  REQUIRE(set.lab.size() == before + 1);
+  // Exactly one batch grew by one, and every batch is still contiguous.
+  int grown = 0;
+  std::size_t at = 0;
+  for (std::size_t b = 0; b < set.labFileBatches.size(); ++b) {
+    if (set.labFileBatches[b].count != beforeFiles[b].count) {
+      ++grown;
+      CHECK(set.labFileBatches[b].count == beforeFiles[b].count + 1);
+      at = set.labFileBatches[b].first + set.labFileBatches[b].count - 1;
+    }
+  }
+  for (std::size_t b = 0; b < set.labBatches.size(); ++b)
+    CHECK(set.labBatches[b].count == beforeShapes[b].count);
+  CHECK(grown == 1);
+  std::size_t count = 0;
+  for (auto b : set.labBatches) {
+    CHECK(b.first == count);
+    count += b.count;
+  }
+  for (auto b : set.labFileBatches) {
+    CHECK(b.first == count);
+    count += b.count;
+  }
+  const auto& copy = set.lab[at];
+  const auto want = lab.toWorld({0.5f, 0.2f, 2.46f});
+  CHECK(copy.center[0] == Catch::Approx(want.x));
+  CHECK(copy.center[1] == Catch::Approx(want.y));
+  CHECK(copy.center[2] == Catch::Approx(want.z));
+  // The parked template is drawn at its own place with the same material.
+  const auto parked = lab.toWorld({0, 0.6f, 2.46f});
+  bool found = false;
+  for (std::size_t i = set.labFileBatches[0].first; i < set.lab.size(); ++i)
+    if (i != at && set.lab[i].center[0] == parked.x && set.lab[i].center[1] == parked.y &&
+        set.lab[i].center[2] == parked.z && set.lab[i].material == copy.material) {
+      found = true;
+      CHECK(set.lab[i].scale[0] == copy.scale[0]);
+    }
+  CHECK(found);
+  CHECK(only.lab[0].material == copy.material);
+}
+TEST_CASE("the lab placed around a board goes through the rig transform",
+          "[unit][render][lab][rig]") {
+  const auto lab = shippedLab();
+  InstanceSet plain, placed;
+  lab.appendTo(plain, view::Theme::manifold());
+  const view::RigXform x{{1.5f, -2.f, .25f}, 2.f};
+  lab.appendTo(placed, view::Theme::manifold(), {}, x);
+  REQUIRE(plain.lab.size() == placed.lab.size());
+  for (std::size_t i = 0; i < plain.lab.size(); ++i) {
+    const auto want = x.toBoard(
+        {plain.lab[i].center[0], plain.lab[i].center[1], plain.lab[i].center[2]});
+    CHECK(placed.lab[i].center[0] == Catch::Approx(want.x));
+    CHECK(placed.lab[i].center[1] == Catch::Approx(want.y));
+    CHECK(placed.lab[i].center[2] == Catch::Approx(want.z));
+    CHECK(placed.lab[i].scale[0] == Catch::Approx(plain.lab[i].scale[0] * 2));
+    CHECK(placed.lab[i].scale[2] == Catch::Approx(plain.lab[i].scale[2] * 2));
+  }
+  const auto room = lab.roomBounds();
+  CHECK(room.minX == Catch::Approx(-2.5f * 20));
+  CHECK(room.maxY == Catch::Approx((3.0f - .6f) * 20));
+  CHECK(room.minZ == Catch::Approx(-1.05f * 20));
+  CHECK(room.maxZ == Catch::Approx((2.7f - 1.05f) * 20));
+}
+TEST_CASE("the slab-underside constant matches the renderer's plinth",
+          "[unit][render][rig]") {
+  CHECK(view::kSlabBelowFace ==
+        Catch::Approx(BoardRenderer::cellHalfExtent().z + 2 * kPlinthDepth));
+  CHECK(kBezelMargin == Catch::Approx(kPlinthOutset - .5f));
 }
 #endif

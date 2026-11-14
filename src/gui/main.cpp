@@ -36,11 +36,16 @@
 #include "render/board_renderer.hpp"
 #include "render/hud_layout.hpp"
 #include "render/image_io.hpp"
+#include "render/lab_rig.hpp"
 #include "render/lab_scene.hpp"
 #include "render/panel_response.hpp"
 #include "render/window.hpp"
+#include "view/board_boot.hpp"
 #include "view/game_end_fx.hpp"
 #include "view/implant_fx.hpp"
+#include "view/layout.hpp"
+#include "view/rig_deploy.hpp"
+#include "view/rig_move.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"
 #include "render/projector_hologram.hpp"
@@ -217,6 +222,229 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
   instances.holoBeam.push_back(render::projectorBeam(source, at, theme));
   return wall ? std::array{0.f, req.alpha} : std::array{req.alpha, 0.f};
 }
+
+/// --deploy-t / --stow-t: a lab game's deploy or stow pinned at that age; --focus pins
+/// the room-light focus level (M24.5). Negative means off.
+float gDeployT = -1.0f;
+float gStowT = -1.0f;
+float gFocus = -1.0f;
+
+/// A game happens in the lab (M24.5): the lab is on, a game is drawn (or held while it
+/// stows) and nothing else owns the camera.
+bool labGame(const app::Shell& shell, bool hold) {
+  return labEnabled(shell) && gStation.empty() && shell.hasGame() && !shell.attracting() &&
+         gLabScene->doc().deploy.has_value() && (shell.showsBoard() || hold) &&
+         shell.screen() != app::Screen::Editor;
+}
+
+/// The rig around the current layout, cached per session and layout (M24.6 animates a
+/// layout change; here it snaps).
+const render::RigLayout* rigLayoutFor(const app::Session& session) {
+  struct Cache {
+    std::uint64_t session{0};
+    std::size_t key{0};
+    bool valid{false};
+    std::optional<render::RigLayout> layout;
+  };
+  static Cache cache;
+  const auto& placements = session.placements();
+  const auto b = view::boundsOf(placements);
+  std::size_t key = placements.size();
+  for (const float f : {b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ})
+    key = key * 1000003u ^ std::hash<float>{}(f);
+  if (!cache.valid || cache.session != session.id() || cache.key != key)
+    cache = {session.id(), key, true, render::rigLayout(*gLabScene, placements)};
+  return cache.layout ? &*cache.layout : nullptr;
+}
+
+/// Before the interface builds: on the lab path, menu to game becomes Deploy and game to
+/// menu Stow, timed by this game's mast groups. A finished game has already shut down.
+void configureRigMoves(render::Ui& ui, const app::Shell& shell) {
+  const bool on = labEnabled(shell) && gStation.empty() && shell.hasGame() &&
+                  !shell.attracting() && gLabScene->doc().deploy.has_value();
+  const render::RigLayout* layout = on ? rigLayoutFor(*shell.session()) : nullptr;
+  const int groups = layout ? static_cast<int>(layout->groups.size()) : 1;
+  const float shutdown =
+      on && shell.session()->endEvent().has_value() ? 0.0f : app::kStowShutdownSeconds;
+  ui.setRigMoves(layout != nullptr, view::deployLastLock(groups), shutdown,
+                 view::stowTravelSeconds(groups));
+}
+
+/// This frame's rig: the layout, the running move and every slab's pose.
+struct RigFrame {
+  const render::RigLayout* layout{nullptr};
+  std::optional<render::Ui::RigMove> move;  ///< a deploy or stow still running
+  std::vector<view::SlabPose> poses;
+  [[nodiscard]] bool is(app::ScreenMove m) const { return move && move->move == m; }
+};
+
+/// Also clamps the player's stored orbit inside the room, before the game camera is
+/// derived from it, so zoom can never drift outside.
+RigFrame rigFrame(app::Shell& shell, const render::Ui& ui, bool hold, float intensity) {
+  RigFrame f;
+  if (!labGame(shell, hold)) return f;
+  f.layout = rigLayoutFor(*shell.session());
+  if (f.layout == nullptr) return f;
+  render::constrainGameCamera(*shell.session(), *f.layout);
+  if (const auto m = ui.rigMove(); m && !m->done) f.move = m;
+  auto phase = render::RigPhase::Rest;
+  float age = 0;
+  if (f.is(app::ScreenMove::Deploy)) {
+    phase = render::RigPhase::Deploy;
+    age = f.move->age;
+  } else if (f.is(app::ScreenMove::Stow)) {
+    phase = render::RigPhase::Stow;
+    age = f.move->age - f.move->shutdown;
+  }
+  f.poses = render::rigPoses(*f.layout, phase, age, intensity);
+  return f;
+}
+
+/// The board's boot waits for the deploy's last lock; a capture states that age.
+std::optional<float> deployBootAge(float deployAge, float lock) {
+  if (deployAge < lock) return 0.0f;
+  if (deployAge - lock >= view::kBootSeconds) return std::nullopt;
+  return deployAge - lock;
+}
+
+/// The stow's compressed shutdown, 0..1; a finished game is already dark (no hold fx).
+std::optional<float> stowShutdown(const RigFrame& rig) {
+  if (!rig.is(app::ScreenMove::Stow) || rig.move->shutdown <= 0) return std::nullopt;
+  return std::clamp(rig.move->age / rig.move->shutdown, 0.0f, 1.0f);
+}
+
+/// The camera re-aimed at `aim` from where it stands.
+view::OrbitCamera lookAt(view::OrbitCamera c, const view::Vec3& aim) {
+  const auto back = c.eye() - aim;
+  c.target = aim;
+  c.distance = std::max(1e-3f, view::length(back));
+  c.pitch = std::asin(std::clamp(back.z / c.distance, -1.f, 1.f));
+  c.yaw = std::atan2(back.x, -back.y);
+  return c;
+}
+
+/// The flight of a deploy (the lab's station to `game`) or a stow (back), in board space.
+/// The eye rides `view::blendCamera` with `rigEase`; the aim watches the travelling slab
+/// - the first group's out of the rack, the last group's back in - turning onto it and
+/// off it smoothly, so every endpoint is held exactly. (The spec blends the target by
+/// smoothstep 0.4..1.4; a target-only blend lost the slab while it ran overhead.)
+view::OrbitCamera rigFlightCamera(const RigFrame& rig, const view::OrbitCamera& game,
+                                  const view::OrbitCamera& lab) {
+  const auto smooth = [](float x) {
+    x = std::clamp(x, 0.f, 1.f);
+    return x * x * (3 - 2 * x);
+  };
+  const auto& m = *rig.move;
+  const auto& layout = *rig.layout;
+  if (m.move == app::ScreenMove::Deploy) {
+    constexpr float kFlyStart = 0.4f;  // the menu has dissolved; the slab is out
+    if (m.age <= kFlyStart) return lab;
+    if (m.age >= m.lock) return game;
+    const auto slab = layout.groups.front().slabs.front();
+    // On the slab until it has run along the rail, then onto the game's target.
+    const float overhead = layout.paths[slab].departure + view::kSlabTravelEnd;
+    const auto follow = rig.poses[slab].centre +
+                        (game.target - rig.poses[slab].centre) *
+                            smooth((m.age - overhead) / std::max(.01f, m.lock - overhead));
+    const auto aim =
+        lab.target + (follow - lab.target) * smooth((m.age - kFlyStart) / 0.3f);
+    return lookAt(view::blendCamera(lab, game, view::rigEase((m.age - kFlyStart) /
+                                                             (m.lock - kFlyStart))),
+                  aim);
+  }
+  if (m.age <= m.shutdown) return game;
+  if (m.age >= m.lock) return lab;
+  const float u = m.age - m.shutdown, span = m.lock - m.shutdown;
+  const auto slab = layout.groups.back().slabs.front();
+  // Onto the slab as it leaves its mast, off it once it is tilting into its bay.
+  const float inBay = view::stowTravelSeconds(static_cast<int>(layout.groups.size())) -
+                      (view::kSlabLockSeconds - view::kSlabTiltEnd);
+  const float off = smooth((u - inBay) / std::max(.01f, span - inBay));
+  const auto follow = rig.poses[slab].centre + (lab.target - rig.poses[slab].centre) * off;
+  const auto aim = game.target + (follow - game.target) * smooth(u / 0.3f);
+  return lookAt(view::blendCamera(game, lab, view::rigEase(u / span)), aim);
+}
+
+/// Draw the lab around the board (M24.5): the camera flies between the lab's station and
+/// the game camera during a move, walls between the eye and the board fade, the rig
+/// hardware carries the slabs, and the room dims to focus. Returns the light block.
+render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
+                                  const render::Ui& ui, const render::BoardRenderer& renderer,
+                                  render::InstanceSet& instances, view::OrbitCamera& camera,
+                                  float intensity) {
+  const auto& layout = *rig.layout;
+  // A travelling slab carries the board itself (dark until the boot), so the lock swaps
+  // nothing; picking never sees this.
+  render::carryBoard(instances, layout, rig.poses);
+  if (rig.move && intensity >= .5f) {
+    const auto& m = *rig.move;
+    const bool deploy = m.move == app::ScreenMove::Deploy;
+    if (const auto station =
+            gLabScene->station(stationFor(deploy ? m.from : app::Screen::MainMenu)))
+      camera = rigFlightCamera(rig, camera, render::toBoardCamera(*station, layout.xform));
+  }
+  render::LabDraw draw;
+  draw.xform = &layout.xform;
+  draw.hidden = [&](const io::LabPart& p) { return render::hiddenInGame(p, layout, rig.poses); };
+  const view::Vec3 eye = camera.eye(), target = camera.target;
+  if (ui.wallFade())
+    draw.fade = [&](const io::LabPart& p, const view::Bounds& b) {
+      return render::labPartFade(p, b, eye, target, layout);
+    };
+  const auto glows = render::slabGlowLights(layout, instances);
+  gLabScene->appendTo(instances, renderer.theme(), {}, {}, draw);
+  (void)render::appendRig(instances, *gLabScene, layout, rig.poses);
+  const auto projected = appendProjector(ui, shell.settings(), instances, renderer.theme());
+  render::placeInstances(instances.holo, layout.xform);
+  render::placeInstances(instances.holoTokens, layout.xform);
+  render::placeInstances(instances.holoBeam, layout.xform);
+
+  float focus = render::kFocusLevel;
+  if (rig.is(app::ScreenMove::Deploy))
+    focus = render::deployFocus(rig.move->age, rig.move->lock, rig.move->total, intensity);
+  else if (rig.is(app::ScreenMove::Stow))
+    focus = render::stowFocus(rig.move->age, rig.move->shutdown, rig.move->lock,
+                              rig.move->total, intensity);
+  if (const auto pin = ui.focusPin()) focus = *pin;
+  if (gFocus >= 0) focus = gFocus;
+  return render::labLightBlock(
+      gLabScene->doc(), *gLabScene,
+      gRoomLightOverride >= 0 ? gRoomLightOverride : shell.settings().roomLight,
+      render::kLabKey, "projector", .5f + .5f * projected[0], renderer.theme(),
+      .5f + .5f * projected[1], focus, &layout.xform, glows);
+}
+
+/// The console's `rig` dump: scale, groups, slab centres and their current poses.
+std::string rigReport(const app::Shell& shell, const render::Ui& ui) {
+  if (!labEnabled(shell) || !shell.hasGame() || !gLabScene->doc().deploy) return {};
+  const auto* layout = rigLayoutFor(*shell.session());
+  if (layout == nullptr) return {};
+  const auto rig = rigFrame(const_cast<app::Shell&>(shell), ui, true,
+                            1.0f);  // a report never moves the camera it describes
+  std::ostringstream out;
+  out.precision(3);
+  out << "labScale " << layout->xform.labScale << ", " << layout->groups.size()
+      << " mast group(s)" << (layout->travels ? "" : " (static)") << ", last lock "
+      << layout->lastLock << " s";
+  if (rig.move)
+    out << ", " << (rig.is(app::ScreenMove::Deploy) ? "deploy" : "stow") << " at "
+        << rig.move->age << " s";
+  for (std::size_t g = 0; g < layout->groups.size(); ++g) {
+    const auto& group = layout->groups[g];
+    out << "\ngroup " << g << ": mast (" << group.mastFoot.x << ", " << group.mastFoot.y
+        << ") foot z " << group.mastFoot.z << " top z " << group.mastTopZ;
+    for (const auto s : group.slabs) {
+      const auto& path = layout->paths[s];
+      const auto& pose = rig.poses.empty() ? view::SlabPose{} : rig.poses[s];
+      out << "\n  slab " << s << " slice " << layout->slabs[s].slice << ": hang ("
+          << path.hangCentre.x << ", " << path.hangCentre.y << ", " << path.hangCentre.z
+          << ") now (" << pose.centre.x << ", " << pose.centre.y << ", " << pose.centre.z
+          << ") mast " << pose.mastLength << (pose.clamped ? " clamped" : "")
+          << (pose.inBay ? " in bay" : "");
+    }
+  }
+  return out.str();
+}
 #endif
 
 float gIntensity = -1.0f;  ///< --presentation: presentation intensity for this run
@@ -301,17 +529,28 @@ bool holdsBoard(const app::Shell& shell, const render::Ui& ui) {
 }
 
 /// The board's decisive power-down with no delay, compressed into the move's 0.8 s.
-void applyMoveHold(render::BoardFxState& fx, const app::Session& session,
-                   const render::Ui& ui) {
+void applyMoveHold(render::BoardFxState& fx, const app::Session& session, float progress) {
   const CellId centre = session.game().position().cellCount() / 2;
   const std::vector<int>& dist = session.distancesFrom(centre);
   int far = 0;
   for (const int d : dist) far = std::max(far, d);
   fx.end = view::EndFx{view::EndKind::Decisive, Color::White, centre, false};
-  fx.endAge = app::endAgeAt(ui.powerDownProgress(), far);
+  fx.endAge = app::endAgeAt(progress, far);
   fx.compressedShutdown = true;
-  fx.holdProgress = ui.powerDownProgress();
+  fx.holdProgress = progress;
 }
+
+#ifdef CB_HAVE_IMGUI
+/// The board held while its screen leaves: the menu move's power-down, or a stow's
+/// compressed 1 s shutdown (M24.5) - none when the game had already ended and shut down.
+void applyHold(render::BoardFxState& fx, const app::Session& session, const render::Ui& ui,
+               const RigFrame& rig) {
+  if (!rig.is(app::ScreenMove::Stow))
+    applyMoveHold(fx, session, ui.powerDownProgress());
+  else if (const auto progress = stowShutdown(rig))
+    applyMoveHold(fx, session, *progress);
+}
+#endif
 
 /// The effects a capture asks for through --boot-t, in the renderer's own terms.
 render::BoardFxState captureFx(const render::BoardRenderer& renderer,
@@ -319,6 +558,13 @@ render::BoardFxState captureFx(const render::BoardRenderer& renderer,
   render::BoardFxState fx;
   if (gBootT >= 0.0f) fx.bootAge = gBootT;
   const app::Session& session = *shell.session();
+#ifdef CB_HAVE_IMGUI
+  // A pinned deploy: the board stays dark until the last slab locks, then boots.
+  if (gDeployT >= 0.0f && labGame(shell, false))
+    if (const auto* layout = rigLayoutFor(session))
+      fx.bootAge = deployBootAge(
+          gDeployT, renderer.options().presentationIntensity < .5f ? 0.0f : layout->lastLock);
+#endif
   if (gCheckT >= 0.0f) {
     // The ripple of the last check; a position that never gave one ripples from the
     // royal of the side to move, so any board can be reviewed.
@@ -663,8 +909,8 @@ float wrapAngle(float a) {
 /// off its poles, and the target and distance interpolate. The follow then eases in and
 /// out with `view::shotEnvelope`, so a move neither snaps onto the piece at the first
 /// frame nor jerks back at the last.
-view::OrbitCamera blendCamera(const view::OrbitCamera& base,
-                              const view::OrbitCamera& want, float k) {
+view::OrbitCamera blendFollowCamera(const view::OrbitCamera& base,
+                                    const view::OrbitCamera& want, float k) {
   view::OrbitCamera out = base;
   out.target = base.target + (want.target - base.target) * k;
   out.yaw = base.yaw + wrapAngle(want.yaw - base.yaw) * k;
@@ -738,8 +984,8 @@ view::OrbitCamera boardCameraBase(const app::Shell& shell,
         }
         // Ease in and out at the ends, and respect the follow-strength setting, so the
         // shape follow settles like the flat board's does rather than snapping.
-        return blendCamera(settled, want,
-                           session->followStrength() * view::shotEnvelope(t));
+        return blendFollowCamera(settled, want,
+                                 session->followStrength() * view::shotEnvelope(t));
       }
       return settled;
     }
@@ -1226,6 +1472,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
       return gLabScene->station(stationFor(which));
     });
     (*ui)->setFocusFor(focusFor);
+    configureRigMoves(**ui, *shell);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, 60.0f);
     (*ui)->endFrame();
@@ -1242,6 +1489,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                : uiRect;
     render::InstanceSet instances;
     const bool hold = holdsBoard(*shell, **ui);
+    const float intensity = renderer->options().presentationIntensity;
+    const RigFrame rig = rigFrame(*shell, **ui, hold, intensity);
     // The geometry view builds the warped board as ordinary instances, so the same
     // render path draws it (M17); only the surface flag on the options selects it.
     if ((shell->showsBoard() || hold) && gStation.empty()) {
@@ -1294,7 +1543,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
           [&](CellId c) { return shell->session()->game().cellInPresent(c); },
           shell->session()->timelineLinks());
       render::BoardFxState fx = captureFx(*renderer, *shell);
-      if (hold) applyMoveHold(fx, *shell->session(), **ui);
+      if (hold) applyHold(fx, *shell->session(), **ui, rig);
       render::applyBoardFx(instances, *shell->session(), fx);
     }
     view::OrbitCamera camera =
@@ -1303,10 +1552,17 @@ int captureFrame(const std::string& variantName, const std::string& path,
                           playSeq != nullptr ? *playSeq : render::kNoShapeSequence)
             : view::OrbitCamera{};
     const bool room = labBackdrop(*shell, hold);
+    // A game in the lab (M24.5): the lab is placed around the board, not the reverse.
+    const bool inLab = !room && rig.layout != nullptr;
     auto labOptions = renderer->options();
-    labOptions.labMode = room;
+    labOptions.labMode = room || inLab;
     renderer->setOptions(labOptions);
     std::array<float, 2> projected{};
+    std::optional<render::GpuLightBlock> gameLights;
+    if (inLab) {
+      gameLights = drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
+      camera = camera.withNearClip(labOptions.nearClip);
+    }
     if (room) {
 #ifdef CB_HAVE_IMGUI
       gLabScene->appendTo(
@@ -1334,7 +1590,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                                            : shell->settings().roomLight,
                                    render::kLabKey, "projector", .5f + .5f * projected[0],
                                    renderer->theme(), .5f + .5f * projected[1])
-                             : render::neutralLightBlock());
+                         : gameLights ? *gameLights
+                                      : render::neutralLightBlock());
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
@@ -1817,6 +2074,8 @@ int main(int argc, char** argv) {
           "--projector 0|1 toggles the bench hologram; --overture-t 0..1 pins Library "
           "progress (alias --t).\n"
           "--lab 0|1 toggles the static lab room; --station <name> requires --lab 1.\n"
+          "--deploy-t / --stow-t SECONDS pin a lab game's slab deploy (menu to game) or\n"
+          "stow (live game to menu), with --lab 1; --focus 0..1 pins the room focus.\n"
           "--implant 0|1 toggles the organic lab menus; --panel-t SECONDS pins panel "
           "age.\n"
           "--heartbeat 0|1 toggles the implant double pulse (captures default off).\n"
@@ -1898,6 +2157,17 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--bloom requires a scale from 0 to 4\n");
         return 1;
       }
+    } else if (arg == "--deploy-t" || arg == "--stow-t" || arg == "--focus") {
+      char* end = nullptr;
+      const char* value = i + 1 < argc ? argv[++i] : "";
+      const float v = std::strtof(value, &end);
+      const bool focus = arg == "--focus";
+      if (end == value || *end != '\0' || !std::isfinite(v) || v < 0 || (focus && v > 1)) {
+        std::fprintf(stderr, "%s requires %s\n", arg.c_str(),
+                     focus ? "a level from 0 to 1" : "finite seconds");
+        return 1;
+      }
+      (arg == "--deploy-t" ? gDeployT : arg == "--stow-t" ? gStowT : gFocus) = v;
     } else if (arg == "--room-light") {
       if (i + 1 >= argc) {
         std::fprintf(stderr, "--room-light requires a scale from 0 to 2\n");
@@ -2067,6 +2337,25 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "--station requires --lab 1\n");
     return 1;
   }
+  // M24.5: a lab game's deploy (menu to game) or stow (a live game to the menu), pinned
+  // the way --from/--transition-t pins any screen move.
+  if ((gDeployT >= 0 || gStowT >= 0) && gLab != 1) {
+    std::fprintf(stderr, "--deploy-t and --stow-t require --lab 1\n");
+    return 1;
+  }
+  if (gDeployT >= 0 && gStowT >= 0) {
+    std::fprintf(stderr, "--deploy-t and --stow-t are exclusive\n");
+    return 1;
+  }
+  if (gDeployT >= 0) {
+    screen = "game";
+    gFrom = "menu";
+    gTransitionT = gDeployT;
+  } else if (gStowT >= 0) {
+    screen = "menu";
+    gFrom = "game";
+    gTransitionT = gStowT;
+  }
   // A trailer render is footage: the board and the grade, no interface.
   if (!gTrailerClipDir.empty()) cinema = true;
   const std::string& targetPath = !clipDir.empty() ? clipDir : shotPath;
@@ -2191,6 +2480,9 @@ int main(int argc, char** argv) {
   std::vector<render::PanelTarget> panelTargets;
   // Stamps the session's presentation events (boot, ...) with this loop's visual clock.
   app::FxTimeline fxTimeline;
+#ifdef CB_HAVE_IMGUI
+  (*ui)->setRigReport([&] { return rigReport(*shell, **ui); });
+#endif
   // Hover aids (M20): events only mark the pointer dirty; the cell is resolved once per
   // frame, because the shape view's pick builds a whole surface.
   bool hoverDirty = false;
@@ -2258,6 +2550,14 @@ int main(int argc, char** argv) {
       // The first click or key completes the board's boot at once and is then handled
       // normally (M23.10 section 3).
       if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        // A running deploy has no input but skip (M24.5): the slabs land and the boot
+        // starts now, and the key or click goes no further.
+        const auto rigMove = (*ui)->rigMove();
+        if (rigMove && !rigMove->done && rigMove->move == app::ScreenMove::Deploy) {
+          (*ui)->skipTransition();
+          fxTimeline.holdBootUntil(visualSeconds);
+          continue;
+        }
         fxTimeline.skipBoot();
         (*ui)->skipTransition();
       }
@@ -2742,9 +3042,14 @@ int main(int argc, char** argv) {
       return gLabScene->station(stationFor(which));
     });
     (*ui)->setFocusFor(focusFor);
+    configureRigMoves(**ui, *shell);
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, fps);
     (*ui)->endFrame();
+    // The board boots once the deploy's last slab has locked (M24.5).
+    if (const auto m = (*ui)->rigMove();
+        m && !m->done && m->move == app::ScreenMove::Deploy)
+      fxTimeline.holdBootUntil(visualSeconds - static_cast<double>(m->age - m->lock));
 
     if (request.quit) running = false;
     // Start whenever the library asks, even for the variant that is already loaded:
@@ -2890,6 +3195,8 @@ int main(int argc, char** argv) {
         shell->showsBoard() && !shell->attracting() ? shell->session() : nullptr,
         renderer->theme(), renderer->options());
     const bool hold = holdsBoard(*shell, **ui);
+    const float intensity = renderer->options().presentationIntensity;
+    const RigFrame rig = rigFrame(*shell, **ui, hold, intensity);
     if ((shell->showsBoard() || hold) && gStation.empty()) {
       if (boardRect.valid()) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
@@ -2951,17 +3258,24 @@ int main(int argc, char** argv) {
         fx.end = u->fx;
       }
       fx.reviewing = shell->session()->reviewPly().has_value();
-      if (hold) applyMoveHold(fx, *shell->session(), **ui);
+      if (hold) applyHold(fx, *shell->session(), **ui, rig);
       setFxTint(fx, *renderer);
       render::applyBoardFx(instances, *shell->session(), fx);
       camera = boardCamera(*shell, shapeSeq);
     }
 
     const bool room = labBackdrop(*shell, hold);
+    // A game in the lab (M24.5): the lab is placed around the board, not the reverse.
+    const bool inLab = !room && rig.layout != nullptr;
     auto labOptions = renderer->options();
-    labOptions.labMode = room;
+    labOptions.labMode = room || inLab;
     renderer->setOptions(labOptions);
     std::array<float, 2> projected{};
+    std::optional<render::GpuLightBlock> gameLights;
+    if (inLab) {
+      gameLights = drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
+      camera = camera.withNearClip(labOptions.nearClip);
+    }
     if (room) {
 #ifdef CB_HAVE_IMGUI
       gLabScene->appendTo(
@@ -2988,7 +3302,8 @@ int main(int argc, char** argv) {
                                                            : shell->settings().roomLight,
                                    render::kLabKey, "projector", .5f + .5f * projected[0],
                                    renderer->theme(), .5f + .5f * projected[1])
-                             : render::neutralLightBlock());
+                         : gameLights ? *gameLights
+                                      : render::neutralLightBlock());
     const auto overlay = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI
       (*ui)->record(cmd);
