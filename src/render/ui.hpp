@@ -248,6 +248,9 @@ class Ui {
   /// M24.5: the console's `focus` pin, `wallfade` switch and the `rig` dump.
   [[nodiscard]] std::optional<float> focusPin() const { return console_.focusPin(); }
   [[nodiscard]] bool wallFade() const { return console_.wallFade(); }
+  /// M24.6: the console's `bridges` switch and `relayout` request.
+  [[nodiscard]] bool bridges() const { return console_.bridges(); }
+  [[nodiscard]] bool takeRelayout() { return console_.takeRelayout(); }
   void setRigReport(std::function<std::string()> report) {
     console_.setRigReport(std::move(report));
   }

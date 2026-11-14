@@ -7,17 +7,21 @@
 #include <numbers>
 
 #include "app/session.hpp"
+#include "render/slab_skin.hpp"
+#include "view/board_boot.hpp"
+#include "view/rig_move.hpp"
 
 namespace cb::render {
 namespace {
 constexpr float kBodyBelowFace = 0.13f;  ///< cell centre to the slab body's centre
 constexpr float kBodyHalf = 0.185f;      ///< half the slab's thickness, back to cell top
 constexpr float kMinMastCells = 0.62f * kCellsPerMetre;
-constexpr float kTubeCells = 0.6f * kCellsPerMetre;   ///< one tube's length
+constexpr float kTubeCells = 0.6f * kCellsPerMetre;    ///< one tube's length
 constexpr float kReachCells = 1.15f * kCellsPerMetre;  ///< both tubes, overlapped
 constexpr float kGlowLiftCells = 0.12f * kCellsPerMetre;
 constexpr float kGlowRadiusMetres = 2.5f;
 constexpr std::array<float, 4> kIdentity{0, 0, 0, 1};
+constexpr float kTBarSection = 1.3f;  ///< a rack's T-bar, x the yoke's 0.03 m section
 
 float smooth(float x) noexcept {
   x = std::clamp(x, 0.0f, 1.0f);
@@ -60,14 +64,20 @@ std::pair<view::Vec3, view::Vec3> localBox(const LabScene& lab, std::string_view
 std::string bayName(const LabScene& lab, int slot) {
   return lab.doc().deploy->slabBay + "." + std::to_string(slot);
 }
-view::Vec3 partCentre(const LabScene& lab, const view::RigXform& x, std::string_view name) {
+view::Vec3 partCentre(const LabScene& lab, const view::RigXform& x,
+                      std::string_view name) {
   const auto* p = lab.part(name);
   return p ? x.toBoard(lab.toWorld(p->pos)) : view::Vec3{};
 }
 }  // namespace
 
-std::optional<RigLayout> rigLayout(const LabScene& lab,
-                                   const std::vector<view::Placement>& placements) {
+namespace {
+/// The rig for `placements` with the lab at `xform` (placed to fit when null) and, when
+/// given, these mast groups (a relayout keeps its groups while the lab eases).
+std::optional<RigLayout> build(const LabScene& lab,
+                               const std::vector<view::Placement>& placements,
+                               const view::RigXform* xform,
+                               const std::vector<view::MastGroup>* fixedGroups) {
   const auto& doc = lab.doc();
   if (!doc.deploy || placements.empty()) return std::nullopt;
   const auto& d = *doc.deploy;
@@ -78,11 +88,16 @@ std::optional<RigLayout> rigLayout(const LabScene& lab,
   out.volume.mastEdgeGap = d.mastEdgeGap * kCellsPerMetre;
   out.volume.yokeDrop = d.yokeDrop * kCellsPerMetre;
   out.layoutBounds = view::boundsOf(placements);
-  out.xform = view::placeLayout(out.layoutBounds, out.volume);
+  out.xform = xform ? *xform : view::placeLayout(out.layoutBounds, out.volume);
   out.slabs = view::slabsOf(placements, kBezelMargin);
-  out.groups = view::mastGroups(out.slabs, out.xform, out.volume);
-  out.travels = static_cast<int>(out.groups.size()) <= view::kMaxTravellingGroups;
-  out.lastLock = view::deployLastLock(static_cast<int>(out.groups.size()));
+  // Masts too close for their carriages merge into racks (M24.6); every layout travels.
+  if (fixedGroups) {
+    out.groups = *fixedGroups;
+    for (auto& g : out.groups) g.mastTopZ = out.xform.toBoard({0, 0, out.volume.railZ}).z;
+  } else {
+    out.groups = view::routeGroups(view::mastGroups(out.slabs, out.xform, out.volume),
+                                   out.volume, out.xform.labScale);
+  }
   out.room = boardBounds(lab.roomBounds(), out.xform);
   out.bayPrefix = d.slabBay;
   if (const auto* bay = lab.part(bayName(lab, 0))) {
@@ -125,27 +140,94 @@ std::optional<RigLayout> rigLayout(const LabScene& lab,
   const auto park = partCentre(lab, x, "gantry.carriage.0");
   const float yokeBelow = view::kSlabBelowFace - kBodyBelowFace + out.volume.yokeDrop;
 
+  // A rack's frame runs in the gaps between its slabs: each slab's arm stands beyond its
+  // far edge (halfway to the next slab behind it), its T-bar runs along the row of arms
+  // to a spine in the column gap nearest the rack's middle, and the mast stands on the
+  // spine beyond the farthest row. Every bar stays out from under the slabs.
+  out.arm.assign(out.slabs.size(), {});
+  for (auto& group : out.groups) {
+    for (const auto s : group.slabs) {
+      const auto& slab = out.slabs[s];
+      float next = 1e30f;
+      for (const auto o : group.slabs)
+        if (o != s && out.slabs[o].minY > slab.maxY && out.slabs[o].minX < slab.maxX &&
+            out.slabs[o].maxX > slab.minX)
+          next = std::min(next, out.slabs[o].minY);
+      out.arm[s] = {
+          (slab.minX + slab.maxX) * .5f,
+          std::min(slab.maxY + out.volume.mastEdgeGap, (slab.maxY + next) * .5f), 0};
+    }
+    if (!group.rack()) {
+      for (const auto s : group.slabs)
+        out.arm[s] = {group.mastFoot.x, group.mastFoot.y, 0};
+      continue;
+    }
+    if (fixedGroups) continue;
+    std::vector<std::pair<float, float>> spans;
+    float far = -1e30f, mid = 0;
+    for (const auto s : group.slabs) {
+      spans.emplace_back(out.slabs[s].minX, out.slabs[s].maxX);
+      far = std::max(far, out.arm[s].y);
+      mid += out.arm[s].x / static_cast<float>(group.slabs.size());
+    }
+    std::sort(spans.begin(), spans.end());
+    // The free x gaps between the slabs' x spans; beside the rack if there is none.
+    float spine = spans.back().second + out.volume.mastEdgeGap, best = 1e30f;
+    float reach = spans.front().second;
+    for (std::size_t i = 1; i < spans.size(); ++i) {
+      if (spans[i].first > reach) {
+        const float gap = (reach + spans[i].first) * .5f;
+        if (std::abs(gap - mid) < best) {
+          best = std::abs(gap - mid);
+          spine = gap;
+        }
+      }
+      reach = std::max(reach, spans[i].second);
+    }
+    group.mastFoot.x = spine;
+    group.mastFoot.y = far;
+  }
+
+  // Departures: a column of carriages (one bridge) leaves together, nearest the
+  // magazine first, the slots spread over at most 1.2 s (M24.6).
+  const auto departures =
+      view::departureOrder(out.groups, partCentre(lab, x, bayName(lab, 0)));
+  out.groupSlot = departures.slot;
+  out.slots = std::max(1, departures.count);
+  out.lastLock = view::deployLastLock(out.slots);
+  const float step = view::departureStep(out.slots);
+
   out.bay.assign(out.slabs.size(), -1);
   out.paths.resize(out.slabs.size());
   for (std::uint32_t g = 0; g < out.groups.size(); ++g) {
     const auto& group = out.groups[g];
     const auto& top = out.slabs[group.slabs.front()];
-    const int topSlot = std::min<int>(static_cast<int>(group.slabs.front()), 7);
+    const int topSlot = static_cast<int>(group.slabs.front() % 8);
     const auto topBay = partCentre(lab, x, bayName(lab, topSlot));
     // The lowest slab's yoke rides just under the rail; the stack keeps its spacing.
     const float bottomZ = out.slabs[group.slabs.back()].z;
     const float liftBottom = group.mastTopZ - kMinMastCells + yokeBelow;
+    // A rack is carried rigidly: each slab keeps its offset from the rack's mast, and the
+    // farthest +X slab is picked up where a single slab would be.
+    const auto offsetOf = [&](std::uint32_t s) {
+      const auto& slab = out.slabs[s];
+      return view::Vec3{(slab.minX + slab.maxX) * .5f - group.mastFoot.x,
+                        (slab.minY + slab.maxY) * .5f - group.mastFoot.y, 0};
+    };
+    float shiftX = -1e30f;
+    for (const auto s : group.slabs) shiftX = std::max(shiftX, offsetOf(s).x);
+    const auto topOffset = offsetOf(group.slabs.front());
     for (const auto s : group.slabs) {
       const auto& slab = out.slabs[s];
-      const int slot = std::min<int>(static_cast<int>(s), 7);
+      const int slot = static_cast<int>(s % 8);
       out.bay[s] = s < 8 ? static_cast<int>(s) : -1;
       const auto* bayPart = lab.part(bayName(lab, slot));
       auto& path = out.paths[s];
       path.bayCentre = partCentre(lab, x, bayName(lab, slot));
-      path.bayQuat =
-          bayPart ? quatFromYawPitchRoll(radians(bayPart->rot[0]), radians(bayPart->rot[1]),
-                                         radians(bayPart->rot[2]))
-                  : kIdentity;
+      path.bayQuat = bayPart ? quatFromYawPitchRoll(radians(bayPart->rot[0]),
+                                                    radians(bayPart->rot[1]),
+                                                    radians(bayPart->rot[2]))
+                             : kIdentity;
       path.hangCentre = {(slab.minX + slab.maxX) * .5f, (slab.minY + slab.maxY) * .5f,
                          slab.z - kBodyBelowFace};
       path.mastOffset = {group.mastFoot.x - path.hangCentre.x,
@@ -155,26 +237,107 @@ std::optional<RigLayout> rigLayout(const LabScene& lab,
       // A group is carried as a stack: every slab keeps its height below the top one.
       const float below = top.z - slab.z;
       path.liftZ = liftBottom + (slab.z - bottomZ);
-      path.pickCentre = {pickX,
+      const auto off = offsetOf(s);
+      path.pickCentre = {pickX + off.x - shiftX,
                          std::clamp(topBay.y, railMinY - path.mastOffset.y,
-                                    railMaxY - path.mastOffset.y),
+                                    railMaxY - path.mastOffset.y) +
+                             off.y - topOffset.y,
                          topBay.z - below};
       path.departure =
-          view::kDeployFirstDeparture + view::kDeployStagger * static_cast<float>(g);
+          view::kDeployFirstDeparture + step * static_cast<float>(out.groupSlot[g]);
       path.parkCarriage = park;
     }
   }
   return out;
+}
+}  // namespace
+
+namespace {
+/// An instance belongs to the slab under it: inside its bezel, on the highest face at or
+/// below it (a plinth hangs just under its own face). -1 when none.
+int slabUnder(const RigLayout& layout, const Instance& i) {
+  int best = -1;
+  float bestDz = 1e30f;
+  for (std::size_t s = 0; s < layout.slabs.size(); ++s) {
+    const auto& slab = layout.slabs[s];
+    if (i.center[0] < slab.minX - .05f || i.center[0] > slab.maxX + .05f ||
+        i.center[1] < slab.minY - .05f || i.center[1] > slab.maxY + .05f)
+      continue;
+    const float dz = i.center[2] - slab.z;
+    const float rank = dz >= -view::kSlabBelowFace - .05f ? dz : 1e6f - dz;
+    if (rank < bestDz) {
+      bestDz = rank;
+      best = static_cast<int>(s);
+    }
+  }
+  if (best >= 0) return best;
+  // Outside every bezel (a timeline's rail and arrow): the nearest slab at its height
+  // carries it, so nothing the board draws is left hanging (M24.6).
+  float bestD = 1e30f;
+  for (std::size_t s = 0; s < layout.slabs.size(); ++s) {
+    const auto& slab = layout.slabs[s];
+    const float dx = std::max({0.0f, slab.minX - i.center[0], i.center[0] - slab.maxX});
+    const float dy = std::max({0.0f, slab.minY - i.center[1], i.center[1] - slab.maxY});
+    const float dz = std::abs(i.center[2] - slab.z);
+    const float d = dx * dx + dy * dy + dz * dz;
+    if (d < bestD) {
+      bestD = d;
+      best = static_cast<int>(s);
+    }
+  }
+  return best;
+}
+/// Rotate `i` rigidly about `pivot` by `q`, then move the pivot to `to`.
+void turnInstance(Instance& i, const view::Vec3& pivot, const view::Vec3& to,
+                  const std::array<float, 4>& a) {
+  const view::Vec3 local{i.center[0] - pivot.x, i.center[1] - pivot.y,
+                         i.center[2] - pivot.z};
+  const auto w = to + rotate(a, local);
+  i.center[0] = w.x;
+  i.center[1] = w.y;
+  i.center[2] = w.z;
+  const std::array<float, 4> b{i.quat[0], i.quat[1], i.quat[2], i.quat[3]};
+  i.quat[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+  i.quat[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+  i.quat[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+  i.quat[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+}
+std::array<float, 4> yawQuat(float yaw) noexcept {
+  return {0, 0, std::sin(yaw / 2), std::cos(yaw / 2)};
+}
+view::RigXform easeXform(const view::RigXform& a, const view::RigXform& b,
+                         float f) noexcept {
+  return {a.labOrigin + (b.labOrigin - a.labOrigin) * f,
+          std::lerp(a.labScale, b.labScale, f)};
+}
+}  // namespace
+
+std::optional<RigLayout> rigLayout(const LabScene& lab,
+                                   const std::vector<view::Placement>& placements,
+                                   const view::RigXform* xform) {
+  return build(lab, placements, xform, nullptr);
+}
+
+std::optional<RigLayout> rigLayoutAfter(const LabScene& lab, const RigLayout& previous,
+                                        const std::vector<view::Placement>& placements) {
+  auto fresh = build(lab, placements, nullptr, nullptr);
+  if (!fresh) return fresh;
+  // The lab only moves when the layout outgrows the volume where it stands, or when it
+  // would scale differently.
+  if (std::abs(fresh->xform.labScale - previous.xform.labScale) < 1e-4f &&
+      view::layoutFits(fresh->layoutBounds, previous.xform, fresh->volume))
+    return build(lab, placements, &previous.xform, nullptr);
+  return fresh;
 }
 
 std::vector<view::SlabPose> rigPoses(const RigLayout& layout, RigPhase phase, float age,
                                      float intensity) {
   std::vector<view::SlabPose> out;
   out.reserve(layout.paths.size());
-  const auto groups = static_cast<int>(layout.groups.size());
+  const float step = view::departureStep(layout.slots);
   for (std::size_t i = 0; i < layout.paths.size(); ++i) {
     const auto& path = layout.paths[i];
-    if (!layout.travels || phase == RigPhase::Rest) {
+    if (phase == RigPhase::Rest) {
       out.push_back(view::slabDeploy(path, 0, 0));
       continue;
     }
@@ -189,8 +352,8 @@ std::vector<view::SlabPose> rigPoses(const RigLayout& layout, RigPhase phase, fl
       out.push_back(view::slabDeploy(reversed, -1, 1));
       continue;
     }
-    const int g = static_cast<int>(layout.slabGroup[i]);
-    const float u = age - view::kDeployStagger * static_cast<float>(groups - 1 - g);
+    const int slot = layout.groupSlot[layout.slabGroup[i]];
+    const float u = age - step * static_cast<float>(layout.slots - 1 - slot);
     if (u <= 0) {
       out.push_back(view::slabDeploy(path, 0, 0));
       out.back().clampPulse = 0;
@@ -212,6 +375,16 @@ std::vector<RigPiece> appendRig(InstanceSet& set, const LabScene& lab,
     lab.appendCopyAt(set, name, centre, q, mul, alpha);
     const auto [lo, hi] = localBox(lab, name, mul);
     pieces.push_back({kind, group, slab, turnedBox(centre, lo, hi, q)});
+  };
+  // A horizontal bevel bar (the yoke template) from `a` to `b`, `section` x its own.
+  const auto bar = [&](RigPiece::Kind kind, int group, int slab, const view::Vec3& a,
+                       const view::Vec3& b, float section) {
+    const float dx = b.x - a.x, dy = b.y - a.y;
+    const float len = std::hypot(dx, dy);
+    if (len < 1e-4f) return;
+    add(kind, group, slab, "rig.yoke", (a + b) * .5f,
+        quatFromYawPitchRoll(std::atan2(-dx, dy), 0, 0),
+        {section, len / (0.03f * kCellsPerMetre), section});
   };
   const auto& x = layout.xform;
   const auto carriageTemplate = partCentre(lab, x, "gantry.carriage.0");
@@ -261,35 +434,42 @@ std::vector<RigPiece> appendRig(InstanceSet& set, const LabScene& lab,
       const float bayD = layout.bayDepth > 0 ? layout.bayDepth : depth;
       add(RigPiece::Kind::Back, gi, si, "rig.slab.back",
           pose.centre + rotate(pose.quat, {0, 0, -kBodyHalf}), pose.quat,
-          {std::lerp(bayW, width, f) / backSize, std::lerp(bayD, depth, f) / backSize, 1});
+          {std::lerp(bayW, width, f) / backSize, std::lerp(bayD, depth, f) / backSize,
+           1});
       if (pose.quat[3] > .9999f) {
-        // The yoke runs under the slab from the mast axis to the back's boss.
-        const float dx = path.mastOffset.x, dy = path.mastOffset.y;
-        const float len = std::hypot(dx, dy);
-        const float yaw = std::atan2(-dx, dy);
-        add(RigPiece::Kind::Yoke, gi, si, "rig.yoke",
-            {pose.centre.x + dx * .5f, pose.centre.y + dy * .5f,
-             pose.centre.z - path.yokeBelow},
-            quatFromYawPitchRoll(yaw, 0, 0), {1, len / (0.03f * kCellsPerMetre), 1});
+        // The yoke runs under the slab from its mast axis (a rack's arm) to the back's
+        // boss; on a rack a T-bar joins the arm to the mast at the yoke's height.
+        const auto& arm = layout.arm[s];
+        const view::Vec3 armAt{
+            pose.centre.x + path.mastOffset.x + arm.x - group.mastFoot.x,
+            pose.centre.y + path.mastOffset.y + arm.y - group.mastFoot.y,
+            pose.centre.z - path.yokeBelow};
+        bar(RigPiece::Kind::Yoke, gi, si, {pose.centre.x, pose.centre.y, armAt.z}, armAt,
+            1);
+        if (group.rack()) {
+          const view::Vec3 mast{pose.centre.x + path.mastOffset.x,
+                                pose.centre.y + path.mastOffset.y, armAt.z};
+          const view::Vec3 spine{mast.x, armAt.y, armAt.z};
+          bar(RigPiece::Kind::TBar, gi, si, armAt, spine, kTBarSection);
+          bar(RigPiece::Kind::TBar, gi, si, spine, mast, kTBarSection);
+        }
       }
     }
   }
   return pieces;
 }
 
-void carryBoard(InstanceSet& set, const RigLayout& layout,
-                const std::vector<view::SlabPose>& poses) {
-  if (layout.slabs.empty() || poses.size() != layout.slabs.size()) return;
-  if (std::all_of(poses.begin(), poses.end(), [](const auto& p) { return p.clamped; }))
-    return;
-  // Per slab: its pivot (the deployed centre), its pose and its size from edge-on in the
-  // bay (the parked slab's footprint) to its own once face-up.
-  struct Carry {
-    bool moves{false}, hidden{false};
-    view::Vec3 pivot, centre, scale{1, 1, 1};
-    std::array<float, 4> quat{};
-  };
-  std::vector<Carry> carry(layout.slabs.size());
+namespace {
+/// Per slab: its pivot (the deployed centre), its pose and its size from edge-on in the
+/// bay (the parked slab's footprint) to its own once face-up.
+struct SlabCarry {
+  bool moves{false}, hidden{false};
+  view::Vec3 pivot, centre, scale{1, 1, 1};
+  std::array<float, 4> quat{};
+};
+std::vector<SlabCarry> carriesOf(const RigLayout& layout,
+                                 const std::vector<view::SlabPose>& poses) {
+  std::vector<SlabCarry> carry(layout.slabs.size());
   for (std::size_t s = 0; s < carry.size(); ++s) {
     const auto& pose = poses[s];
     auto& c = carry[s];
@@ -310,54 +490,51 @@ void carryBoard(InstanceSet& set, const RigLayout& layout,
       c.scale.z = std::lerp(std::min(c.scale.x, c.scale.y), 1.0f, f);
     }
   }
-  // An instance belongs to the slab under it: inside its bezel, on the highest face at
-  // or below it (a plinth hangs just under its own face).
-  const auto slabOf = [&](const Instance& i) -> int {
-    int best = -1;
-    float bestDz = 1e30f;
-    for (std::size_t s = 0; s < layout.slabs.size(); ++s) {
-      const auto& slab = layout.slabs[s];
-      if (i.center[0] < slab.minX - .05f || i.center[0] > slab.maxX + .05f ||
-          i.center[1] < slab.minY - .05f || i.center[1] > slab.maxY + .05f)
-        continue;
-      const float dz = i.center[2] - slab.z;
-      const float rank = dz >= -view::kSlabBelowFace - .05f ? dz : 1e6f - dz;
-      if (rank < bestDz) {
-        bestDz = rank;
-        best = static_cast<int>(s);
-      }
-    }
-    return best;
-  };
-  const auto move = [&](Instance& i) {
-    const int s = slabOf(i);
-    if (s < 0 || !carry[static_cast<std::size_t>(s)].moves) return;
-    const auto& c = carry[static_cast<std::size_t>(s)];
-    if (c.hidden) {
-      i.scale[0] = i.scale[1] = i.scale[2] = 0;
-      return;
-    }
-    const view::Vec3 local{(i.center[0] - c.pivot.x) * c.scale.x,
-                           (i.center[1] - c.pivot.y) * c.scale.y,
-                           (i.center[2] - c.pivot.z) * c.scale.z};
-    const auto w = c.centre + rotate(c.quat, local);
-    i.center[0] = w.x;
-    i.center[1] = w.y;
-    i.center[2] = w.z;
-    i.scale[0] *= c.scale.x;
-    i.scale[1] *= c.scale.y;
-    i.scale[2] *= c.scale.z;
-    // q = carry * own (Hamilton product, x y z w).
-    const auto& a = c.quat;
-    const std::array<float, 4> b{i.quat[0], i.quat[1], i.quat[2], i.quat[3]};
-    i.quat[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
-    i.quat[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
-    i.quat[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
-    i.quat[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
-  };
+  return carry;
+}
+void carryInstance(Instance& i, const SlabCarry& c) {
+  if (!c.moves) return;
+  if (c.hidden) {
+    i.scale[0] = i.scale[1] = i.scale[2] = 0;
+    return;
+  }
+  const view::Vec3 local{(i.center[0] - c.pivot.x) * c.scale.x,
+                         (i.center[1] - c.pivot.y) * c.scale.y,
+                         (i.center[2] - c.pivot.z) * c.scale.z};
+  const auto w = c.centre + rotate(c.quat, local);
+  i.center[0] = w.x;
+  i.center[1] = w.y;
+  i.center[2] = w.z;
+  i.scale[0] *= c.scale.x;
+  i.scale[1] *= c.scale.y;
+  i.scale[2] *= c.scale.z;
+  // q = carry * own (Hamilton product, x y z w).
+  const auto& a = c.quat;
+  const std::array<float, 4> b{i.quat[0], i.quat[1], i.quat[2], i.quat[3]};
+  i.quat[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+  i.quat[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+  i.quat[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+  i.quat[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+}
+/// Every board instance list a carry moves.
+template <typename F>
+void eachBoardInstance(InstanceSet& set, F&& f) {
   for (auto* list : {&set.instances, &set.shadows, &set.flourish})
-    for (auto& i : *list) move(i);
-  if (set.standbyLed) move(*set.standbyLed);
+    for (auto& i : *list) f(i);
+  if (set.standbyLed) f(*set.standbyLed);
+}
+}  // namespace
+
+void carryBoard(InstanceSet& set, const RigLayout& layout,
+                const std::vector<view::SlabPose>& poses) {
+  if (layout.slabs.empty() || poses.size() != layout.slabs.size()) return;
+  if (std::all_of(poses.begin(), poses.end(), [](const auto& p) { return p.clamped; }))
+    return;
+  const auto carry = carriesOf(layout, poses);
+  eachBoardInstance(set, [&](Instance& i) {
+    const int s = slabUnder(layout, i);
+    if (s >= 0) carryInstance(i, carry[static_cast<std::size_t>(s)]);
+  });
 }
 
 bool hiddenInGame(const io::LabPart& part, const RigLayout& layout,
@@ -372,8 +549,316 @@ bool hiddenInGame(const io::LabPart& part, const RigLayout& layout,
   if (std::string_view(part.name).substr(0, dot) != layout.bayPrefix) return false;
   const int slot = c - '0';
   for (std::size_t i = 0; i < layout.bay.size(); ++i)
-    if (layout.bay[i] == slot && (!layout.travels || !poses[i].inBay)) return true;
+    if (layout.bay[i] == slot && !poses[i].inBay) return true;
   return false;
+}
+
+Relayout relayoutOf(const LabScene& lab, const RigLayout& from,
+                    const std::vector<view::Placement>& fromPlacements,
+                    const RigLayout& to,
+                    const std::vector<view::Placement>& toPlacements) {
+  (void)lab;
+  Relayout out;
+  out.from = from;
+  out.to = to;
+  out.matches = view::matchSlabs(fromPlacements, from.slabs, toPlacements, to.slabs);
+  out.specs.resize(to.slabs.size());
+  out.seconds = kLabScaleEaseSeconds;
+  for (const auto& m : out.matches) {
+    if (m.to < 0) {
+      out.leaving.push_back(m.from);
+      out.seconds = std::max(out.seconds, view::kSlabLockSeconds);
+      continue;
+    }
+    const auto t = static_cast<std::size_t>(m.to);
+    if (m.from < 0) {
+      out.arrivals.push_back(m.to);
+      out.seconds = std::max(out.seconds, to.paths[t].departure + view::kSlabLockSeconds);
+      continue;
+    }
+    auto& spec = out.specs[t];
+    spec.from = from.xform.toLab(from.paths[static_cast<std::size_t>(m.from)].hangCentre);
+    spec.to = to.xform.toLab(to.paths[t].hangCentre);
+    spec.fromYaw = -m.yaw;
+    spec.toYaw = 0;
+    spec.lift = 0.08f * kCellsPerMetre;
+    out.seconds = std::max(out.seconds, view::relayoutSeconds(spec));
+  }
+  return out;
+}
+
+RelayoutFrame relayoutFrame(const LabScene& lab, const Relayout& move,
+                            const std::vector<view::Placement>& toPlacements, float age,
+                            float intensity) {
+  RelayoutFrame f;
+  const bool calm = intensity < .5f;
+  f.done = calm || age >= move.seconds;
+  const float ease = calm ? 1.0f : view::rigEase(age / kLabScaleEaseSeconds);
+  const auto xform = easeXform(move.from.xform, move.to.xform, ease);
+  auto live = build(lab, toPlacements, &xform, &move.to.groups);
+  f.layout = live ? std::move(*live) : move.to;
+  const std::size_t n = f.layout.slabs.size();
+  f.carry.resize(n);
+  f.poses.reserve(n + move.leaving.size());
+  std::vector<bool> arriving(n, false);
+  for (const int a : move.arrivals) arriving[static_cast<std::size_t>(a)] = true;
+  for (std::size_t i = 0; i < n; ++i) {
+    const auto& path = f.layout.paths[i];
+    if (arriving[i]) {
+      // From the rack, on its own path in the (eased) lab.
+      f.carry[i].arriving = true;
+      f.poses.push_back(view::slabDeploy(path, f.done ? 1e3f : age, intensity));
+      continue;
+    }
+    const auto& spec = move.specs[i];
+    const auto p = view::slabRelayout(spec, f.done ? 1e3f : age, intensity);
+    view::SlabPose pose;
+    pose.centre = f.done ? path.hangCentre : xform.toBoard(p.centre);
+    pose.quat = yawQuat(f.done ? 0.0f : p.yaw);
+    const auto arm = rotate(pose.quat, path.mastOffset);
+    pose.carriage = {pose.centre.x + arm.x, pose.centre.y + arm.y, path.railZ};
+    pose.mastLength = std::max(0.0f, path.railZ - (pose.centre.z - path.yokeBelow));
+    pose.clamped = f.done || p.settled;
+    pose.inBay = false;
+    f.poses.push_back(pose);
+    auto& c = f.carry[i];
+    c.moves = !f.done && (view::length(pose.centre - path.hangCentre) > 1e-6f ||
+                          std::abs(p.yaw) > 1e-6f);
+    c.from = path.hangCentre;
+    c.to = pose.centre;
+    c.yaw = p.yaw;
+  }
+  // The leaving slabs, back to the rack along their old path in the old lab, as extra
+  // groups of their own.
+  for (const int j : move.leaving) {
+    const auto o = static_cast<std::size_t>(j);
+    auto path = move.from.paths[o];
+    path.departure = 0;
+    auto pose = view::slabDeploy(path, f.done ? -1.0f : view::kSlabLockSeconds - age, 1);
+    const auto toHere = [&](const view::Vec3& b) {
+      return xform.toBoard(move.from.xform.toLab(b));
+    };
+    pose.centre = toHere(pose.centre);
+    pose.carriage = toHere(pose.carriage);
+    const float railZ = xform.toBoard({0, 0, f.layout.volume.railZ}).z;
+    pose.carriage.z = railZ;
+    pose.mastLength = std::max(0.0f, railZ - (pose.centre.z - path.yokeBelow));
+    pose.clamped = false;
+    path.hangCentre = toHere(path.hangCentre);
+    path.railZ = railZ;
+    view::MastGroup g;
+    g.mastFoot = path.hangCentre + path.mastOffset;
+    g.mastTopZ = railZ;
+    g.slabs = {static_cast<std::uint32_t>(f.layout.slabs.size())};
+    f.layout.groups.push_back(g);
+    f.layout.slabs.push_back(move.from.slabs[o]);
+    f.layout.paths.push_back(path);
+    f.layout.arm.push_back({g.mastFoot.x, g.mastFoot.y, 0});
+    f.layout.bay.push_back(move.from.bay[o]);
+    f.layout.slabGroup.push_back(static_cast<std::uint32_t>(f.layout.groups.size() - 1));
+    f.layout.groupSlot.push_back(0);
+    f.poses.push_back(pose);
+  }
+  return f;
+}
+
+void carryRelayout(InstanceSet& set, const RelayoutFrame& frame) {
+  const std::size_t n = frame.carry.size();
+  if (n == 0 || frame.done) return;
+  // Arrivals ride their deploy path like a deploy's slabs; a matched slab moves rigidly
+  // with its relayout. Each instance's slab is found before anything moves.
+  RigLayout own = frame.layout;
+  own.slabs.resize(n);
+  own.paths.resize(n);
+  std::vector<view::SlabPose> poses(frame.poses.begin(),
+                                    frame.poses.begin() + static_cast<std::ptrdiff_t>(n));
+  for (std::size_t i = 0; i < n; ++i)
+    if (!frame.carry[i].arriving) poses[i].clamped = true;
+  const auto deploy = carriesOf(own, poses);
+  eachBoardInstance(set, [&](Instance& i) {
+    const int s = slabUnder(own, i);
+    if (s < 0) return;
+    const auto& c = frame.carry[static_cast<std::size_t>(s)];
+    if (c.moves)
+      turnInstance(i, c.from, c.to, yawQuat(c.yaw));
+    else
+      carryInstance(i, deploy[static_cast<std::size_t>(s)]);
+  });
+}
+
+std::optional<float> relayoutBootAge(const Relayout& move, float age,
+                                     float intensity) noexcept {
+  if (move.arrivals.empty()) return std::nullopt;
+  float lock = 0;
+  if (intensity >= .5f)
+    for (const int a : move.arrivals)
+      lock = std::max(lock, move.to.paths[static_cast<std::size_t>(a)].departure +
+                                view::kSlabLockSeconds);
+  if (age < lock) return 0.0f;
+  if (age - lock >= view::kBootSeconds) return std::nullopt;
+  return age - lock;
+}
+
+std::size_t appendBridges(InstanceSet& set, const std::vector<view::LightBridge>& bridges,
+                          float power) {
+  std::vector<Instance> bars;
+  const float alpha = kBridgeAlpha * std::clamp(power, 0.0f, 1.0f);
+  if (alpha <= 0.0f) return 0;
+  for (const auto& b : bridges) {
+    for (int i = 0; i < kBridgeSegments; ++i) {
+      const auto p = view::bridgePoint(b, static_cast<float>(i) / kBridgeSegments);
+      const auto q = view::bridgePoint(b, static_cast<float>(i + 1) / kBridgeSegments);
+      Instance beam = cylinderBetween(p, q, kBridgeBeamMetres * kCellsPerMetre);
+      beam.color[0] = b.color.r;
+      beam.color[1] = b.color.g;
+      beam.color[2] = b.color.b;
+      beam.color[3] = alpha;
+      beam.material = shaderMaterial(view::Material::Hologram, Cut::Plank, 0.0f);
+      beam.panelSignal[2] = -1.0f;  // the projector's opacity path: alpha is opacity
+      bars.push_back(beam);
+      Instance core = cylinderBetween(p, q, kBridgeCoreMetres * kCellsPerMetre);
+      for (int c = 0; c < 3; ++c)
+        core.color[c] = std::min(1.0f, beam.color[c] * 1.4f) * power;
+      core.color[3] = 1.0f;
+      core.material = shaderMaterial(view::Material::Glow, Cut::Plank, 0.0f);
+      bars.push_back(core);
+    }
+  }
+  return insertLabCylinders(set, bars);
+}
+
+std::vector<RigCable> rigCables(const RigLayout& layout,
+                                const std::vector<view::SlabPose>& poses,
+                                const VariantSpec& v, const view::ViewConfig& cfg,
+                                const std::vector<view::TimelineLink>& links) {
+  std::vector<RigCable> out;
+  if (links.empty() || poses.size() < layout.slabs.size()) return out;
+  int turnGrid = -1, lineGrid = -1;
+  for (std::size_t i = 0; i < cfg.gridAxes.size(); ++i) {
+    if (v.dims.kind(cfg.gridAxes[i]) == AxisKind::Temporal)
+      turnGrid = static_cast<int>(i);
+    if (v.dims.kind(cfg.gridAxes[i]) == AxisKind::Multiverse)
+      lineGrid = static_cast<int>(i);
+  }
+  if (turnGrid < 0 || lineGrid < 0) return out;
+  const auto slices = view::enumerateSlices(v.dims, cfg);
+  // The slab of (line, turn), and each line's earliest board.
+  std::map<std::pair<int, int>, int> slabAt;
+  std::map<int, std::pair<int, int>> first;  // line -> (turn, slab)
+  for (std::size_t s = 0; s < layout.slabs.size(); ++s) {
+    const auto slice = layout.slabs[s].slice;
+    if (slice >= slices.size()) continue;
+    const int turn = slices[slice].at[static_cast<std::size_t>(turnGrid)];
+    const int line = slices[slice].at[static_cast<std::size_t>(lineGrid)];
+    slabAt[{line, turn}] = static_cast<int>(s);
+    const auto it = first.find(line);
+    if (it == first.end() || turn < it->second.first)
+      first[line] = {turn, static_cast<int>(s)};
+  }
+  const float above = kCableAboveMetres * kCellsPerMetre;
+  for (const auto& link : links) {
+    const auto a = slabAt.find({link.fromLine, link.atTurn});
+    const auto b = first.find(link.toLine);
+    if (a == slabAt.end() || b == first.end()) continue;
+    const auto sa = static_cast<std::size_t>(a->second);
+    const auto sb = static_cast<std::size_t>(b->second.second);
+    const auto& pa = poses[sa];
+    const auto& pb = poses[sb];
+    if (pa.inBay || pb.inBay) continue;
+    // The slab's face: its body centre plus the body-below-face offset.
+    const float face = std::max(pa.centre.z, pb.centre.z) + kBodyBelowFace;
+    const view::Vec3 from{pa.carriage.x, pa.carriage.y, face + above};
+    const view::Vec3 to{pb.carriage.x, pb.carriage.y, face + above};
+    if (view::length(to - from) < 1.0f) continue;
+    out.push_back({a->second, b->second.second, view::cablePoints(from, to)});
+  }
+  return out;
+}
+
+std::size_t appendCables(InstanceSet& set, const std::vector<RigCable>& cables,
+                         float seconds, float power) {
+  std::vector<Instance> bars;
+  const view::Rgba glass = view::Rgba::hex(0x9FE8FF);
+  const float d = kCableMetres * kCellsPerMetre;
+  for (const auto& cable : cables) {
+    float length = 0;
+    std::vector<float> at{0};
+    for (std::size_t i = 1; i < cable.points.size(); ++i) {
+      Instance bar = cylinderBetween(cable.points[i - 1], cable.points[i], d);
+      bar.color[0] = glass.r;
+      bar.color[1] = glass.g;
+      bar.color[2] = glass.b;
+      bar.color[3] = 1.0f;
+      bar.material = shaderMaterial(view::Material::Glass, Cut::Plank, 0.0f);
+      bars.push_back(bar);
+      length += view::length(cable.points[i] - cable.points[i - 1]);
+      at.push_back(length);
+    }
+    if (power <= 0.0f || length <= 0.0f) continue;
+    // Light pulses running from the parent to the child.
+    for (int k = 0; k < kCablePulses; ++k) {
+      const float s = std::fmod(seconds * kCablePulseSpeed * kCellsPerMetre +
+                                    length * static_cast<float>(k) / kCablePulses,
+                                length);
+      std::size_t i = 1;
+      while (i + 1 < at.size() && at[i] < s) ++i;
+      const float f = (s - at[i - 1]) / std::max(1e-5f, at[i] - at[i - 1]);
+      const auto p = cable.points[i - 1] + (cable.points[i] - cable.points[i - 1]) * f;
+      const auto dir = view::normalize(cable.points[i] - cable.points[i - 1]);
+      Instance dot =
+          cylinderBetween(p - dir * (d * 1.5f), p + dir * (d * 1.5f), d * 1.6f);
+      const auto g = glass.array();
+      for (std::size_t c = 0; c < 3; ++c)
+        dot.color[c] = std::min(1.0f, g[c] * 1.2f) * power;
+      dot.color[3] = 1.0f;
+      dot.material = shaderMaterial(view::Material::Glow, Cut::Plank, 0.0f);
+      bars.push_back(dot);
+    }
+  }
+  return insertLabCylinders(set, bars);
+}
+
+float parkFraction(float formed) noexcept {
+  return smooth(formed / 0.3f);
+}
+
+void parkHigh(const RigLayout& layout, std::vector<view::SlabPose>& poses, float f) {
+  if (f <= 0.0f) return;
+  const float park = kParkMastMetres * kCellsPerMetre;
+  for (const auto& group : layout.groups) {
+    if (group.slabs.empty()) continue;
+    const auto top = group.slabs.front();
+    if (top >= poses.size()) continue;
+    const auto& path = layout.paths[top];
+    const float yoke = poses[top].centre.z - path.yokeBelow;
+    const float rise = (path.railZ - park - yoke) * std::clamp(f, 0.0f, 1.0f);
+    for (const auto s : group.slabs) {
+      if (s >= poses.size()) continue;
+      poses[s].centre.z += rise;
+      poses[s].mastLength = std::max(0.0f, poses[s].mastLength - rise);
+    }
+  }
+}
+
+std::size_t appendStandby(InstanceSet& set, const RigLayout& layout,
+                          const std::vector<view::SlabPose>& poses) {
+  std::vector<Instance> leds;
+  const view::Rgba amber = view::Rgba::hex(0xFF9F43);
+  for (std::size_t s = 0; s < layout.slabs.size() && s < poses.size(); ++s) {
+    const auto& slab = layout.slabs[s];
+    const auto& p = poses[s];
+    if (p.inBay) continue;
+    const float hw = (slab.maxX - slab.minX) * .5f - .25f;
+    const float hd = (slab.maxY - slab.minY) * .5f - .25f;
+    const auto at = p.centre + rotate(p.quat, {-hw, -hd, kBodyHalf});
+    Instance led = cylinderBetween(at, at + view::Vec3{0, 0, .08f}, .22f);
+    const auto a = amber.array();
+    for (std::size_t c = 0; c < 3; ++c) led.color[c] = a[c];
+    led.color[3] = 1.0f;
+    led.material = shaderMaterial(view::Material::Glow, Cut::Plank, 0.0f);
+    leds.push_back(led);
+  }
+  return insertLabCylinders(set, leds);
 }
 
 std::vector<bool> slabsShown(const RigLayout& layout,

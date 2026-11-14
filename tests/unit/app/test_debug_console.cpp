@@ -441,3 +441,24 @@ TEST_CASE("the console switches the slab skin, forces a latch and reports the st
   for (const char* word : {"skin", "stretch", "latch"})
     CHECK(has(DebugConsole::help(), word));
 }
+
+TEST_CASE("the console switches light bridges and replays a relayout (M24.6)",
+          "[unit][app][rig]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(c.bridges());
+  CHECK(c.run(*shell, "bridges off") == "bridges off");
+  CHECK_FALSE(c.bridges());
+  CHECK(c.run(*shell, "bridges on") == "bridges on");
+  CHECK(c.bridges());
+  CHECK(has(c.run(*shell, "bridges maybe"), "usage"));
+
+  CHECK_FALSE(c.takeRelayout());
+  CHECK(has(c.run(*shell, "relayout"), "no game in the lab"));
+  c.setRigReport([] { return std::string("labScale 1"); });
+  CHECK(c.run(*shell, "relayout") == "relayout");
+  CHECK(c.takeRelayout());
+  CHECK_FALSE(c.takeRelayout());  // taken once
+  CHECK(has(c.run(*shell, "relayout now"), "usage"));
+  for (const char* word : {"relayout", "bridges"}) CHECK(has(DebugConsole::help(), word));
+}

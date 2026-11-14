@@ -1225,14 +1225,16 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     const bool latching = options_.slabSkin && options_.latchBoost != 1.0f &&
                           (options_.latchAxis == 0 || options_.latchAxis == 1);
     std::vector<std::uint32_t> latchIndices;
+    // A stacked shape in the lab is light throughout (M24.6).
+    const bool allLight = options_.stackedLight > 0.0f && surf.stacked();
     const auto isLit = [&](CellId c) {
-      return std::binary_search(lit.begin(), lit.end(), c);
+      return allLight || std::binary_search(lit.begin(), lit.end(), c);
     };
     const auto emitPatch = [&](const SurfacePatch& patch) {
       fxCellPlus = patch.cell + 1;
       view::Rgba fill = fillFor(patch.cell);
       // Light completes what the skin cannot: the cell's own colour as a hologram cell.
-      if (lightPass) fill.a = 0.7f;
+      if (lightPass) fill.a = allLight ? options_.stackedLight : 0.7f;
       // An LED capture: the captured cell's own emitters switch to the capture colour and
       // settle back through the per-emitter transition (no slab drawn over the board).
       view::Rgba shown = fill;
@@ -2324,6 +2326,39 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
         const std::size_t shadowsBefore = shadows.size();
         emitShadow(pl.x, pl.y, pl.z);
         if (shadows.size() > shadowsBefore) shadows.back().color[3] *= copy.opacity;
+      }
+    }
+    // A piece on a light bridge (M24.6) travels as a hologram: scan lines only,
+    // stretched 1.3x along the curve.
+    if (!mover.empty() && !options_.flat && anim->onBridge()) {
+      const auto s = anim->sample();
+      const float t = anim->progress();
+      const auto tangent = view::bridgeRide(anim->bridge(), std::min(1.0f, t + 0.01f)) -
+                           view::bridgeRide(anim->bridge(), std::max(0.0f, t - 0.01f));
+      const std::size_t sh = static_cast<std::size_t>(shape[mover.type]);
+      auto& group = byShape[sh];
+      const std::size_t before = group.size();
+      emitPiece(mover, s.x, s.y, s.z, false, kInvalidCell, true);
+      if (group.size() > before) {
+        Instance inst = group.back();
+        group.pop_back();
+        inst.panelSignal[3] = 1.0f;
+        const float flat = std::hypot(tangent.x, tangent.y);
+        if (std::abs(tangent.z) > flat) {
+          inst.scale[2] *= 1.3f;
+        } else if (flat > 1e-6f) {
+          // Turn the piece's own x onto the travel, then stretch it there.
+          const float yaw = std::atan2(tangent.y, tangent.x);
+          const std::array<float, 4> a{0, 0, std::sin(yaw / 2), std::cos(yaw / 2)};
+          const std::array<float, 4> b{inst.quat[0], inst.quat[1], inst.quat[2],
+                                       inst.quat[3]};
+          inst.quat[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+          inst.quat[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+          inst.quat[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+          inst.quat[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+          inst.scale[0] *= 1.3f;
+        }
+        byShapeFlourish[sh].push_back(inst);
       }
     }
     for (const view::MoveAnimation::Portal& portal : anim->openPortals()) {

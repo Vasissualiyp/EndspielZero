@@ -67,5 +67,12 @@ struct Rib {
 /// Draw the ribs as a chain of thin lab cylinders (metal, #2A2E35) in the lab batch.
 /// Returns the number of cylinder instances added.
 std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs);
+/// A lab `cylinder` instance from `a` to `b` (its axis is local +Z), `diameter` across,
+/// a touch longer than the segment so consecutive ones meet without a crack. Colour,
+/// material and signals are the caller's.
+[[nodiscard]] Instance cylinderBetween(const view::Vec3& a, const view::Vec3& b,
+                                       float diameter);
+/// Insert instances into the lab cylinder batch, keeping every lab batch contiguous.
+std::size_t insertLabCylinders(InstanceSet& set, const std::vector<Instance>& bars);
 
 }  // namespace cb::render

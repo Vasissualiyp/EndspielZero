@@ -178,6 +178,7 @@ void MoveAnimation::clear() {
   to_ = kInvalidCell;
   captureCell_ = kInvalidCell;
   captured_ = Piece{};
+  hasBridge_ = false;
 }
 
 void MoveAnimation::start(const ViewConfig& cfg, const std::vector<Placement>& placements,
@@ -469,6 +470,13 @@ MoveAnimation::Sample MoveAnimation::sample() const {
   Sample out;
   if (!active_ || runs_.empty()) return out;
   out.moving = true;
+  if (hasBridge_) {
+    const Vec3 at = bridgeRide(bridge_, progress());
+    out.x = at.x;
+    out.y = at.y;
+    out.z = at.z;
+    return out;
+  }
   const float t = std::clamp(elapsed_, 0.0f, duration_);
 
   for (std::size_t r = 0; r < runs_.size(); ++r) {

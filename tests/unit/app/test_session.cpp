@@ -638,3 +638,32 @@ TEST_CASE("review is refused where it cannot be rebuilt", "[unit][app][review]")
   CHECK_FALSE(s->apply(a).has_value());
   CHECK_FALSE(s->reviewPly());
 }
+
+TEST_CASE("in the lab, a move across a level seam rides the light bridge (M24.6)",
+          "[unit][app][rig]") {
+  for (const bool on : {false, true}) {
+    CAPTURE(on);
+    auto s = open("torus3d");
+    s->setLightBridges(on);
+    CHECK(s->lightBridges().size() == (on ? 1u : 0u));
+    // A legal move that leaves through the level seam (the third screen axis).
+    const auto& pos = s->game().position();
+    std::optional<Move> crossing;
+    for (const Move& m : s->game().legalMoves()) {
+      const Piece p = pos.at(m.from);
+      const auto path = view::tracePath(s->variant(), pos, p.type, p.orientation(), m);
+      for (const auto& step : path.steps)
+        if (step.kind == view::StepKind::Portal && step.faceAxis == 2) crossing = m;
+      if (crossing) break;
+    }
+    REQUIRE(crossing);
+    app::Action a;
+    a.kind = app::ActionKind::ClickCell;
+    a.cell = crossing->from;
+    REQUIRE(s->apply(a).has_value());
+    a.cell = crossing->to;
+    REQUIRE(s->apply(a).has_value());
+    REQUIRE(s->animation().active());
+    CHECK(s->animation().hasBridge() == on);
+  }
+}

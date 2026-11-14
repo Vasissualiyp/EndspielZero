@@ -191,6 +191,10 @@ struct BoardOptions {
   /// boost (`latchBoost`). Only read with `slabSkin`.
   int latchAxis{-1};
   float latchBoost{1.0f};
+  /// A stacked D >= 3 shape view in the lab (M24.6): no slab can hold it, so every tile
+  /// is drawn as projected light (hologram material, the projector opacity path) at this
+  /// opacity. 0 = off, the LED tiles as before. Set by the front end only in a lab game.
+  float stackedLight{0.0f};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.

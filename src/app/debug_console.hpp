@@ -49,6 +49,15 @@ class DebugConsole {
     latch_.reset();
     return out;
   }
+  /// M24.6: `bridges on|off` draws the light bridges between glued slabs that cannot
+  /// touch (default on); `relayout` asks the front end to replay the last layout change,
+  /// taken once.
+  [[nodiscard]] bool bridges() const noexcept { return bridges_; }
+  [[nodiscard]] bool takeRelayout() noexcept {
+    const bool out = relayout_;
+    relayout_ = false;
+    return out;
+  }
   /// The GUI supplies the `stretch` report (min/max stretch, pass-through count).
   void setSkinReport(std::function<std::string()> report) {
     skinReport_ = std::move(report);
@@ -68,6 +77,8 @@ class DebugConsole {
   bool wallFade_{true};
   bool skin_{true};
   std::optional<int> latch_;
+  bool bridges_{true};
+  bool relayout_{false};
   std::function<std::string()> rigReport_;
   std::function<std::string()> skinReport_;
   const io::LabDoc* labDoc_{nullptr};

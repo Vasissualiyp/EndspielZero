@@ -265,44 +265,32 @@ std::vector<CellId> passThroughCells(const PlaySurface& shaped, float gap) {
   return passThroughOf(shaped.patches(), shaped, gap);
 }
 
-std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs) {
-  std::vector<Instance> bars;
-  for (const Rib& rib : ribs) {
-    for (std::size_t i = 1; i < rib.points.size(); ++i) {
-      const view::Vec3 a = rib.points[i - 1];
-      const view::Vec3 b = rib.points[i];
-      const view::Vec3 d = b - a;
-      const float len = view::length(d);
-      if (len < 1e-5f) continue;
-      const view::Vec3 dir = d * (1.0f / len);
-      // The cylinder's axis is its local +Z: turn it onto the segment.
-      const view::Vec3 axis = view::cross(view::Vec3{0.0f, 0.0f, 1.0f}, dir);
-      const float w = 1.0f + dir.z;
-      std::array<float, 4> q{axis.x, axis.y, axis.z, w};
-      if (w < 1e-6f) q = {1.0f, 0.0f, 0.0f, 0.0f};
-      const float qn = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
-      for (float& c : q) c /= qn;
-      Instance bar{};
-      const view::Vec3 mid = (a + b) * 0.5f;
-      bar.center[0] = mid.x;
-      bar.center[1] = mid.y;
-      bar.center[2] = mid.z;
-      bar.scale[0] = kRibDiameter;
-      bar.scale[1] = kRibDiameter;
-      // A touch longer than the segment so consecutive bars meet without a crack.
-      bar.scale[2] = len + kRibDiameter * 0.5f;
-      std::copy(q.begin(), q.end(), bar.quat);
-      const view::Rgba metal = view::Rgba::hex(0x2A2E35);
-      bar.color[0] = metal.r;
-      bar.color[1] = metal.g;
-      bar.color[2] = metal.b;
-      bar.color[3] = 1.0f;
-      bar.material = shaderMaterial(view::Material::Metal, Cut::Plank, 0.0f);
-      bars.push_back(bar);
-    }
-  }
+Instance cylinderBetween(const view::Vec3& a, const view::Vec3& b, float diameter) {
+  Instance bar{};
+  const view::Vec3 d = b - a;
+  const float len = view::length(d);
+  if (len < 1e-5f) return bar;
+  const view::Vec3 dir = d * (1.0f / len);
+  // The cylinder's axis is its local +Z: turn it onto the segment.
+  const view::Vec3 axis = view::cross(view::Vec3{0.0f, 0.0f, 1.0f}, dir);
+  const float w = 1.0f + dir.z;
+  std::array<float, 4> q{axis.x, axis.y, axis.z, w};
+  if (w < 1e-6f) q = {1.0f, 0.0f, 0.0f, 0.0f};
+  const float qn = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+  for (float& c : q) c /= qn;
+  const view::Vec3 mid = (a + b) * 0.5f;
+  bar.center[0] = mid.x;
+  bar.center[1] = mid.y;
+  bar.center[2] = mid.z;
+  bar.scale[0] = diameter;
+  bar.scale[1] = diameter;
+  bar.scale[2] = len + diameter * 0.5f;
+  std::copy(q.begin(), q.end(), bar.quat);
+  return bar;
+}
+
+std::size_t insertLabCylinders(InstanceSet& set, const std::vector<Instance>& bars) {
   if (bars.empty()) return 0;
-  // Into the cylinder batch, keeping every lab batch contiguous: shapes, then files.
   auto& batch = set.labBatches[static_cast<std::size_t>(LabShape::Cylinder)];
   const std::uint32_t at = batch.first + batch.count;
   const auto n = static_cast<std::uint32_t>(bars.size());
@@ -316,6 +304,24 @@ std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs) {
     if (b.first >= at) b.first += n;
   batch.count += n;
   return bars.size();
+}
+
+std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs) {
+  std::vector<Instance> bars;
+  const view::Rgba metal = view::Rgba::hex(0x2A2E35);
+  for (const Rib& rib : ribs) {
+    for (std::size_t i = 1; i < rib.points.size(); ++i) {
+      if (view::length(rib.points[i] - rib.points[i - 1]) < 1e-5f) continue;
+      Instance bar = cylinderBetween(rib.points[i - 1], rib.points[i], kRibDiameter);
+      bar.color[0] = metal.r;
+      bar.color[1] = metal.g;
+      bar.color[2] = metal.b;
+      bar.color[3] = 1.0f;
+      bar.material = shaderMaterial(view::Material::Metal, Cut::Plank, 0.0f);
+      bars.push_back(bar);
+    }
+  }
+  return insertLabCylinders(set, bars);
 }
 
 }  // namespace cb::render

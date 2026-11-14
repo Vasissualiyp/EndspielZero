@@ -496,7 +496,10 @@ std::string DebugConsole::help() {
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
          "deploy | stow  replay the current game's slab deploy / stow in the lab\n"
          "focus <0..1>|auto  pin the room-light focus level during a lab game\n"
-         "rig          lab scale, mast groups, slab centres and their current poses\n"
+         "rig          lab scale, mast groups and racks, slab poses, light bridges\n"
+         "relayout     replay the lab game's last layout change (the gantry moves)\n"
+         "bridges on|off  light bridges between glued slabs that cannot touch "
+         "(default on)\n"
          "wallfade on|off  fade walls between the eye and the board (default on)\n"
          "skin on|off  the lab game's slab skin: rigid tiles, membrane, ribs (default "
          "on)\n"
@@ -541,7 +544,8 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
   const auto args = words(text);
   if (args[0] == "deploy" || args[0] == "stow" || args[0] == "focus" ||
       args[0] == "rig" || args[0] == "wallfade" || args[0] == "skin" ||
-      args[0] == "stretch" || args[0] == "latch") {
+      args[0] == "stretch" || args[0] == "latch" || args[0] == "relayout" ||
+      args[0] == "bridges") {
     std::string result;
     const auto& cmd = args[0];
     if (cmd == "deploy" || cmd == "stow") {
@@ -592,6 +596,22 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
       result = args.size() != 1 ? "usage: stretch"
                : report.empty() ? "no skinned shape in the lab"
                                 : report;
+    } else if (cmd == "bridges") {
+      if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
+        result = "usage: bridges on|off";
+      else {
+        bridges_ = args[1] == "on";
+        result = "bridges " + args[1];
+      }
+    } else if (cmd == "relayout") {
+      if (args.size() != 1)
+        result = "usage: relayout";
+      else if (!rigReport_ || rigReport_().empty())
+        result = "no game in the lab";
+      else {
+        relayout_ = true;
+        result = "relayout";
+      }
     } else if (cmd == "wallfade") {
       if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
         result = "usage: wallfade on|off";

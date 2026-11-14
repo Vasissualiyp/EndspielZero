@@ -19,6 +19,7 @@
 #include "view/camera.hpp"
 #include "view/game_end_fx.hpp"
 #include "view/layout.hpp"
+#include "view/light_bridge.hpp"
 #include "view/move_anim.hpp"
 #include "view/move_camera.hpp"
 #include "view/seams.hpp"
@@ -207,6 +208,15 @@ class Session {
   [[nodiscard]] float pullBack() const noexcept { return pullBack_; }
   /// Where the board is glued to itself, and in what colour. Built once per variant.
   [[nodiscard]] const view::SeamMap& seams() const noexcept { return seams_; }
+  /// M24.6: in a lab game, two slabs the variant glues but that cannot touch are joined
+  /// by a light bridge (`view::lightBridges`), and a move across that gluing rides it.
+  /// Off by default, so a board outside the lab never changes; the front end turns it on.
+  void setLightBridges(bool on);
+  [[nodiscard]] bool lightBridgesOn() const noexcept { return bridgesOn_; }
+  /// The bridges of the current layout; empty while off.
+  [[nodiscard]] const std::vector<view::LightBridge>& lightBridges() const noexcept {
+    return bridges_;
+  }
   /// The multiverse's branches, in lattice terms, for the view to draw connectors. Empty
   /// for a variant with no timelines.
   [[nodiscard]] std::vector<view::TimelineLink> timelineLinks() const;
@@ -502,6 +512,10 @@ class Session {
   view::OrbitCamera camera_;
   std::vector<view::Placement> placements_;
   view::SeamMap seams_;
+  bool bridgesOn_{false};
+  std::vector<view::LightBridge> bridges_;
+  /// Ride the light bridge the animation's route crosses, if any (M24.6).
+  void attachBridge(const view::MovePath& path);
   view::Theme theme_{view::Theme::console()};
   view::MoveAnimation anim_;
   /// The route the running animation is following, kept so `camera()` can plan a shot

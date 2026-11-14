@@ -8,6 +8,7 @@
 #include "position/position.hpp"
 #include "variant/variant.hpp"
 #include "view/layout.hpp"
+#include "view/light_bridge.hpp"
 #include "view/seams.hpp"
 #include "view/theme.hpp"
 
@@ -204,6 +205,21 @@ class MoveAnimation {
   /// cannot reconstruct the route itself (M17.15).
   [[nodiscard]] const MovePath& path() const noexcept { return path_; }
   [[nodiscard]] Sample sample() const;
+  /// M24.6: the running move crosses a light bridge, so the piece rides `ride` instead of
+  /// sinking through the seam (`view::bridgeRide`). Cleared by `start` and `clear`.
+  void setBridge(const BridgeRide& ride) noexcept {
+    if (!active_) return;
+    bridge_ = ride;
+    hasBridge_ = true;
+  }
+  [[nodiscard]] bool hasBridge() const noexcept { return active_ && hasBridge_; }
+  [[nodiscard]] const BridgeRide& bridge() const noexcept { return bridge_; }
+  /// True while the piece is on the bridge itself (between `kBridgeEnter` and
+  /// `kBridgeLeave` of the move): it travels as a hologram.
+  [[nodiscard]] bool onBridge() const noexcept {
+    const float t = progress();
+    return hasBridge() && t > kBridgeEnter && t < kBridgeLeave;
+  }
   /// Portals with any intensity left this frame, for the renderer to draw.
   [[nodiscard]] std::vector<Portal> openPortals() const;
 
@@ -222,6 +238,8 @@ class MoveAnimation {
   std::vector<float> runStart_;  ///< normalised time each run begins at
   std::vector<float> runEnd_;
   std::vector<Portal> portals_;
+  bool hasBridge_{false};
+  BridgeRide bridge_{};
 };
 
 }  // namespace cb::view

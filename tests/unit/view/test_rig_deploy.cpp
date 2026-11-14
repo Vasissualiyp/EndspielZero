@@ -3,6 +3,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <numbers>
 #include <random>
 
 #include "view/rig_deploy.hpp"
@@ -27,8 +28,8 @@ void addBoard(std::vector<Placement>& out, int n, float ox, float oy, float z,
               std::uint32_t slice) {
   for (int y = 0; y < n; ++y)
     for (int x = 0; x < n; ++x)
-      out.push_back({static_cast<CellId>(out.size()), ox + static_cast<float>(x) -
-                                                          .5f * static_cast<float>(n - 1),
+      out.push_back({static_cast<CellId>(out.size()),
+                     ox + static_cast<float>(x) - .5f * static_cast<float>(n - 1),
                      oy + static_cast<float>(y) - .5f * static_cast<float>(n - 1), z,
                      slice});
 }
@@ -39,7 +40,8 @@ std::vector<Placement> standard() {
 }
 std::vector<Placement> cube5() {
   std::vector<Placement> p;
-  for (std::uint32_t s = 0; s < 5; ++s) addBoard(p, 5, 0, 0, 2.5f * static_cast<float>(s), s);
+  for (std::uint32_t s = 0; s < 5; ++s)
+    addBoard(p, 5, 0, 0, 2.5f * static_cast<float>(s), s);
   return p;
 }
 constexpr float kBezel = .28f;
@@ -265,4 +267,209 @@ TEST_CASE("walls between the eye and the board fade", "[unit][view][rig]") {
     last = f;
   }
   CHECK(last == 1.0f);
+}
+
+// ---------------------------------------------------------------------------------------
+// M24.6: the multi-slab gantry.
+
+namespace {
+/// A row of `n` boards of `size` cells, `pitch` apart along X, at labScale 1.
+std::vector<Placement> row(int n, int size, float pitch) {
+  std::vector<Placement> p;
+  for (int s = 0; s < n; ++s)
+    addBoard(p, size, pitch * static_cast<float>(s), 0, 0, static_cast<std::uint32_t>(s));
+  return p;
+}
+float metres(float boardCells, float labScale) {
+  return boardCells / (20.0f * labScale);
+}
+}  // namespace
+
+TEST_CASE("routing keeps standard, cube5 and a spaced grid as they were",
+          "[unit][view][rig]") {
+  const auto v = shippedVolume();
+  for (const auto& p : {standard(), cube5()}) {
+    const auto slabs = slabsOf(p, kBezel);
+    const auto x = placeLayout(boundsOf(p), v);
+    const auto groups = mastGroups(slabs, x, v);
+    const auto routed = routeGroups(groups, v, x.labScale);
+    REQUIRE(routed.size() == 1);
+    CHECK(routed[0].slabs == groups[0].slabs);
+    CHECK_FALSE(routed[0].rack());
+    CHECK(routed[0].mastFoot.x == groups[0].mastFoot.x);
+    CHECK(routed[0].mastFoot.y == groups[0].mastFoot.y);
+    CHECK(routed[0].mastFoot.z == groups[0].mastFoot.z);
+    CHECK(spacingHolds(routed, x.labScale));
+  }
+  // 4x4 boards 7 cells apart: 0.35 m columns and 0.35 m on one bridge - no merge.
+  std::vector<Placement> grid;
+  addBoard(grid, 4, 0, 0, 0, 0);
+  addBoard(grid, 4, 7, 0, 0, 1);
+  addBoard(grid, 4, 0, 7, 0, 2);
+  addBoard(grid, 4, 7, 7, 0, 3);
+  const auto x = placeLayout(boundsOf(grid), v);
+  const auto routed = routeGroups(mastGroups(slabsOf(grid, kBezel), x, v), v, x.labScale);
+  CHECK(routed.size() == 4);
+  CHECK(spacingHolds(routed, x.labScale));
+}
+
+TEST_CASE("masts closer than the spacings merge into one rack with T-bar arms",
+          "[unit][view][rig]") {
+  const auto v = shippedVolume();
+  // Four 4x4 boards 6 cells apart: 0.30 m < 0.34 m between columns.
+  const auto p = row(4, 4, 6);
+  const auto slabs = slabsOf(p, kBezel);
+  const auto x = placeLayout(boundsOf(p), v);
+  const auto groups = mastGroups(slabs, x, v);
+  REQUIRE(groups.size() == 4);
+  CHECK_FALSE(spacingHolds(groups, x.labScale));
+  const auto routed = routeGroups(groups, v, x.labScale);
+  REQUIRE(routed.size() == 1);
+  CHECK(routed[0].rack());
+  CHECK(routed[0].arms.size() == 4);
+  CHECK(routed[0].slabs.size() == 4);
+  // The rack mast stands at the middle of its arms, on their line.
+  CHECK(routed[0].mastFoot.x == Approx(9.0f).margin(1e-4));
+  CHECK(routed[0].mastFoot.y == Approx(groups[0].mastFoot.y));
+  CHECK(spacingHolds(routed, x.labScale));
+  // Every slab is still carried exactly once.
+  std::vector<std::uint32_t> all = routed[0].slabs;
+  std::sort(all.begin(), all.end());
+  CHECK(all == std::vector<std::uint32_t>{0, 1, 2, 3});
+}
+
+TEST_CASE("the spacing rules: columns 0.34 m apart, carriages on a bridge 0.32 m",
+          "[unit][view][rig]") {
+  const auto group = [](float x, float y) {
+    MastGroup g;
+    g.mastFoot = {x, y, 0};
+    return g;
+  };
+  // At labScale 1 a metre is 20 cells.
+  CHECK(spacingHolds({group(0, 0), group(6.8f, 0)}, 1));
+  CHECK_FALSE(spacingHolds({group(0, 0), group(6.7f, 0)}, 1));
+  CHECK(spacingHolds({group(0, 0), group(0, 6.4f)}, 1));
+  CHECK_FALSE(spacingHolds({group(0, 0), group(0, 6.3f)}, 1));
+  // The rules are in metres: twice the lab scale needs twice the board distance.
+  CHECK_FALSE(spacingHolds({group(0, 0), group(6.8f, 0)}, 2));
+  CHECK(metres(13.6f, 2) == Approx(.34f));
+}
+
+TEST_CASE("departures: nearest the magazine first, a column together, within 1.4 s",
+          "[unit][view][rig]") {
+  const auto group = [](float x, float y) {
+    MastGroup g;
+    g.mastFoot = {x, y, 0};
+    return g;
+  };
+  const Vec3 magazine{40, 0, 0};
+  const auto d =
+      departureOrder({group(0, 0), group(20, 0), group(20, 10), group(-20, 0)}, magazine);
+  CHECK(d.count == 3);
+  CHECK(d.slot == std::vector<int>{1, 0, 0, 2});
+  CHECK(departureStep(1) == Approx(.12f));
+  CHECK(departureStep(4) == Approx(.12f));
+  CHECK(departureStep(20) == Approx(1.2f / 19));
+  for (const int n : {1, 2, 4, 11, 40, 200}) {
+    CAPTURE(n);
+    const float last =
+        kDeployFirstDeparture + departureStep(n) * static_cast<float>(n - 1);
+    CHECK(last <= 1.4f + 1e-5f);
+    CHECK(deployLastLock(n) == Approx(last + kSlabLockSeconds));
+  }
+  // No static fallback: any number of columns travels.
+  CHECK(deployLastLock(1) == Approx(1.62f));
+  CHECK(stowTravelSeconds(1) == Approx(kSlabLockSeconds));
+}
+
+TEST_CASE("a relayout lifts, travels, turns, lowers and settles", "[unit][view][rig]") {
+  RelayoutSpec s;
+  s.from = {0, 0, 0};
+  s.to = {10, -4, 2};
+  s.fromYaw = 0;
+  s.toYaw = std::numbers::pi_v<float> / 2;
+  const float end = relayoutSeconds(s);
+  CHECK(end ==
+        Approx(kRelayoutLiftSeconds + relayoutTravelSeconds(length(s.to - s.from)) +
+               kRelayoutLowerSeconds + kRelayoutSettleSeconds));
+  CHECK(relayoutTravelSeconds(0) == Approx(.5f));
+  CHECK(relayoutTravelSeconds(200) == Approx(.9f));
+  // Exact endpoints.
+  const auto a = slabRelayout(s, 0, 1);
+  CHECK(a.centre.x == s.from.x);
+  CHECK(a.centre.y == s.from.y);
+  CHECK(a.centre.z == s.from.z);
+  CHECK(a.yaw == s.fromYaw);
+  CHECK_FALSE(a.settled);
+  const auto b = slabRelayout(s, end, 1);
+  CHECK(b.centre.x == s.to.x);
+  CHECK(b.centre.y == s.to.y);
+  CHECK(b.centre.z == s.to.z);
+  CHECK(b.yaw == Approx(s.toYaw));
+  CHECK(b.settled);
+  // Lifted by `lift` once the lift is done, turning only during the travel.
+  const auto lifted = slabRelayout(s, kRelayoutLiftSeconds, 1);
+  CHECK(lifted.centre.z == Approx(s.from.z + s.lift));
+  CHECK(lifted.yaw == Approx(s.fromYaw));
+  // Continuous: no jump bigger than 0.6 cells or 0.1 rad in 1 ms.
+  auto last = a;
+  for (int ms = 1; ms <= static_cast<int>(end * 1000) + 5; ++ms) {
+    const auto p = slabRelayout(s, static_cast<float>(ms) / 1000.0f, 1);
+    CAPTURE(ms);
+    CHECK(length(p.centre - last.centre) <= .6f);
+    CHECK(std::abs(p.yaw - last.yaw) <= .1f);
+    last = p;
+  }
+  // A slab that does not move does not bob, and calm is the final pose.
+  RelayoutSpec still;
+  still.from = still.to = {3, 3, 3};
+  CHECK(slabRelayout(still, .2f, 1).centre.z == 3.0f);
+  CHECK(slabRelayout(s, .1f, .3f).centre.x == s.to.x);
+  CHECK(slabRelayout(s, .1f, .3f).settled);
+}
+
+TEST_CASE("slabs are matched across a layout change by their cells",
+          "[unit][view][rig]") {
+  // One 4x4 board; the new layout swaps its axes (a quarter turn) and moves it.
+  std::vector<Placement> before, after;
+  addBoard(before, 4, 0, 0, 0, 0);
+  for (const auto& p : before) after.push_back({p.cell, 10 - p.y, 5 + p.x, 0, 0});
+  // A second board only in the new layout.
+  addBoard(after, 4, 30, 0, 0, 1);
+  for (std::size_t i = 16; i < after.size(); ++i) after[i].cell += 100;
+  const auto m =
+      matchSlabs(before, slabsOf(before, kBezel), after, slabsOf(after, kBezel));
+  REQUIRE(m.size() == 2);
+  CHECK(m[0].from == 0);
+  CHECK(m[0].to == 0);
+  CHECK(m[0].yaw == Approx(std::numbers::pi_v<float> / 2).margin(1e-4));
+  CHECK(m[1].from == -1);
+  CHECK(m[1].to == 1);
+}
+
+TEST_CASE("a light-guide cable sags 8 % between its masts", "[unit][view][rig]") {
+  const Vec3 a{0, 0, 10}, b{20, 0, 10};
+  const auto pts = cablePoints(a, b);
+  REQUIRE(pts.size() == 13);
+  CHECK(length(pts.front() - a) < 1e-5f);
+  CHECK(length(pts.back() - b) < 1e-5f);
+  CHECK(pts[6].z == Approx(10 - .08f * 20).margin(.02f));
+  for (std::size_t i = 1; i < pts.size(); ++i) CHECK(pts[i].x > pts[i - 1].x);
+  for (const auto& p : pts) CHECK(p.z <= 10 + 1e-5f);
+}
+
+TEST_CASE("a layout fits the volume where the lab stands, or it does not",
+          "[unit][view][rig]") {
+  const auto v = shippedVolume();
+  const auto b = boundsOf(standard());
+  const auto x = placeLayout(b, v);
+  CHECK(layoutFits(b, x, v));
+  // The same board moved 10 cells along x still fits; 40 cells does not.
+  Bounds moved = b;
+  moved.minX += 10;
+  moved.maxX += 10;
+  CHECK(layoutFits(moved, x, v));
+  moved.minX += 30;
+  moved.maxX += 30;
+  CHECK_FALSE(layoutFits(moved, x, v));
 }
