@@ -756,31 +756,31 @@ name = "tutorial"
 target = [-0.45, 2.6, 1.15]
 distance = 1.1
 yaw = 8
-pitch = 12
+pitch = 22
 fov = 50
 
 [[station]]
 name = "library"
-target = [1.421985, 2.489449, 1.443332]
-distance = 0.6064
-yaw = -133.31894
-pitch = 11.71376
-fov = 78.64104
+target = [2.809901, 2.351864, 1.122881]
+distance = 1.95285
+yaw = -79.94032
+pitch = 18.10446
+fov = 64.99525
 
 [[station]]
 name = "watch"
-target = [2.8, 2.2, 2.4]
-distance = 4.0
+target = [2.3275, 1.5246, 1.2159]
+distance = 2.5
 yaw = -10
-pitch = 0
-fov = 65
+pitch = 10
+fov = 68
 
 [[station]]
 name = "settings"
 target = [-0.2, 2.4, 1]
 distance = 2.6
 yaw = 0
-pitch = 18
+pitch = 15
 fov = 55
 
 [[station]]
@@ -864,7 +864,7 @@ soft = 15
 [[station]]
 name = "sky"
 target = [0, 0.4, 2.78]
-distance = 1.6
+distance = 1.3
 yaw = 0
 pitch = -60
 fov = 50

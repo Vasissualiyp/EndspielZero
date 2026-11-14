@@ -14,6 +14,8 @@ struct Hologram {
     return !quads.empty() || !tokens.empty() || !lines.empty();
   }
 };
+/// How far a flat wall subject is tipped about its own horizontal axis, toward the room.
+inline constexpr float kWallSubjectTiltDegrees = 18.70188f;
 struct HologramPlacement {
   view::Vec3 centre{};
   float radius{1};

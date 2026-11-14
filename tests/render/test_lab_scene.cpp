@@ -153,13 +153,57 @@ TEST_CASE("lab station framing keeps the hardware visible and eyes inside the ro
         CAPTURE(anchor);
         const auto projected = view::transformPoint(camera.viewProj(16.f / 9),
                                                     lab->toWorld(*doc->anchor(anchor)));
-        // The menu panels occupy the right half; hardware must clear them.
+        CAPTURE(projected.x, projected.y);
+        // The menu panels occupy the right half; hardware must clear them. M24.4e:
+        // from a standing Library eye the rack lies right of the wall subject, so its
+        // front is only required on screen (it shows beside and through the pane).
         CHECK(projected.x > -.9f);
-        CHECK(projected.x < 0);
+        if (st.name == "library" && std::string_view(anchor) == "magazine.front")
+          CHECK(projected.x < .9f);
+        else
+          CHECK(projected.x < 0);
         CHECK(std::abs(projected.y) < .9f);
-        if (st.name != "menu" && std::string_view(anchor) == "projector.lens")
-          CHECK(projected.y > .5f);  // Below the retained 2-D library decoration.
+        // M24.4e: the old "bench lens below the 2-D library decoration" rule went
+        // with the Library's move to the wall; a standing Watch eye looks down.
       }
+    }
+  }
+}
+TEST_CASE("every lab station is a standing eye on the floor, clear of the furniture",
+          "[unit][render][lab]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto centre = *doc->anchor("gantry.centre");
+  const view::Vec3 origin{centre[0], centre[1], centre[2]};
+  const auto metres = [&](view::Vec3 world) { return world * (1 / kCellsPerMetre) + origin; };
+  const auto room = lab->roomBounds();
+  const auto lo = metres({room.minX, room.minY, room.minZ}),
+             hi = metres({room.maxX, room.maxY, room.maxZ});
+  REQUIRE(lo.z == Catch::Approx(0).margin(1e-4));
+  REQUIRE_FALSE(doc->stations.empty());
+  for (const auto& st : doc->stations) {
+    CAPTURE(st.name);
+    const auto eye = metres(lab->station(st.name)->eye());
+    CAPTURE(eye.x, eye.y, eye.z);
+    // No station is authored as seated, so every eye is a standing adult's.
+    CHECK(eye.z >= 1.45f);
+    CHECK(eye.z <= 1.75f);
+    CHECK(eye.x >= lo.x + .3f);
+    CHECK(eye.x <= hi.x - .3f);
+    CHECK(eye.y >= lo.y + .3f);
+    CHECK(eye.y <= hi.y - .3f);
+    // Furniture is any authored part a standing body could walk into: not the room
+    // shell, not a rig template, and with its bottom below head height.
+    for (const auto& part : doc->parts) {
+      if (part.group == "room" || part.group == "template") continue;
+      const auto b = lab->partBounds(part.name);
+      const auto bl = metres({b.minX, b.minY, b.minZ}), bh = metres({b.maxX, b.maxY, b.maxZ});
+      if (bl.z >= 1.8f) continue;
+      CAPTURE(part.name);
+      const float gap = std::max({bl.x - eye.x, eye.x - bh.x, bl.y - eye.y, eye.y - bh.y});
+      CHECK(gap >= .25f);
     }
   }
 }
@@ -304,6 +348,8 @@ TEST_CASE("menu station flights keep their eyes within the room", "[unit][render
         CHECK(std::abs(eye.y) < 3.f);
         CHECK(eye.z > 0);
         CHECK(eye.z < 2.7f);
+        // A standing player's flight may rise, but not above 1.9 m (M24.4e).
+        CHECK(eye.z <= 1.9f);
       }
     }
 }
@@ -436,22 +482,28 @@ TEST_CASE("library looks into the rack beside a large wall hologram",
   REQUIRE(lab);
   const auto cam = *lab->station("library");
   // M24.4c-3d-fix measures the view into the rack below, rather than the
-  // optical-axis yaw: the subjects deliberately occupy the left half.
-  CHECK(std::abs(cam.pitch) <= 12.f * std::numbers::pi_v<float> / 180);
+  // optical-axis yaw: the subjects deliberately occupy the left half. M24.4e
+  // amends the pitch limit from 12 to 20 degrees: a standing eye looks down on
+  // the board, which hangs below it.
+  CHECK(std::abs(cam.pitch) <= 20.f * std::numbers::pi_v<float> / 180);
   const auto origin = *doc->anchor("gantry.centre");
   const float eyeZ = cam.eye().z / kCellsPerMetre + origin[2];
-  CHECK(eyeZ >= 1.3f);
-  CHECK(eyeZ <= 1.6f);
+  // M24.4e's standing eye replaces M24.4c-3d-fix's 1.3-1.6 m.
+  CHECK(eyeZ >= 1.45f);
+  CHECK(eyeZ <= 1.75f);
   const auto front = lab->toWorld(*doc->anchor("magazine.front"));
   CHECK(view::dot(view::normalize(cam.eye() - front), view::Vec3{-1, 0, 0}) >=
         std::cos(50.f * std::numbers::pi_v<float> / 180));
   ProjectedBox rack;
   partBox(rack, *lab, cam, 16.f / 9, "magazine.frame");
   CAPTURE(rack.left, rack.right, rack.area());
+  // M24.4e: standing in front of the bench, the rack is right of the wall subject
+  // and reaches behind the Library pane (was right <= 0.56, box <= 25 %). The
+  // clipped rack hull in test_library_framing.cpp keeps 7-25 %.
   CHECK(rack.left >= .02f);
-  CHECK(rack.right <= .56f);
+  CHECK(rack.right <= .92f);
   CHECK(rack.area() >= .07f);
-  CHECK(rack.area() <= .25f);
+  CHECK(rack.area() <= .30f);
 }
 namespace {
 LabScene shippedLab() {

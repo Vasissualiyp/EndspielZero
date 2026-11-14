@@ -82,10 +82,10 @@ TEST_CASE("wall subjects fit their geometry and turn flat faces toward the room"
   auto lab = LabScene::create(*doc);
   REQUIRE(lab);
   const auto camera = *lab->station("library");
-  const auto lens = lab->toWorld(*doc->anchor("wallprojector.lens"));
-  const float radius = kWallHologramRadiusMetres * kCellsPerMetre;
-  HologramPlacement at{lens + view::Vec3{-(.1f * kCellsPerMetre + radius), 0, 0},
-                       radius,
+  const auto anchor = *doc->anchor("wallprojector.lens");
+  const auto lens = lab->toWorld(anchor);
+  HologramPlacement at{lab->toWorld(wallHologramCentre(anchor, kWallHologramRadiusMetres)),
+                       kWallHologramRadiusMetres * kCellsPerMetre,
                        0,
                        1,
                        1,

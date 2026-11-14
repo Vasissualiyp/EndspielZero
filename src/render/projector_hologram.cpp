@@ -217,7 +217,7 @@ Hologram overtureHologram(const OvertureScene& scene, const view::Theme& theme,
     const float flatness =
         1 -
         std::clamp(extent.y / (.35f * std::max({extent.x, extent.z, .001f})), 0.f, 1.f);
-    tilt = 37.26266f * kPi / 180 * flatness * flatness * (3 - 2 * flatness);
+    tilt = kWallSubjectTiltDegrees * kPi / 180 * flatness * flatness * (3 - 2 * flatness);
   }
   const Mapping map{bounds.centre(), reach, at.yaw + scene.cam.yaw, at, tilt};
   Hologram out;

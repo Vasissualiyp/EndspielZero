@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #ifdef CB_HAVE_IMGUI
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <numbers>
 #include "render/lab_scene.hpp"
@@ -162,6 +163,26 @@ Polygon subjectHull(const Hologram& h, const view::OrbitCamera& cam) {
   }
   return hull(std::move(points));
 }
+HologramPlacement wallPlacement(const LabScene& lab) {
+  const auto lens = *lab.doc().anchor("wallprojector.lens");
+  return {lab.toWorld(wallHologramCentre(lens, kWallHologramRadiusMetres)),
+          kWallHologramRadiusMetres * kCellsPerMetre,
+          0,
+          1,
+          1,
+          1,
+          lab.toWorld(lens),
+          true};
+}
+std::array<view::Vec3, 8> corners(const Instance& i) {
+  std::array<view::Vec3, 8> out;
+  for (std::size_t j = 0; j < 8; ++j) {
+    const view::Vec3 p{(j & 1 ? .5f : -.5f) * i.scale[0], (j & 2 ? .5f : -.5f) * i.scale[1],
+                       (j & 4 ? .5f : -.5f) * i.scale[2]};
+    out[j] = rotate(p, i.quat) + view::Vec3{i.center[0], i.center[1], i.center[2]};
+  }
+  return out;
+}
 Polygon partHull(const LabScene& lab, const view::OrbitCamera& cam,
                  const io::LabPart& part) {
   Bounds b{{-.5f, -.5f, -.5f}, {.5f, .5f, .5f}};
@@ -216,17 +237,7 @@ TEST_CASE("Library framing measures subjects and obstructing hardware",
   for (auto which : {app::Overture::Standard, app::Overture::Cylinder,
                      app::Overture::Torus, app::Overture::Cube5, app::Overture::Hyper4}) {
     const auto scene = overtureScene(which, 1, false, theme);
-    const auto lens = lab->toWorld(*doc->anchor("wallprojector.lens"));
-    const float radius = kWallHologramRadiusMetres * kCellsPerMetre;
-    const HologramPlacement at{lens + view::Vec3{-(.1f * kCellsPerMetre + radius), 0, 0},
-                               radius,
-                               0,
-                               1,
-                               1,
-                               1,
-                               lens,
-                               true};
-    const auto h = overtureHologram(scene, theme, at);
+    const auto h = overtureHologram(scene, theme, wallPlacement(*lab));
     const auto polygon = subjectHull(h, cam);
     REQUIRE(!polygon.empty());
     Point lo{1, 1}, hi{0, 0};
@@ -236,12 +247,66 @@ TEST_CASE("Library framing measures subjects and obstructing hardware",
         hi[j] = std::max(hi[j], p[j]);
       }
     const float coverage = area(polygon), height = hi[1] - lo[1];
-    CAPTURE(which, coverage, height, lo[0], hi[0]);
-    CHECK(coverage >= .09f);
+    CAPTURE(which, coverage, height, lo[0], hi[0], lo[1], hi[1]);
+    // M24.4e amends 9 % to 8.5 %: from a standing eye in front of the bench the
+    // subject is further away than from M24.4c-3d-fix's eye on the bench.
+    CHECK(coverage >= .085f);
     CHECK(height >= .22f);
     CHECK(lo[0] >= .02f);
     CHECK(hi[0] <= .56f);
-    CHECK(coverage > rackArea);
+    // A standing eye looks down, so the subject must not slip off the frame's foot.
+    CHECK(lo[1] >= .02f);
+    CHECK(hi[1] <= .98f);
+    // M24.4e drops "larger than the rack": from in front of the bench the rack is
+    // seen face-on to the right, mostly behind the Library pane.
+  }
+}
+TEST_CASE("the Library's standing eye looks down on the wall board (M24.4e)",
+          "[unit][render][lab][library-framing]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto eye = lab->station("library")->eye();
+  const auto at = wallPlacement(*lab);
+  const auto theme = view::Theme::manifold();
+  constexpr float deg = 180 / std::numbers::pi_v<float>;
+  // Flat subjects: every 2-D board, before it forms. The line of sight to the board's
+  // centre meets its plane at 20-40 degrees from the top side, and the centre sits below
+  // the eye by at least 0.15 of the board's projected (vertical) height.
+  for (auto which : {app::Overture::Standard, app::Overture::Cylinder, app::Overture::Torus}) {
+    CAPTURE(which);
+    const auto h = overtureHologram(overtureScene(which, 0, false, theme), theme, at);
+    REQUIRE_FALSE(h.quads.empty());
+    auto n = rotate({0, 0, 1}, h.quads.front().quat);
+    if (n.z < 0) n = n * -1.f;
+    float lo = 1e9f, hi = -1e9f;
+    for (const auto& q : h.quads) {
+      CHECK(std::abs(view::dot(rotate({0, 0, 1}, q.quat), n)) > .999f);
+      for (const auto& c : corners(q)) {
+        lo = std::min(lo, c.z);
+        hi = std::max(hi, c.z);
+      }
+    }
+    const float angle = std::asin(view::dot(n, view::normalize(eye - at.centre))) * deg;
+    CAPTURE(angle, eye.z, at.centre.z, hi - lo);
+    CHECK(angle >= 20);
+    CHECK(angle <= 40);
+    CHECK(at.centre.z <= eye.z - .15f * (hi - lo));
+  }
+  // Stacked and 3-D subjects, formed: the top layer is seen from above, at >= 10 degrees.
+  for (auto which : {app::Overture::Cube5, app::Overture::Hyper4, app::Overture::Torus}) {
+    CAPTURE(which);
+    const auto h = overtureHologram(overtureScene(which, 1, false, theme), theme, at);
+    REQUIRE_FALSE(h.quads.empty());
+    float top = -1e9f;
+    for (const auto& q : h.quads)
+      if (q.color[3] > 0)
+        for (const auto& c : corners(q)) top = std::max(top, c.z);
+    const view::Vec3 topCentre{at.centre.x, at.centre.y, top};
+    const float angle = std::asin((eye.z - top) / view::length(eye - topCentre)) * deg;
+    CAPTURE(angle, eye.z, top);
+    CHECK(angle >= 10);
   }
 }
 #endif

@@ -32,7 +32,15 @@ namespace cb::render {
 /// The manifold is the menu centrepiece; other bench previews retain their radius.
 inline constexpr float kMenuHologramRadiusMetres = .26f;
 inline constexpr float kHologramRadiusMetres = .20f;
-inline constexpr float kWallHologramRadiusMetres = .36332f;
+inline constexpr float kWallHologramRadiusMetres = .37179f;
+/// M24.4e: the wall subject hangs below its lens so a standing eye looks down on it.
+inline constexpr float kWallHologramDropMetres = .27029f;
+/// Where the wall projector centres its subject, in lab metres: in front of the lens
+/// (-X), 0.1 m clear of it, and lowered by `kWallHologramDropMetres`.
+[[nodiscard]] constexpr std::array<float, 3> wallHologramCentre(std::array<float, 3> lens,
+                                                             float radiusMetres) noexcept {
+  return {lens[0] - .10f - radiusMetres, lens[1], lens[2] - kWallHologramDropMetres};
+}
 
 struct HologramRequest {
   enum Kind { None, Manifold, Overture, Tesseract } kind{None};

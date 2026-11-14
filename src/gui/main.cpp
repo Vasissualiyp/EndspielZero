@@ -188,7 +188,7 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
   auto lens = *gLabScene->doc().anchor(wall ? "wallprojector.lens" : "projector.lens");
   const auto source = gLabScene->toWorld(lens);
   if (wall)
-    lens[0] -= .10f + req.radiusMetres;
+    lens = render::wallHologramCentre(lens, req.radiusMetres);
   else
     lens[2] += .32f - .20f + req.radiusMetres;
   const render::HologramPlacement at{gLabScene->toWorld(lens),
