@@ -192,7 +192,8 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
                                      req.alpha,
                                      req.scale,
                                      req.squashZ,
-                                     source};
+                                     source,
+                                     wall};
   render::Hologram h;
   switch (req.kind) {
     case render::HologramRequest::Manifold:

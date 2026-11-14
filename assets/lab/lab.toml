@@ -702,11 +702,11 @@ fov = 50
 
 [[station]]
 name = "library"
-target = [1.9095, 1.4131, 1.2759]
-distance = 3.0438
-yaw = -112.534
-pitch = 3.6237
-fov = 47.8809
+target = [1.421985, 2.489449, 1.443332]
+distance = 0.6064
+yaw = -133.31894
+pitch = 11.71376
+fov = 78.64104
 
 [[station]]
 name = "watch"

@@ -22,6 +22,7 @@ struct HologramPlacement {
   float scale{1};
   float squashZ{1};  ///< Historical name: squash along lens-to-centre, about the lens.
   view::Vec3 lens{};
+  bool wallSubject{false};  ///< Fit visible geometry; tip flat subjects toward the room.
 };
 /// Columns of a right-handed orthonormal frame; quaternion order is x,y,z,w.
 [[nodiscard]] std::array<float, 4> quatFromBasis(view::Vec3 t, view::Vec3 b,

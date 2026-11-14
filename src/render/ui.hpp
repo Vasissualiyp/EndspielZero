@@ -32,7 +32,7 @@ namespace cb::render {
 /// The manifold is the menu centrepiece; other bench previews retain their radius.
 inline constexpr float kMenuHologramRadiusMetres = .26f;
 inline constexpr float kHologramRadiusMetres = .20f;
-inline constexpr float kWallHologramRadiusMetres = .42f;
+inline constexpr float kWallHologramRadiusMetres = .36332f;
 
 struct HologramRequest {
   enum Kind { None, Manifold, Overture, Tesseract } kind{None};

@@ -83,7 +83,8 @@ TEST_CASE("Ui station clock camera interruption skip and projector phases",
     auto h = (*ui)->hologramRequest();
     CHECK(h.kind == HologramRequest::Manifold);
     CHECK(h.projector == HologramRequest::Projector::Bench);
-    CHECK(h.radiusMetres == Catch::Approx(std::lerp(.26f, .42f, .104f)));
+    CHECK(h.radiusMetres == Catch::Approx(std::lerp(kMenuHologramRadiusMetres,
+                                                    kWallHologramRadiusMetres, .104f)));
     CHECK(h.scale == Catch::Approx(.5));
     CHECK(h.alpha == h.scale);
     CHECK(h.squashZ == Catch::Approx(.25));
@@ -186,7 +187,7 @@ TEST_CASE("Ui station clock camera interruption skip and projector phases",
     h = (*ui)->hologramRequest();
     CHECK(h.kind == HologramRequest::Overture);
     CHECK(h.projector == HologramRequest::Projector::Wall);
-    CHECK(h.radiusMetres == .42f);
+    CHECK(h.radiusMetres == kWallHologramRadiusMetres);
     CHECK((*ui)->rackSlides()[0] == .06f);
     (*ui)->pinTransitionAge(.125f);
     frame();
