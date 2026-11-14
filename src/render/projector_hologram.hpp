@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <optional>
+
 #include "render/board_renderer.hpp"
 #include "render/overture_scene.hpp"
 namespace cb::render {
@@ -34,4 +36,10 @@ struct HologramPlacement {
                                          const HologramPlacement&);
 [[nodiscard]] Instance projectorBeam(view::Vec3 lens, const HologramPlacement&,
                                      const view::Theme&);
+/// The lens flare of the projector powering on (M24.7, brief 5): a glow disc at the lens,
+/// `roomUp` 0.05-0.25 mapped to a scale of 0 -> 1.6 -> 1 lens radii and alpha 0.5 -> 0.
+/// Empty outside that span. `lensRadius` is in world units.
+[[nodiscard]] std::optional<Instance> projectorFlare(view::Vec3 lens, view::Vec3 toward,
+                                                     float lensRadius, float roomUp,
+                                                     const view::Theme&);
 }  // namespace cb::render

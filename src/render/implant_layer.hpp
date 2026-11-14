@@ -16,6 +16,8 @@ struct ImplantParams {
   float pixelScale{1};
   float living{0}, warpK{0}, uiFocus{1}, veil{.45f};
   float tremor[2]{}, gaze[2]{};
+  /// M24.7: seconds into the launch handshake (-1 = none) and how visible the layer is.
+  float handshake{-1}, menuFade{1};
 
   struct Panel {
     float rect[4];

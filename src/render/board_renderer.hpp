@@ -295,6 +295,9 @@ class BoardRenderer {
   void setImplant(std::optional<ImplantParams> params) {
     implantParams_ = std::move(params);
   }
+  /// The eyelids and defocus of waking up (M24.7), drawn in the post composite before the
+  /// implant layer. Absent (the default) leaves the composite exactly as it was.
+  void setWake(std::optional<PostWake> wake) noexcept { wake_ = wake; }
   /// How far out of focus the board is, 0 to 1.
   ///
   /// Pause steps the camera back and throws the board out of focus so the menu in front
@@ -494,6 +497,7 @@ class BoardRenderer {
   std::array<VkImageView, kFramesInFlight> dofBoundColor_{};
   std::array<VkImageView, kFramesInFlight> dofBoundDepth_{};
   std::optional<DepthOfField> dof_;
+  std::optional<PostWake> wake_;
 
   // Local lighting (M24.2), one uniform buffer per frame in flight.
   GpuLightBlock lights_{neutralLightBlock()};

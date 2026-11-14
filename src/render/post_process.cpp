@@ -11,7 +11,7 @@
 namespace cb::render {
 namespace {
 
-/// Mirrors the fragment shaders' push block (32 bytes).
+/// Mirrors the fragment shaders' push block (64 bytes; the bloom passes read the first 32).
 struct PostPush {
   float texel[2]{};
   float strength{0};
@@ -19,9 +19,11 @@ struct PostPush {
   std::uint32_t seed{0};
   std::uint32_t first{0};
   float vignette{0};
-  float pad{0};
+  std::uint32_t wakeActive{0};
+  float lidTop{0}, lidBottom{0}, curve{0}, feather{0};
+  float blurPx{0}, exposureEv{0}, saturation{1}, lidGlow{0};
 };
-static_assert(sizeof(PostPush) == 32);
+static_assert(sizeof(PostPush) == 64);
 
 constexpr std::uint32_t kSetsPerSlot = 2 + kMaxBloomLevels;
 
@@ -428,7 +430,7 @@ PostStats PostProcess::stats(std::uint32_t slot) const { return impl_->slots[slo
 
 void PostProcess::record(VkCommandBuffer cmd, const OffscreenTarget& target,
                          const view::Theme& theme, float bloomStrength, float intensity,
-                         double seconds, std::uint32_t slot) {
+                         double seconds, std::uint32_t slot, const PostWake* wake) {
   Impl& m = *impl_;
   Impl::Slot& s = m.slots[slot];
   s.stats.bloomPasses = 0;
@@ -513,6 +515,19 @@ void PostProcess::record(VkCommandBuffer cmd, const OffscreenTarget& target,
   pc.grain = 0.012f * std::clamp(theme.grainAmount, 0.0f, 4.0f) * std::clamp(intensity, 0.0f, 1.0f);
   pc.seed = postFrameSeed(seconds);
   pc.vignette = kPostVignette;
+  if (wake != nullptr) {
+    pc.wakeActive = 1;
+    pc.texel[0] = 1.0f / static_cast<float>(target.width());
+    pc.texel[1] = 1.0f / static_cast<float>(target.height());
+    pc.lidTop = wake->lidTop;
+    pc.lidBottom = wake->lidBottom;
+    pc.curve = wake->curve;
+    pc.feather = wake->feather;
+    pc.blurPx = wake->blurPx;
+    pc.exposureEv = wake->exposureEv;
+    pc.saturation = wake->saturation;
+    pc.lidGlow = wake->lidGlow;
+  }
   pass(target.colorView(), target.width(), target.height(), VK_ATTACHMENT_LOAD_OP_DONT_CARE,
        m.composite, bloom ? s.sets[1] : s.sets[0], pc);
 }

@@ -13,6 +13,13 @@ struct PostStats {
   std::uint32_t bloomPasses{0};
 };
 
+/// The eyelids and the vision behind them while waking up (M24.7). Absent means the
+/// composite runs exactly as it always did.
+struct PostWake {
+  float lidTop{0}, lidBottom{0}, curve{0}, feather{.04f};
+  float blurPx{0}, exposureEv{0}, saturation{1}, lidGlow{0};
+};
+
 /// Frame-slot-owned HDR scene, dual-filter bloom and LDR composite (ADR-0025).
 /// The caller waits the slot fence before prepare/reuse, and completes GPU work before
 /// destruction, just as for BoardRenderer's instance buffers. No frame waits here.
@@ -39,7 +46,8 @@ class PostProcess {
   [[nodiscard]] PostStats stats(std::uint32_t slot) const;
   /// Scene resolve enters in COLOR_ATTACHMENT_OPTIMAL. Output leaves in that layout.
   void record(VkCommandBuffer cmd, const OffscreenTarget& target, const view::Theme& theme,
-              float bloomStrength, float intensity, double seconds, std::uint32_t slot);
+              float bloomStrength, float intensity, double seconds, std::uint32_t slot,
+              const PostWake* wake = nullptr);
 
  private:
   struct Impl;

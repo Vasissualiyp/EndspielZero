@@ -125,6 +125,13 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
     return label + (enabled ? "on" : "off");
   }
 
+  if (cmd == "wake" || cmd == "handshake") {
+    // M24.7: the frame loop watches these counters and replays the sequence.
+    auto& s = shell.settings();
+    ++(cmd == "wake" ? s.wakeReplay : s.handshakeReplay);
+    return cmd + " replaying";
+  }
+
   if (cmd == "warp" || cmd == "gaze") {
     auto& s = shell.settings();
     const auto number = [](const std::string& word)->std::optional<float> {
@@ -228,6 +235,7 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
     if (key == "guiScaleAuto") key = "gui_scale_auto";
     if (key == "livingVision") key = "living_vision";
     if (key == "implantFx") key = "implant_fx";
+    if (key == "wakeOnLaunch") key = "wake_on_launch";
     if (key == "labScene") key = "lab_scene";
     if (key == "hudFraming") key = "hud_framing";
     if (key == "guiScale") key = "gui_scale";
@@ -539,6 +547,8 @@ std::string DebugConsole::help() {
          "tremor [on|off], wander [on|off] micro-tremor and idle gaze wander\n"
          "gaze [<x> <y>|off|ui|room|target <key>] show or pin the gaze\n"
          "warp <k>|default override the lens warp strength\n"
+         "wake        replay the launch waking-up sequence: eyelids, blinks, handshake (M24.7)\n"
+         "handshake    replay only the implant handshake (set wakeOnLaunch false to skip it)\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"

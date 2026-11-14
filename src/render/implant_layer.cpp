@@ -22,10 +22,11 @@ struct GpuParams {
   float warm[4];
   float body[4];
   float living[4], gazeTremor[4], periphery[4], optics[4], deep[4];
+  float hand[4];  // handshake age, menu fade
 };
 static_assert(sizeof(ImplantParams::Panel) == 48);
 static_assert(offsetof(GpuParams, timing) == 832);
-static_assert(sizeof(GpuParams) == 992);
+static_assert(sizeof(GpuParams) == 1008);
 struct Gpu {
   VkImage image{VK_NULL_HANDLE};
   VkDeviceMemory memory{VK_NULL_HANDLE};
@@ -446,7 +447,8 @@ void ImplantLayer::composite(VkCommandBuffer cmd, const OffscreenTarget& target,
                     {params.gaze[0],params.gaze[1],params.tremor[0],params.tremor[1]},
                     {view::kPeripheryStart,view::kPeripheryFull,view::kPeripheryDesaturate,view::kPeripheryFringePixels},
                     {view::kUiAwayAlpha,view::kUiDefocusPixels,view::kPeripheryBlurPixels,0},
-                    {.2086f,.159f,.6724f,1}};
+                    {.2086f,.159f,.6724f,1},
+                    {params.handshake,params.menuFade,0,0}};
   std::memcpy(s.mapped, &p, sizeof(p));
   // Two separable Gaussian copies: half-size sigma 4 and quarter-size sigma 14,
   // both sigmas measured in full-resolution 1080p pixels. No per-pixel Poisson taps.

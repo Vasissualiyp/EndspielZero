@@ -3023,8 +3023,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     // Bloom, tone map, vignette and grain: the float scene becomes the target's colour,
     // left as an attachment exactly as the legacy resolve leaves it.
     if (hdr) {
-      post_.record(cmd, target, theme_, bloomStrength, push.visual[1], visualTime_,
-                   frame);
+      post_.record(cmd, target, theme_, bloomStrength, push.visual[1], visualTime_, frame,
+                   wake_ ? &*wake_ : nullptr);
     }
 
     // Defocus, in two separable passes that ping-pong between the target's two colour
@@ -3243,6 +3243,7 @@ BoardRenderer& BoardRenderer::operator=(BoardRenderer&& o) noexcept {
   std::swap(postEnabled_, o.postEnabled_);
   std::swap(bloomScale_, o.bloomScale_);
   std::swap(post_, o.post_);
+  std::swap(wake_, o.wake_);
   std::swap(implant_, o.implant_);
   std::swap(implantParams_, o.implantParams_);
   std::swap(postUnavailable_, o.postUnavailable_);

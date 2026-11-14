@@ -41,6 +41,7 @@
 #include "render/window.hpp"
 #include "view/game_end_fx.hpp"
 #include "view/implant_fx.hpp"
+#include "view/wake.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"
 #include "render/projector_hologram.hpp"
@@ -73,6 +74,9 @@ int gCliGazeUi = -1;
 std::string gCliGazeTarget;
 std::optional<float> gCliWarp;
 std::optional<float> gPanelT;
+/// M24.7 waking up: --wake 0|1, and --wake-t / --handshake-t pin the age of a capture.
+int gWake = -1;
+std::optional<float> gWakeT, gHandshakeT;
 std::string gStation;
 bool gLabCapture = false;
 std::optional<render::LabScene> gLabScene;
@@ -165,9 +169,92 @@ struct WarpInput {
 std::optional<std::array<float, 3>> gHoloMetres;
 bool gHoloIsWall = false;
 
+/// What the launch sequence decided for this frame (M24.7).
+struct WakeFrame {
+  /// The eyelids and defocus are drawn in the post composite.
+  bool postActive{false};
+  view::WakeState state;
+  float menuFade{1};
+  float handshake{-1};
+};
+/// The launch sequence's own clock and its skip. `launchSeconds` is the visual time of the
+/// first frame on the lab path; console `wake` re-arms it.
+struct WakeRun {
+  double launchSeconds{-1};
+  int seenWake{0}, seenHandshake{0};
+  bool finished{false};
+  double skippedAt{-1};
+  bool active{false}, blocking{false};
+} gWakeRun;
+/// The projector powers on with the room: 1 outside the sequence (M24.7 step 3).
+float gWakeRoomUp = 1.f;
+
+WakeFrame stepWake(const app::Settings& settings, bool capture, double seconds,
+                   float intensity, bool eligible) {
+  WakeFrame out;
+  gWakeRoomUp = 1.f;
+  gWakeRun.active = gWakeRun.blocking = false;
+  if (gWake == 0 || !eligible) return out;
+  auto& run = gWakeRun;
+  float age = 0;
+  if (capture) {
+    if (!gWakeT && !gHandshakeT) return out;
+    age = gWakeT ? *gWakeT : 3.0f + *gHandshakeT;
+  } else {
+    if (run.launchSeconds < 0 && !run.finished)
+      run.launchSeconds = settings.wakeOnLaunch || gWake == 1 ? seconds : -1;
+    if (settings.wakeReplay != run.seenWake) {
+      run.seenWake = settings.wakeReplay;
+      run.launchSeconds = seconds;
+      run.finished = false;
+      run.skippedAt = -1;
+    }
+    if (settings.handshakeReplay != run.seenHandshake) {
+      run.seenHandshake = settings.handshakeReplay;
+      run.launchSeconds = seconds - 3.0;
+      run.finished = false;
+      run.skippedAt = -1;
+    }
+    if (run.finished || run.launchSeconds < 0) return out;
+    if (run.skippedAt >= 0) {
+      // Skipped (or the cross-fade of a calm run): the plain 0.2 s cross-fade of brief 3.6.
+      const float t = static_cast<float>((seconds - run.skippedAt) / .2);
+      out.menuFade = std::clamp(t, 0.f, 1.f);
+      out.menuFade = out.menuFade * out.menuFade * (3.f - 2.f * out.menuFade);
+      if (t >= 1.f) run.finished = true;
+      return out;
+    }
+    age = static_cast<float>(seconds - run.launchSeconds);
+  }
+  out.state = view::wakeState(age, intensity);
+  if (out.state.done) {
+    run.finished = !capture;
+    return out;
+  }
+  out.postActive = true;
+  out.menuFade = out.state.menuFade;
+  out.handshake = out.state.handshake;
+  gWakeRoomUp = out.state.roomUp;
+  run.active = !capture;
+  run.blocking = run.active && !(out.state.handshake >= 1.f);
+  return out;
+}
+
+void applyWake(render::BoardRenderer& renderer, const WakeFrame& wake, std::uint32_t height) {
+  if (!wake.postActive) {
+    renderer.setWake(std::nullopt);
+    return;
+  }
+  const auto& w = wake.state;
+  renderer.setWake(render::PostWake{w.topEdge, w.bottomEdge, w.curve, w.feather,
+                                    w.blurFraction * static_cast<float>(height), w.exposureEv,
+                                    w.saturation, w.lidGlow});
+}
+
 void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
                      const app::Settings& settings, bool active, double seconds,
-                     std::uint32_t height, bool capture, const LivingFrame& living = {}) {
+                     std::uint32_t height, bool capture, const LivingFrame& living = {},
+                     const WakeFrame& wake = {}) {
   renderer.setDepthOfField(std::nullopt);
   if (!active) {
     renderer.setImplant(std::nullopt);
@@ -180,6 +267,13 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
   p.heartbeat = pulse ? view::heartbeat(seconds, p.intensity) : 1.f;
   p.dip = std::max(ui.saccadicDip(), living.dip);
   p.pixelScale = static_cast<float>(height) / 1080.f;
+  p.handshake = wake.handshake;
+  p.menuFade = wake.menuFade;
+  if (wake.handshake >= 0) {
+    // The veil rises with the menu's convergence (brief 3.6: resolve 0.6-1.8 s).
+    const float t = std::clamp((wake.handshake - .6f) / 1.2f, 0.f, 1.f);
+    p.globalSync = t * t * (3.f - 2.f * t);
+  }
   if (living.active) {
     p.living = 1;
     p.warpK = living.warpK;
@@ -225,7 +319,10 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
                                      const view::Theme& theme) {
   gHoloMetres.reset();
   if (!(gProjector >= 0 ? gProjector == 1 : settings.projector)) return {};
-  const auto req = ui.hologramRequest();
+  auto req = ui.hologramRequest();
+  // Waking up: the projector powers on with the room, growing out of its lens.
+  req.alpha *= gWakeRoomUp;
+  req.scale *= gWakeRoomUp;
   const bool wall = req.projector == render::HologramRequest::Projector::Wall;
   auto lens = *gLabScene->doc().anchor(wall ? "wallprojector.lens" : "projector.lens");
   const auto source = gLabScene->toWorld(lens);
@@ -255,6 +352,11 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
     case render::HologramRequest::None:
       break;
   }
+  // The lens flare of the power-on belongs to the beam, so it draws even before any of
+  // the hologram has grown.
+  if (const auto flare = render::projectorFlare(source, at.centre, .05f * render::kCellsPerMetre,
+                                                gWakeRoomUp, theme))
+    instances.holoBeam.push_back(*flare);
   if (!h.any()) return {};
   if (req.alpha > .05f) {
     gHoloMetres = lens;
@@ -465,6 +567,13 @@ void applyPost(render::BoardRenderer& renderer, const app::Settings& settings) {
     std::fprintf(stderr, "%s; continuing without it\n",
                  renderer.postUnavailable().c_str());
   }
+}
+
+/// Whether the HDR path will run, decided from the settings so a capture's first frame
+/// agrees with its last (applyPost only runs after the interface is built).
+bool postWanted(const render::BoardRenderer& renderer, const app::Settings& settings) {
+  return renderer.postAvailable() &&
+         (gPostOverride >= 0 ? gPostOverride == 1 : settings.postProcess);
 }
 
 void setFxTint(render::BoardFxState& fx, const render::BoardRenderer& renderer) {
@@ -1427,6 +1536,10 @@ int captureFrame(const std::string& variantName, const std::string& path,
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
     const bool implantActive = configureImplantUi(**ui, *shell, renderer->theme(),
                                                   lastLabTheme, holdsBoard(*shell, **ui));
+    const WakeFrame wake =
+        stepWake(shell->settings(), true, visualOrigin + sample.seconds, renderer->options().presentationIntensity,
+                 implantActive && postWanted(*renderer, shell->settings()));
+    applyWake(*renderer, wake, target->height());
     (*ui)->setStationCamera([&](app::Screen which) -> std::optional<view::OrbitCamera> {
       if (!labEnabled(*shell)) return std::nullopt;
       return gLabScene->station(stationFor(which));
@@ -1538,7 +1651,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                      target->width(), target->height(),
                                      renderer->options().presentationIntensity);
       setImplantFrame(*renderer, **ui, shell->settings(), implantActive,
-                      visualOrigin + sample.seconds, target->height(), true, living);
+                      visualOrigin + sample.seconds, target->height(), true, living, wake);
     }
 #endif
     renderer->setLights(room ? render::labLightBlock(
@@ -2030,7 +2143,8 @@ int main(int argc, char** argv) {
           "--projector 0|1 toggles the bench hologram; --overture-t 0..1 pins Library "
           "progress (alias --t).\n"
           "--lab 0|1 toggles the static lab room; --station <name> requires --lab 1.\n"
-          "--implant 0|1 toggles the organic lab menus; --panel-t SECONDS pins panel "
+          "--implant 0|1 toggles the organic lab menus; --wake 0|1 and --wake-t SECONDS "
+          "(--handshake-t SECONDS) play or pin the launch waking-up sequence; --panel-t SECONDS pins panel "
           "age.\n"
           "--heartbeat 0|1 toggles the implant double pulse (captures default off).\n"
           "--living 0|1 toggles living vision (lens warp, gaze, focus; M24.4c);\n"
@@ -2244,6 +2358,23 @@ int main(int argc, char** argv) {
       }
       ++i;
       gCliWarp = k;
+    } else if (arg == "--wake") {
+      if (i + 1 >= argc || (std::string_view(argv[i + 1]) != "0" &&
+                            std::string_view(argv[i + 1]) != "1")) {
+        std::fprintf(stderr, "--wake requires 0 or 1\n");
+        return 1;
+      }
+      gWake = std::string_view(argv[++i]) == "1" ? 1 : 0;
+    } else if (arg == "--wake-t" || arg == "--handshake-t") {
+      char* end = nullptr;
+      const char* value = i + 1 < argc ? argv[i + 1] : "";
+      const float age = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(age) || age < 0) {
+        std::fprintf(stderr, "%s requires finite seconds\n", arg.c_str());
+        return 1;
+      }
+      ++i;
+      (arg == "--wake-t" ? gWakeT : gHandshakeT) = age;
     } else if (arg == "--panel-t") {
       if (i + 1 >= argc) {
         std::fprintf(stderr, "--panel-t requires finite seconds\n");
@@ -2488,6 +2619,22 @@ int main(int argc, char** argv) {
     if (!SDL_WaitEventTimeout(&e, animating ? 8 : 100)) e.type = SDL_EVENT_POLL_SENTINEL;
     do {
       if (e.type == SDL_EVENT_POLL_SENTINEL) continue;
+      // Waking up (M24.7): any key or click ends the sequence. The menu is not usable
+      // until the handshake has converged, so that input is swallowed rather than acted on.
+      if (gWakeRun.active) {
+        const bool press = e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        if (press) {
+          // Already past the convergence: the menu is up, so there is nothing to fade in.
+          gWakeRun.skippedAt = gWakeRun.blocking ? visualSeconds : -1;
+          gWakeRun.finished = !gWakeRun.blocking;
+          gWakeRun.active = false;
+          if (gWakeRun.blocking) continue;
+        } else if (gWakeRun.blocking &&
+                   (e.type == SDL_EVENT_KEY_UP || e.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+                    e.type == SDL_EVENT_MOUSE_WHEEL || e.type == SDL_EVENT_TEXT_INPUT)) {
+          continue;
+        }
+      }
 #ifdef CB_HAVE_IMGUI
       const bool consumed = (*ui)->processEvent(e);
 #else
@@ -3010,6 +3157,10 @@ int main(int argc, char** argv) {
     (*ui)->setLabBackdrop(labBackdrop(*shell, holdsBoard(*shell, **ui)));
     const bool implantActive = configureImplantUi(**ui, *shell, renderer->theme(),
                                                   lastLabTheme, holdsBoard(*shell, **ui));
+    const WakeFrame wake =
+        stepWake(shell->settings(), false, visualSeconds, renderer->options().presentationIntensity,
+                 implantActive && postWanted(*renderer, shell->settings()));
+    applyWake(*renderer, wake, window->height());
     (*ui)->setStationCamera([&](app::Screen which) -> std::optional<view::OrbitCamera> {
       if (!labEnabled(*shell)) return std::nullopt;
       return gLabScene->station(stationFor(which));
@@ -3290,7 +3441,7 @@ int main(int argc, char** argv) {
                                      window->width(), window->height(),
                                      renderer->options().presentationIntensity);
       setImplantFrame(*renderer, **ui, shell->settings(), implantActive, visualSeconds,
-                      window->height(), false, living);
+                      window->height(), false, living, wake);
     }
 #endif
     auto frame = window->beginFrame();

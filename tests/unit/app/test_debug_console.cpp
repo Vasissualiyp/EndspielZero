@@ -405,3 +405,24 @@ TEST_CASE("living gaze controls are inspectable and living preference persists",
   CHECK_FALSE(app::Settings::load(path).livingVision);
   std::filesystem::remove(path);
 }
+
+TEST_CASE("wake and handshake replay requests and the launch preference persist",
+          "[unit][app][wake]") {
+  auto shell=app::Shell::create({"standard"},{}); REQUIRE(shell);
+  app::DebugConsole c;
+  CHECK(shell->settings().wakeOnLaunch);
+  CHECK(shell->settings().wakeReplay==0);
+  CHECK(c.run(*shell,"wake")=="wake replaying");
+  CHECK(shell->settings().wakeReplay==1);
+  CHECK(c.run(*shell,"handshake")=="handshake replaying");
+  CHECK(shell->settings().handshakeReplay==1);
+  CHECK(shell->settings().wakeReplay==1);
+  CHECK(c.run(*shell,"set wakeOnLaunch false")=="wakeOnLaunch is now false");
+  CHECK_FALSE(shell->settings().wakeOnLaunch);
+  CHECK(has(app::DebugConsole::help(),"wake"));
+  CHECK(has(app::DebugConsole::help(),"handshake"));
+  const auto path=std::filesystem::temp_directory_path()/"cb-wake-settings.conf";
+  REQUIRE(shell->settings().save(path));
+  CHECK_FALSE(app::Settings::load(path).wakeOnLaunch);
+  std::filesystem::remove(path);
+}

@@ -34,6 +34,10 @@ struct Settings {
   bool implantFx{true};
   bool heartbeat{true};
   bool livingVision{true};
+  /// M24.7: play the waking-up sequence once at launch (lab and post on).
+  bool wakeOnLaunch{true};
+  /// Run-only: console `wake` / `handshake` bump these and the frame loop replays.
+  int wakeReplay{0}, handshakeReplay{0};
   // Run-only perception controls, shared by CLI, console and the frame loop.
   bool tremor{true}, gazeWander{true};
   std::optional<view::Vec2f> gazePin;

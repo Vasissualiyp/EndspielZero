@@ -78,6 +78,8 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.labScene = asBool(value);
     else if (key == "living_vision")
       s.livingVision = asBool(value);
+    else if (key == "wake_on_launch")
+      s.wakeOnLaunch = asBool(value);
     else if (key == "implant_fx")
       s.implantFx = asBool(value);
     else if (key == "heartbeat")
@@ -236,6 +238,7 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "gui_scale_auto = " << boolText(guiScaleAuto) << '\n';
   out << "lab_scene = " << boolText(labScene) << '\n';
   out << "living_vision = " << boolText(livingVision) << '\n';
+  out << "wake_on_launch = " << boolText(wakeOnLaunch) << '\n';
   out << "implant_fx = " << boolText(implantFx) << '\n';
   out << "heartbeat = " << boolText(heartbeat) << '\n';
   out << "projector = " << boolText(projector) << '\n';

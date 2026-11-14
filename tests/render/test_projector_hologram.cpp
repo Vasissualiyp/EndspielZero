@@ -377,4 +377,27 @@ TEST_CASE("wall projector beam and collapse follow minus X without rotating the 
     CHECK(collapsed.lines[n].center[2] == Catch::Approx(normal.lines[n].center[2]));
   }
 }
+
+TEST_CASE("the lens flare of power-on peaks at 1.6 lens radii and fades out",
+          "[unit][render][hologram][wake]") {
+  const view::Vec3 lens{30, 20, 25}, toward{19.6f, 20, 25};
+  const auto theme = view::Theme::manifold();
+  CHECK_FALSE(projectorFlare(lens, toward, 4.f, 0.f, theme));
+  CHECK_FALSE(projectorFlare(lens, toward, 4.f, .04f, theme));
+  CHECK_FALSE(projectorFlare(lens, toward, 4.f, .26f, theme));
+  const auto start = projectorFlare(lens, toward, 4.f, .05f, theme);
+  REQUIRE(start);
+  CHECK(start->scale[0] == Catch::Approx(0).margin(1e-4));
+  CHECK(start->color[3] == Catch::Approx(.5f * theme.ember.a));
+  const auto peak = projectorFlare(lens, toward, 4.f, .15f, theme);
+  REQUIRE(peak);
+  CHECK(peak->scale[0] == Catch::Approx(2 * 1.6f * 4.f));
+  CHECK(peak->color[3] < start->color[3]);
+  const auto end = projectorFlare(lens, toward, 4.f, .2499f, theme);
+  REQUIRE(end);
+  CHECK(end->scale[0] == Catch::Approx(2 * 1.f * 4.f).margin(.05));
+  CHECK(end->color[3] < .01f);
+  const auto axis = rotated({0, 0, 1}, peak->quat);
+  CHECK(axis.x == Catch::Approx(-1));  // the disc faces along the beam
+}
 #endif

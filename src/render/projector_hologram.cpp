@@ -280,4 +280,17 @@ Instance projectorBeam(view::Vec3 lens, const HologramPlacement& at,
                                at.squashZ;
   return line(lens, base, .10f * kCellsPerMetre, theme.ember, .12f * at.alpha);
 }
+
+std::optional<Instance> projectorFlare(view::Vec3 lens, view::Vec3 toward, float lensRadius,
+                                       float roomUp, const view::Theme& theme) {
+  constexpr float kFrom = .05f, kTo = .25f;
+  if (!(roomUp >= kFrom && roomUp < kTo)) return std::nullopt;
+  const float f = (roomUp - kFrom) / (kTo - kFrom);
+  const float scale = f < .5f ? 1.6f * (f / .5f) : 1.6f - .6f * ((f - .5f) / .5f);
+  auto out = instance(lens, {2 * scale * lensRadius, 2 * scale * lensRadius, .004f * kCellsPerMetre},
+                      theme.ember, .5f * (1.f - f));
+  out.material = shaderMaterial(view::Material::Glow, Cut::Plank, 0);
+  alongZ(out, toward - lens);
+  return out;
+}
 }  // namespace cb::render
