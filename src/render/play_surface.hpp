@@ -122,11 +122,12 @@ struct ShapeBeat {
 /// boundaries the surface functions use (view/morph.hpp), eased with shapeEase, so a rail
 /// colours in exactly while its two edges travel to meet. Pure; 1 for any kind/axis with
 /// no stage (so formed = 1 is bit-for-bit the shipped mesh).
-[[nodiscard]] float seamRailWeight(app::SurfaceKind kind, int axis, float formed) noexcept;
+[[nodiscard]] float seamRailWeight(app::SurfaceKind kind, int axis,
+                                   float formed) noexcept;
 
-/// The plinth's share of a surface's first morph stage: the slab under the flat board fades
-/// out over the first quarter of the stage in which the sheet starts to curl, so it is
-/// gone before the sheet has lifted far off it.
+/// The plinth's share of a surface's first morph stage: the slab under the flat board
+/// fades out over the first quarter of the stage in which the sheet starts to curl, so it
+/// is gone before the sheet has lifted far off it.
 inline constexpr float kPlinthFadeShare = 0.25f;
 /// 1 at formed 0 (the slab the ordinary board stands on), 0 from
 /// kPlinthFadeShare * firstStageEnd(kind) on, shapeEase'd between. firstStageEnd: Tube 1,
@@ -232,6 +233,15 @@ inline constexpr int kSurfaceCorners = (kSurfaceSubdiv + 1) * (kSurfaceSubdiv + 
 /// through a translucent outer shell reaches the sheet the eye settles on behind it
 /// (M17.22).
 inline constexpr float kGhostPickVisibility = 0.5f;
+
+/// The slab skin (M24.5b): how much each cell's footprint is stretched by the current
+/// embedding, relative to the flat board, along the files (u) and ranks (v).
+/// 1 = as flat; > 1 stretched; < 1 compressed.
+struct CellStretch {
+  CellId cell{kInvalidCell};
+  float u{1};
+  float v{1};
+};
 
 /// One square, as the piece of surface it actually is.
 ///
@@ -424,7 +434,37 @@ class PlaySurface {
   [[nodiscard]] bool blocked(const view::Vec3& eye, const view::Vec3& target,
                              float eps) const;
 
+  /// The slab skin (M24.5b), built only when the pose asks for `skin` on a parametrised
+  /// 2-D shape; empty otherwise. `membranePatches` is the unshrunk sheet behind the
+  /// tiles (the whole cell footprint, so the sheet has no slits; no entry for a
+  /// pass-through cell), `stretch` the per-cell stretch in the
+  /// order of `seats()`, and `passThrough` the cells drawn as light, sorted by CellId.
+  [[nodiscard]] const std::vector<SurfacePatch>& membranePatches() const noexcept {
+    return membrane_;
+  }
+  [[nodiscard]] const std::vector<CellStretch>& stretch() const noexcept {
+    return stretch_;
+  }
+  [[nodiscard]] const std::vector<CellId>& passThrough() const noexcept {
+    return passThrough_;
+  }
+  /// The warp this surface samples, and its lattice extents.
+  [[nodiscard]] app::SurfaceKind kind() const noexcept { return kind_; }
+  [[nodiscard]] int files() const noexcept { return nx_; }
+  [[nodiscard]] int ranks() const noexcept { return nz_; }
+  /// Which lattice axes close on themselves (0 files, 1 ranks), and whether crossing
+  /// that axis's seam reverses the other coordinate (Moebius files, Klein ranks).
+  [[nodiscard]] bool wraps(int axis) const noexcept {
+    return axis == 0 ? wrapU_ : wrapV_;
+  }
+  [[nodiscard]] bool flipsAcross(int axis) const noexcept {
+    return axis == 0 ? flipU_ : flipV_;
+  }
+
  private:
+  /// The surface point at a lattice fraction (0..1 per axis), slide folded in: the one
+  /// sampler the patch loop, the seats and `pointAt` share.
+  [[nodiscard]] view::Vec3 sampleAt(float u, float v) const;
   /// The three- and four-dimensional shapes (M17.12): one flat tile per cell from
   /// `playShapePosition`, since above two dimensions the "surface" is a stack of sheets
   /// rather than one parametrised sheet. The pose's slide offsets the periodic axes and
@@ -449,6 +489,20 @@ class PlaySurface {
   float su_{0.0f};
   float sv_{0.0f};
   view::Bounds bounds_{};
+  bool wrapU_{false};
+  bool wrapV_{false};
+  bool flipU_{false};
+  bool flipV_{false};
+  std::vector<SurfacePatch> membrane_;
+  std::vector<CellStretch> stretch_;
+  std::vector<CellId> passThrough_;
 };
+
+/// The per-cell stretch of `shaped` against `flat` (the same variant at `formed = 0`):
+/// the surface length across each cell along u, from its low u-edge midpoint through its
+/// centre to its high one (two half-cell chords), over the same on the flat pose; v
+/// likewise. In the order of `shaped.seats()`. Empty for a stacked shape.
+[[nodiscard]] std::vector<CellStretch> cellStretch(const PlaySurface& shaped,
+                                                   const PlaySurface& flat);
 
 }  // namespace cb::render

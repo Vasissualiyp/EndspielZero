@@ -498,6 +498,10 @@ std::string DebugConsole::help() {
          "focus <0..1>|auto  pin the room-light focus level during a lab game\n"
          "rig          lab scale, mast groups, slab centres and their current poses\n"
          "wallfade on|off  fade walls between the eye and the board (default on)\n"
+         "skin on|off  the lab game's slab skin: rigid tiles, membrane, ribs (default "
+         "on)\n"
+         "stretch      min/max cell stretch (u, v) and the pass-through cell count\n"
+         "latch <axis>  flash the seam latch on axis 0 (files) or 1 (ranks)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"
          "boot                     replay the board's power-on sequence\n"
@@ -536,7 +540,8 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
   if (words(text).empty()) return {};
   const auto args = words(text);
   if (args[0] == "deploy" || args[0] == "stow" || args[0] == "focus" ||
-      args[0] == "rig" || args[0] == "wallfade") {
+      args[0] == "rig" || args[0] == "wallfade" || args[0] == "skin" ||
+      args[0] == "stretch" || args[0] == "latch") {
     std::string result;
     const auto& cmd = args[0];
     if (cmd == "deploy" || cmd == "stow") {
@@ -559,9 +564,8 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
       if (args.size() == 2 && args[1] == "auto") {
         focusPin_.reset();
         result = "focus auto";
-      } else if (args.size() == 2 &&
-                 std::sscanf(args[1].c_str(), "%f", &level) == 1 && level >= 0 &&
-                 level <= 1) {
+      } else if (args.size() == 2 && std::sscanf(args[1].c_str(), "%f", &level) == 1 &&
+                 level >= 0 && level <= 1) {
         focusPin_ = level;
         char buf[32];
         std::snprintf(buf, sizeof(buf), "focus %.2f", static_cast<double>(level));
@@ -569,6 +573,25 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
       } else {
         result = "usage: focus <0..1>|auto";
       }
+    } else if (cmd == "skin") {
+      if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
+        result = "usage: skin on|off";
+      else {
+        skin_ = args[1] == "on";
+        result = "skin " + args[1];
+      }
+    } else if (cmd == "latch") {
+      if (args.size() != 2 || (args[1] != "0" && args[1] != "1"))
+        result = "usage: latch <axis>  (0 files, 1 ranks)";
+      else {
+        latch_ = args[1] == "1" ? 1 : 0;
+        result = "latch " + args[1];
+      }
+    } else if (cmd == "stretch") {
+      const std::string report = skinReport_ ? skinReport_() : std::string{};
+      result = args.size() != 1 ? "usage: stretch"
+               : report.empty() ? "no skinned shape in the lab"
+                                : report;
     } else if (cmd == "wallfade") {
       if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
         result = "usage: wallfade on|off";
@@ -578,9 +601,9 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
       }
     } else {
       const std::string report = rigReport_ ? rigReport_() : std::string{};
-      result = args.size() != 1    ? "usage: rig"
-               : report.empty()    ? "no game in the lab"
-                                   : report;
+      result = args.size() != 1 ? "usage: rig"
+               : report.empty() ? "no game in the lab"
+                                : report;
     }
     history_.push_back(text);
     log_.push_back("> " + text);

@@ -183,6 +183,14 @@ struct BoardOptions {
   /// reads this; 0 is the calm presentation (static emitters and footprints stay, no
   /// glitches, no trail). A later calm setting is just this scalar.
   float presentationIntensity{1.0f};
+  /// The lab's slab skin (M24.5b): on a lab game's parametrised 2-D shape the tiles keep
+  /// their flat size, the membrane shows behind them and a Klein bottle's pass-through
+  /// band is drawn as light. Set by the front end only on the lab game path.
+  bool slabSkin{false};
+  /// A seam latch flash (M24.5b): the wrap axis whose rail is boosted (-1 none) and the
+  /// boost (`latchBoost`). Only read with `slabSkin`.
+  int latchAxis{-1};
+  float latchBoost{1.0f};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -230,6 +238,17 @@ struct InstanceSet {
   /// Which instance carries the transform for that mesh - an identity one, because the
   /// vertices are already in world space. The pipeline needs *an* instance bound.
   std::uint32_t surfaceInstance{0};
+  /// The slab skin splits the surface mesh by material (M24.5b): the LED tiles, the light
+  /// band (hologram), the membrane (matte with a sub-flag) and, during a seam latch, a
+  /// blended glow strip each draw their own index range with their own identity instance.
+  /// Empty everywhere else, where the whole mesh is one draw with `surfaceInstance`.
+  struct SurfaceDraw {
+    std::uint32_t firstIndex{0};
+    std::uint32_t indexCount{0};
+    std::uint32_t instance{0};
+    bool blend{false};  ///< the latch strip: blended, drawn last
+  };
+  std::vector<SurfaceDraw> surfaceDraws;
 
   /// The capture flourish (M18.1): the captured piece shrinking out and the blood flash
   /// at the square it stood on. Kept apart from `instances` because these must be drawn

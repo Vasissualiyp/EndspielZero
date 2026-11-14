@@ -415,3 +415,29 @@ TEST_CASE("deploy, stow, focus, rig and wallfade reach the lab game (M24.5)",
   for (const char* word : {"deploy", "stow", "focus", "rig", "wallfade"})
     CHECK(has(DebugConsole::help(), word));
 }
+
+TEST_CASE("the console switches the slab skin, forces a latch and reports the stretch",
+          "[unit][app][skin]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(c.skin());
+  CHECK(c.run(*shell, "skin off") == "skin off");
+  CHECK_FALSE(c.skin());
+  CHECK(c.run(*shell, "skin on") == "skin on");
+  CHECK(c.skin());
+  CHECK(has(c.run(*shell, "skin maybe"), "usage"));
+
+  CHECK_FALSE(c.takeLatch().has_value());
+  CHECK(c.run(*shell, "latch 1") == "latch 1");
+  const auto latch = c.takeLatch();
+  REQUIRE(latch.has_value());
+  CHECK(*latch == 1);
+  CHECK_FALSE(c.takeLatch().has_value());  // taken once
+  CHECK(has(c.run(*shell, "latch 2"), "usage"));
+
+  CHECK(has(c.run(*shell, "stretch"), "no skinned shape"));
+  c.setSkinReport([] { return std::string("u 0.99..0.99"); });
+  CHECK(c.run(*shell, "stretch") == "u 0.99..0.99");
+  for (const char* word : {"skin", "stretch", "latch"})
+    CHECK(has(DebugConsole::help(), word));
+}

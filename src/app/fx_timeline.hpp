@@ -58,6 +58,19 @@ class FxTimeline {
   [[nodiscard]] std::optional<End> end(double now) const;
   /// The power-up after an undo out of a finished game, for `kPowerUpSeconds`.
   [[nodiscard]] std::optional<End> powerUp(double now) const;
+  /// A seam latch (M24.5b): the front end stamps one when the live morph closes a wrap
+  /// axis (`render::latchCrossed`), or the console's `latch <axis>` forces one. Only the
+  /// newest is kept; it lasts `kLatchSeconds`.
+  struct LatchFx {
+    int axis;
+    float age;
+  };
+  static constexpr float kLatchSeconds = 0.25f;
+  void latch(int axis, double now) noexcept {
+    latchAxis_ = axis;
+    latchStart_ = now;
+  }
+  [[nodiscard]] std::optional<LatchFx> latchAge(double now) const;
   /// Whether any of the above is running (what the frame loop keeps redrawing for).
   [[nodiscard]] bool animating(double now) const;
 
@@ -82,6 +95,8 @@ class FxTimeline {
   std::optional<view::EndFx> endFx_;
   std::optional<double> powerUpStart_;
   std::optional<view::EndFx> powerUpFx_;
+  int latchAxis_{0};
+  std::optional<double> latchStart_;
 };
 
 }  // namespace cb::app

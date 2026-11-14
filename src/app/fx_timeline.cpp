@@ -150,9 +150,16 @@ std::optional<FxTimeline::End> FxTimeline::powerUp(double now) const {
   return End{static_cast<float>(age), *powerUpFx_};
 }
 
+std::optional<FxTimeline::LatchFx> FxTimeline::latchAge(double now) const {
+  if (!latchStart_) return std::nullopt;
+  const double age = now - *latchStart_;
+  if (age < 0.0 || age >= static_cast<double>(kLatchSeconds)) return std::nullopt;
+  return LatchFx{latchAxis_, static_cast<float>(age)};
+}
+
 bool FxTimeline::animating(double now) const {
   return captureAge(now) || booting(now) || ripple(now) || end(now) || powerUp(now) ||
-         turnAge(now) || moveAge(now) || thinkingAge(now);
+         turnAge(now) || moveAge(now) || thinkingAge(now) || latchAge(now);
 }
 
 }  // namespace cb::app

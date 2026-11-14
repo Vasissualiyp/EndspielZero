@@ -50,6 +50,7 @@
 #include "render/play_surface.hpp"
 #include "render/projector_hologram.hpp"
 #include "render/shape_sequence.hpp"
+#include "render/slab_skin.hpp"
 #include "render/ui.hpp"
 #endif
 
@@ -228,13 +229,19 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
 float gDeployT = -1.0f;
 float gStowT = -1.0f;
 float gFocus = -1.0f;
+/// --skin 0|1: the lab game's slab skin (M24.5b; default on, the console's `skin`
+/// switches it live). --latch-t pins a seam latch's age on --latch-axis for captures.
+int gSkin = -1;
+bool gSkinOn = true;
+float gLatchT = -1.0f;
+int gLatchAxis = 1;
 
 /// A game happens in the lab (M24.5): the lab is on, a game is drawn (or held while it
 /// stows) and nothing else owns the camera.
 bool labGame(const app::Shell& shell, bool hold) {
-  return labEnabled(shell) && gStation.empty() && shell.hasGame() && !shell.attracting() &&
-         gLabScene->doc().deploy.has_value() && (shell.showsBoard() || hold) &&
-         shell.screen() != app::Screen::Editor;
+  return labEnabled(shell) && gStation.empty() && shell.hasGame() &&
+         !shell.attracting() && gLabScene->doc().deploy.has_value() &&
+         (shell.showsBoard() || hold) && shell.screen() != app::Screen::Editor;
 }
 
 /// The rig around the current layout, cached per session and layout (M24.6 animates a
@@ -343,14 +350,16 @@ view::OrbitCamera rigFlightCamera(const RigFrame& rig, const view::OrbitCamera& 
     const auto slab = layout.groups.front().slabs.front();
     // On the slab until it has run along the rail, then onto the game's target.
     const float overhead = layout.paths[slab].departure + view::kSlabTravelEnd;
-    const auto follow = rig.poses[slab].centre +
-                        (game.target - rig.poses[slab].centre) *
-                            smooth((m.age - overhead) / std::max(.01f, m.lock - overhead));
+    const auto follow =
+        rig.poses[slab].centre +
+        (game.target - rig.poses[slab].centre) *
+            smooth((m.age - overhead) / std::max(.01f, m.lock - overhead));
     const auto aim =
         lab.target + (follow - lab.target) * smooth((m.age - kFlyStart) / 0.3f);
-    return lookAt(view::blendCamera(lab, game, view::rigEase((m.age - kFlyStart) /
-                                                             (m.lock - kFlyStart))),
-                  aim);
+    return lookAt(
+        view::blendCamera(lab, game,
+                          view::rigEase((m.age - kFlyStart) / (m.lock - kFlyStart))),
+        aim);
   }
   if (m.age <= m.shutdown) return game;
   if (m.age >= m.lock) return lab;
@@ -360,18 +369,42 @@ view::OrbitCamera rigFlightCamera(const RigFrame& rig, const view::OrbitCamera& 
   const float inBay = view::stowTravelSeconds(static_cast<int>(layout.groups.size())) -
                       (view::kSlabLockSeconds - view::kSlabTiltEnd);
   const float off = smooth((u - inBay) / std::max(.01f, span - inBay));
-  const auto follow = rig.poses[slab].centre + (lab.target - rig.poses[slab].centre) * off;
+  const auto follow =
+      rig.poses[slab].centre + (lab.target - rig.poses[slab].centre) * off;
   const auto aim = game.target + (follow - game.target) * smooth(u / 0.3f);
   return lookAt(view::blendCamera(game, lab, view::rigEase(u / span)), aim);
+}
+
+render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight);
+
+/// The ribs for the board's current shape (M24.5b), joined by two spokes to the yoke
+/// under its slab - the M24.5 yoke of the board's (single) slab.
+std::vector<render::Rib> skinRibs(const app::Shell& shell,
+                                  const std::vector<render::RigPiece>& pieces) {
+  const auto& v = shell.session()->variant();
+  render::SurfacePose pose = render::surfacePose(shell.settings(), v);
+  pose.skin = true;
+  const render::PlaySurface surf = render::PlaySurface::build(v, pose);
+  if (surf.empty() || surf.stacked()) return {};
+  const auto yoke = std::find_if(pieces.begin(), pieces.end(), [](const auto& p) {
+    return p.kind == render::RigPiece::Kind::Yoke;
+  });
+  if (yoke == pieces.end()) return {};
+  const view::Bounds& b = yoke->bounds;
+  const view::Vec3 centre{(b.minX + b.maxX) * 0.5f, (b.minY + b.maxY) * 0.5f,
+                          (b.minZ + b.maxZ) * 0.5f};
+  return render::slabRibs(surf, render::kRibCount, centre, pose.formed,
+                          &surf.passThrough());
 }
 
 /// Draw the lab around the board (M24.5): the camera flies between the lab's station and
 /// the game camera during a move, walls between the eye and the board fade, the rig
 /// hardware carries the slabs, and the room dims to focus. Returns the light block.
 render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
-                                  const render::Ui& ui, const render::BoardRenderer& renderer,
-                                  render::InstanceSet& instances, view::OrbitCamera& camera,
-                                  float intensity) {
+                                  const render::Ui& ui,
+                                  const render::BoardRenderer& renderer,
+                                  render::InstanceSet& instances,
+                                  view::OrbitCamera& camera, float intensity) {
   const auto& layout = *rig.layout;
   // A travelling slab carries the board itself (dark until the boot), so the lock swaps
   // nothing; picking never sees this.
@@ -381,11 +414,14 @@ render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
     const bool deploy = m.move == app::ScreenMove::Deploy;
     if (const auto station =
             gLabScene->station(stationFor(deploy ? m.from : app::Screen::MainMenu)))
-      camera = rigFlightCamera(rig, camera, render::toBoardCamera(*station, layout.xform));
+      camera =
+          rigFlightCamera(rig, camera, render::toBoardCamera(*station, layout.xform));
   }
   render::LabDraw draw;
   draw.xform = &layout.xform;
-  draw.hidden = [&](const io::LabPart& p) { return render::hiddenInGame(p, layout, rig.poses); };
+  draw.hidden = [&](const io::LabPart& p) {
+    return render::hiddenInGame(p, layout, rig.poses);
+  };
   const view::Vec3 eye = camera.eye(), target = camera.target;
   if (ui.wallFade())
     draw.fade = [&](const io::LabPart& p, const view::Bounds& b) {
@@ -393,15 +429,20 @@ render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
     };
   const auto glows = render::slabGlowLights(layout, instances);
   gLabScene->appendTo(instances, renderer.theme(), {}, {}, draw);
-  (void)render::appendRig(instances, *gLabScene, layout, rig.poses);
-  const auto projected = appendProjector(ui, shell.settings(), instances, renderer.theme());
+  const auto rigPieces = render::appendRig(instances, *gLabScene, layout, rig.poses);
+  // The ribs that hold the skin into its shape (M24.5b), joined to the board's yoke.
+  if (renderer.options().slabSkin && renderer.options().surface)
+    (void)render::appendRibs(instances, skinRibs(shell, rigPieces));
+  const auto projected =
+      appendProjector(ui, shell.settings(), instances, renderer.theme());
   render::placeInstances(instances.holo, layout.xform);
   render::placeInstances(instances.holoTokens, layout.xform);
   render::placeInstances(instances.holoBeam, layout.xform);
 
   float focus = render::kFocusLevel;
   if (rig.is(app::ScreenMove::Deploy))
-    focus = render::deployFocus(rig.move->age, rig.move->lock, rig.move->total, intensity);
+    focus =
+        render::deployFocus(rig.move->age, rig.move->lock, rig.move->total, intensity);
   else if (rig.is(app::ScreenMove::Stow))
     focus = render::stowFocus(rig.move->age, rig.move->shutdown, rig.move->lock,
                               rig.move->total, intensity);
@@ -412,6 +453,42 @@ render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
       gRoomLightOverride >= 0 ? gRoomLightOverride : shell.settings().roomLight,
       render::kLabKey, "projector", .5f + .5f * projected[0], renderer.theme(),
       .5f + .5f * projected[1], focus, &layout.xform, glows);
+}
+
+/// A seam latch flash on the renderer's options (M24.5b): the rail of `latch.axis` is
+/// boosted by `render::latchBoost`. Only on the skin's path.
+void applyLatch(render::BoardRenderer& renderer, const app::FxTimeline::LatchFx& latch) {
+  render::BoardOptions o = renderer.options();
+  if (!o.slabSkin) return;
+  o.latchAxis = latch.axis;
+  o.latchBoost = render::latchBoost(latch.age, o.presentationIntensity);
+  renderer.setOptions(o);
+}
+
+/// The console's `stretch` report (M24.5b): the current skinned shape's stretch range and
+/// how many cells are drawn as light.
+std::string skinReport(const app::Shell& shell) {
+  const render::BoardOptions o = optionsFor(shell, -1);
+  if (!o.slabSkin) return {};
+  const auto& v = shell.session()->variant();
+  render::SurfacePose pose = render::surfacePose(shell.settings(), v);
+  pose.skin = true;
+  const render::PlaySurface surf = render::PlaySurface::build(v, pose);
+  if (surf.stretch().empty()) return {};
+  float lu = 1e9f, hu = 0, lv = 1e9f, hv = 0;
+  for (const auto& c : surf.stretch()) {
+    lu = std::min(lu, c.u);
+    hu = std::max(hu, c.u);
+    lv = std::min(lv, c.v);
+    hv = std::max(hv, c.v);
+  }
+  char buf[160];
+  std::snprintf(buf, sizeof(buf),
+                "formed %.3f: u %.3f..%.3f, v %.3f..%.3f, %zu pass-through cell(s)",
+                static_cast<double>(pose.formed), static_cast<double>(lu),
+                static_cast<double>(hu), static_cast<double>(lv), static_cast<double>(hv),
+                surf.passThrough().size());
+  return buf;
 }
 
 /// The console's `rig` dump: scale, groups, slab centres and their current poses.
@@ -529,7 +606,8 @@ bool holdsBoard(const app::Shell& shell, const render::Ui& ui) {
 }
 
 /// The board's decisive power-down with no delay, compressed into the move's 0.8 s.
-void applyMoveHold(render::BoardFxState& fx, const app::Session& session, float progress) {
+void applyMoveHold(render::BoardFxState& fx, const app::Session& session,
+                   float progress) {
   const CellId centre = session.game().position().cellCount() / 2;
   const std::vector<int>& dist = session.distancesFrom(centre);
   int far = 0;
@@ -543,8 +621,8 @@ void applyMoveHold(render::BoardFxState& fx, const app::Session& session, float 
 #ifdef CB_HAVE_IMGUI
 /// The board held while its screen leaves: the menu move's power-down, or a stow's
 /// compressed 1 s shutdown (M24.5) - none when the game had already ended and shut down.
-void applyHold(render::BoardFxState& fx, const app::Session& session, const render::Ui& ui,
-               const RigFrame& rig) {
+void applyHold(render::BoardFxState& fx, const app::Session& session,
+               const render::Ui& ui, const RigFrame& rig) {
   if (!rig.is(app::ScreenMove::Stow))
     applyMoveHold(fx, session, ui.powerDownProgress());
   else if (const auto progress = stowShutdown(rig))
@@ -562,8 +640,9 @@ render::BoardFxState captureFx(const render::BoardRenderer& renderer,
   // A pinned deploy: the board stays dark until the last slab locks, then boots.
   if (gDeployT >= 0.0f && labGame(shell, false))
     if (const auto* layout = rigLayoutFor(session))
-      fx.bootAge = deployBootAge(
-          gDeployT, renderer.options().presentationIntensity < .5f ? 0.0f : layout->lastLock);
+      fx.bootAge = deployBootAge(gDeployT, renderer.options().presentationIntensity < .5f
+                                               ? 0.0f
+                                               : layout->lastLock);
 #endif
   if (gCheckT >= 0.0f) {
     // The ripple of the last check; a position that never gave one ripples from the
@@ -863,6 +942,8 @@ render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight = -1)
   const bool wantSurface = (s.geometryView || s.geometryFormed > 1e-4f) && !s.flatView;
   o.surface =
       wantSurface && session != nullptr && render::hasPlaySurface(session->variant());
+  // The slab skin (M24.5b) lives on the lab game path only.
+  o.slabSkin = gSkinOn && o.surface && labGame(shell, true);
 #else
   (void)shell;
 #endif
@@ -1382,6 +1463,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::fprintf(stderr, "%s\n", ui.error().format().c_str());
     return 1;
   }
+  if (gSkin >= 0) (*ui)->setSkin(gSkin == 1);
+  gSkinOn = (*ui)->skin();
   // The capture has to show the interface at the scale the player set, or it is not a
   // picture of what they would see.
   (*ui)->forceDevOverlay(gDevOverlay);
@@ -1535,6 +1618,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
       }
       // Refresh the alignment offsets and this frame's legend hover before building.
       renderer->setOptions(optionsFor(*shell, (*ui)->seamHover()));
+      if (gLatchT >= 0.0f)
+        applyLatch(*renderer, app::FxTimeline::LatchFx{gLatchAxis, gLatchT});
       syncMarks(*renderer, *shell->session());
       instances = renderer->buildInstances(
           shell->session()->snapshot(), shell->session()->viewConfig(),
@@ -1560,7 +1645,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
     std::array<float, 2> projected{};
     std::optional<render::GpuLightBlock> gameLights;
     if (inLab) {
-      gameLights = drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
+      gameLights =
+          drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
       camera = camera.withNearClip(labOptions.nearClip);
     }
     if (room) {
@@ -1590,8 +1676,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
                                                            : shell->settings().roomLight,
                                    render::kLabKey, "projector", .5f + .5f * projected[0],
                                    renderer->theme(), .5f + .5f * projected[1])
-                         : gameLights ? *gameLights
-                                      : render::neutralLightBlock());
+                        : gameLights ? *gameLights
+                                     : render::neutralLightBlock());
     const std::function<void(VkCommandBuffer)> drawUi = [&](VkCommandBuffer cmd) {
       (*ui)->record(cmd);
     };
@@ -2074,6 +2160,9 @@ int main(int argc, char** argv) {
           "--projector 0|1 toggles the bench hologram; --overture-t 0..1 pins Library "
           "progress (alias --t).\n"
           "--lab 0|1 toggles the static lab room; --station <name> requires --lab 1.\n"
+          "--skin 0|1 the lab game's slab skin on a shape (default 1); --latch-t "
+          "SECONDS\n"
+          "pins a seam latch flash's age on --latch-axis 0|1 (default 1, the ranks).\n"
           "--deploy-t / --stow-t SECONDS pin a lab game's slab deploy (menu to game) or\n"
           "stow (live game to menu), with --lab 1; --focus 0..1 pins the room focus.\n"
           "--implant 0|1 toggles the organic lab menus; --panel-t SECONDS pins panel "
@@ -2157,12 +2246,29 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--bloom requires a scale from 0 to 4\n");
         return 1;
       }
+    } else if (arg == "--skin" || arg == "--latch-axis") {
+      const std::string value = i + 1 < argc ? argv[++i] : "";
+      if (value != "0" && value != "1") {
+        std::fprintf(stderr, "%s requires 0 or 1\n", arg.c_str());
+        return 1;
+      }
+      (arg == "--skin" ? gSkin : gLatchAxis) = value == "1" ? 1 : 0;
+    } else if (arg == "--latch-t") {
+      char* end = nullptr;
+      const char* value = i + 1 < argc ? argv[++i] : "";
+      const float v = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(v) || v < 0) {
+        std::fprintf(stderr, "--latch-t requires finite seconds\n");
+        return 1;
+      }
+      gLatchT = v;
     } else if (arg == "--deploy-t" || arg == "--stow-t" || arg == "--focus") {
       char* end = nullptr;
       const char* value = i + 1 < argc ? argv[++i] : "";
       const float v = std::strtof(value, &end);
       const bool focus = arg == "--focus";
-      if (end == value || *end != '\0' || !std::isfinite(v) || v < 0 || (focus && v > 1)) {
+      if (end == value || *end != '\0' || !std::isfinite(v) || v < 0 ||
+          (focus && v > 1)) {
         std::fprintf(stderr, "%s requires %s\n", arg.c_str(),
                      focus ? "a level from 0 to 1" : "finite seconds");
         return 1;
@@ -2432,6 +2538,7 @@ int main(int argc, char** argv) {
                  ui.error().format().c_str());
     return 1;
   }
+  if (gSkin >= 0) (*ui)->setSkin(gSkin == 1);
   (*ui)->forceDevOverlay(gDevOverlay);
   bool lastLabTheme = false;
   (void)(*ui)->setScale(
@@ -2480,8 +2587,12 @@ int main(int argc, char** argv) {
   std::vector<render::PanelTarget> panelTargets;
   // Stamps the session's presentation events (boot, ...) with this loop's visual clock.
   app::FxTimeline fxTimeline;
+  // The live morph's last value, for the seam latches (M24.5b); negative: none yet.
+  float latchFormed = -1.0f;
+  std::uint64_t latchSession = 0;
 #ifdef CB_HAVE_IMGUI
   (*ui)->setRigReport([&] { return rigReport(*shell, **ui); });
+  (*ui)->setSkinReport([&] { return skinReport(*shell); });
 #endif
   // Hover aids (M20): events only mark the pointer dirty; the cell is resolved once per
   // frame, because the shape view's pick builds a whole surface.
@@ -2861,6 +2972,7 @@ int main(int argc, char** argv) {
     const double elapsed = std::chrono::duration<double>(now - lastFrame).count();
     const float dt = static_cast<float>(elapsed);
     visualSeconds += std::max(0.0, elapsed);
+    gSkinOn = (*ui)->skin();
     renderer->setVisualTime(visualSeconds);
     lastFrame = now;
     if (dt > 0.0f) fps = fps * 0.9f + (1.0f / dt) * 0.1f;
@@ -3188,6 +3300,24 @@ int main(int argc, char** argv) {
     view::OrbitCamera camera;
 #ifdef CB_HAVE_IMGUI
     renderer->setOptions(optionsFor(*shell, (*ui)->seamHover()));
+    // A seam latch (M24.5b): the console forces one; otherwise the live morph closing a
+    // wrap axis upward between two frames stamps one. Opening never flashes.
+    if (const auto axis = (*ui)->takeLatch()) fxTimeline.latch(*axis, visualSeconds);
+    if (renderer->options().slabSkin && shell->session() != nullptr) {
+      const float liveFormed = shell->settings().geometryFormed;
+      const auto close = render::wrapCloseAt(shell->session()->variant());
+      if (latchFormed >= 0.0f && latchSession == shell->session()->id())
+        for (int a = 0; a < 2; ++a)
+          if (render::latchCrossed(latchFormed, liveFormed,
+                                   close[static_cast<std::size_t>(a)]))
+            fxTimeline.latch(a, visualSeconds);
+      latchFormed = liveFormed;
+      latchSession = shell->session()->id();
+    } else {
+      latchFormed = -1.0f;
+    }
+    if (const auto latch = fxTimeline.latchAge(visualSeconds))
+      applyLatch(*renderer, *latch);
 #endif
     // Check after Ui::build and request processing: the console may replace a
     // position in the existing Session without producing a load request.
@@ -3273,7 +3403,8 @@ int main(int argc, char** argv) {
     std::array<float, 2> projected{};
     std::optional<render::GpuLightBlock> gameLights;
     if (inLab) {
-      gameLights = drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
+      gameLights =
+          drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
       camera = camera.withNearClip(labOptions.nearClip);
     }
     if (room) {
@@ -3302,8 +3433,8 @@ int main(int argc, char** argv) {
                                                            : shell->settings().roomLight,
                                    render::kLabKey, "projector", .5f + .5f * projected[0],
                                    renderer->theme(), .5f + .5f * projected[1])
-                         : gameLights ? *gameLights
-                                      : render::neutralLightBlock());
+                        : gameLights ? *gameLights
+                                     : render::neutralLightBlock());
     const auto overlay = [&](VkCommandBuffer cmd) {
 #ifdef CB_HAVE_IMGUI
       (*ui)->record(cmd);

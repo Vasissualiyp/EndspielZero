@@ -615,5 +615,15 @@ void main() {
         rgb = mix(rgb, rgb * 1.25, 0.5 * sal);
         rgb += lightBuf.implant.rgb * (0.10 + 0.55 * rim) * sal;
     }
+    // The slab skin's membrane (M24.5b), last so every other fragment is shaded exactly as
+    // before: matte with the 0.5 sub-flag (matte's fraction is otherwise unused).
+    // Its stretched bridges glow faintly in the LED colour (the theme's ember,
+    // push.material), the strength in the heat channel, modulated along the files by a
+    // serpentine, and powered with its cell.
+    if (matId == 0 && matVar > 0.25 && matVar < 0.75) {
+        float serpentine = 0.5 + 0.5 * sin(40.0 * fragPanel.y);
+        rgb += push.material.rgb * clamp(fragPanelSignal.w, 0.0, 1.0) * serpentine *
+               fx.a.x * fx.a.y;
+    }
     outColor = vec4(rgb, fragColor.a);
 }

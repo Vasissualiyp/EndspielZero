@@ -11,8 +11,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <string>
 
 #include "app/overture.hpp"
+#include "render/slab_skin.hpp"
 
 namespace cb::render {
 namespace {
@@ -292,6 +295,75 @@ bool PlaySurface::nearestBoundary(const SurfaceSeat& a, const SurfaceSeat& b,
   return pointAt(bf, br, out);
 }
 
+namespace {
+
+/// Each cell's surface length across it along u and along v, in the order of the seats:
+/// low edge midpoint -> centre -> high edge midpoint, two half-cell chords (M24.5b).
+std::vector<std::array<float, 2>> cellLengths(const PlaySurface& s) {
+  std::vector<std::array<float, 2>> out;
+  if (s.stacked() || s.files() <= 0 || s.ranks() <= 0) return out;
+  out.reserve(static_cast<std::size_t>(s.files() * s.ranks()));
+  for (int f = 0; f < s.files(); ++f) {
+    for (int r = 0; r < s.ranks(); ++r) {
+      const float fc = static_cast<float>(f) + 0.5f;
+      const float rc = static_cast<float>(r) + 0.5f;
+      view::Vec3 c{}, u0{}, u1{}, v0{}, v1{};
+      (void)s.pointAt(fc, rc, c);
+      (void)s.pointAt(fc - 0.5f, rc, u0);
+      (void)s.pointAt(fc + 0.5f, rc, u1);
+      (void)s.pointAt(fc, rc - 0.5f, v0);
+      (void)s.pointAt(fc, rc + 0.5f, v1);
+      out.push_back({view::length(c - u0) + view::length(u1 - c),
+                     view::length(c - v0) + view::length(v1 - c)});
+    }
+  }
+  return out;
+}
+
+std::vector<CellStretch> stretchOf(const PlaySurface& shaped,
+                                   const std::vector<std::array<float, 2>>& flat,
+                                   const std::vector<CellId>& cells) {
+  std::vector<CellStretch> out;
+  const auto lengths = cellLengths(shaped);
+  if (lengths.size() != flat.size() || lengths.size() != cells.size()) return out;
+  out.reserve(lengths.size());
+  for (std::size_t i = 0; i < lengths.size(); ++i) {
+    const float fu = flat[i][0] > 1e-6f ? flat[i][0] : 1.0f;
+    const float fv = flat[i][1] > 1e-6f ? flat[i][1] : 1.0f;
+    out.push_back({cells[i], lengths[i][0] / fu, lengths[i][1] / fv});
+  }
+  return out;
+}
+
+/// The flat pose's lengths, cached per variant and per pose knob that shapes the sheet:
+/// the flat board never changes while they do not (M24.5b).
+const std::vector<std::array<float, 2>>& flatLengths(const VariantSpec& v,
+                                                     SurfacePose pose) {
+  struct Cache {
+    std::string name;
+    std::uint64_t extents{0};
+    std::array<float, 4> knobs{};
+    std::vector<std::array<float, 2>> lengths;
+  };
+  static Cache cache;
+  const std::uint64_t extents = (static_cast<std::uint64_t>(v.dims.extent(0)) << 32) |
+                                static_cast<std::uint64_t>(v.dims.extent(1));
+  const std::array<float, 4> knobs{pose.openness, pose.thickness, pose.twist,
+                                   pose.collapsePhase};
+  if (cache.lengths.empty() || cache.name != v.name || cache.extents != extents ||
+      cache.knobs != knobs) {
+    pose.formed = 0.0f;
+    pose.skin = false;
+    pose.slideU = 0.0f;
+    pose.slideV = 0.0f;
+    pose.evert = 0.0f;
+    cache = {v.name, extents, knobs, cellLengths(PlaySurface::build(v, pose))};
+  }
+  return cache.lengths;
+}
+
+}  // namespace
+
 PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   PlaySurface s;
   // Above two dimensions the shape is authored, not a parametrised surface (M17.12).
@@ -307,6 +379,7 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // - every cell lands somewhere else - which is not what a board wants. The play surface
   // keeps the geometry and flips the normal the seat and the patch read, so the pieces
   // move to the other face while the squares stay put.
+  const SurfacePose input = pose;
   const bool inverted = pose.evert > 0.5f;
   pose.evert = 0.0f;
   const app::SurfaceKind kind = app::overtureSignature(v).surface;
@@ -346,8 +419,8 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   // the first place, so there is no longer a longer period to protect against. Reverted
   // to the plain two laps every other warp already uses.
   float sv = slidesAlongRanks(v) ? wrapSlide(pose.slideV, 2.0f * fnz) / fnz : 0.0f;
-  // A rank slide moves the board along the tube - which is open, and so has nowhere to go -
-  // until the bend closes it into a ring. It comes in with the bend, or the first bent
+  // A rank slide moves the board along the tube - which is open, and so has nowhere to go
+  // - until the bend closes it into a ring. It comes in with the bend, or the first bent
   // frame would carry the whole board away from where the open tube left it.
   // The nearest equivalent lap, not the raw two-lap window: a slide accumulated by a long
   // middle-drag (125 cells) would otherwise carry the ring several laps round while the
@@ -381,7 +454,14 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   s.surfacePose_ = pose;
   s.su_ = su;
   s.sv_ = sv;
-  const auto at = [&](float u, float vv) { return sample(kind, pose, u + su, vv + sv); };
+  // Which axes close, and which seam reverses the other coordinate: the lattice the
+  // skin's pass-through test measures distance on (M24.5b).
+  s.wrapU_ = kind == app::SurfaceKind::Tube || kind == app::SurfaceKind::Torus ||
+             kind == app::SurfaceKind::Klein || kind == app::SurfaceKind::Band;
+  s.wrapV_ = kind == app::SurfaceKind::Torus || kind == app::SurfaceKind::Klein;
+  s.flipU_ = kind == app::SurfaceKind::Band;
+  s.flipV_ = kind == app::SurfaceKind::Klein;
+  const auto at = [&](float u, float vv) { return s.sampleAt(u, vv); };
 
   // The gapless grid first: every patch and seat is cut from it, the pick ray is tested
   // against it, and the shape's axis is its cross-section centroid. Sampling the surface
@@ -474,27 +554,77 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   s.seats_.reserve(static_cast<std::size_t>(nx * nz));
   s.patches_.reserve(static_cast<std::size_t>(nx * nz));
   constexpr int kSide = kSubdiv + 1;
+  // The square, as a patch of the surface. Its corners run across the cell's own lattice
+  // footprint, inset so the line between squares is a real gap in the shape rather than a
+  // stripe painted on it. `scaleU`/`scaleV` shrink it further (the skin's rigid tiles).
+  const auto cutPatch = [&](CellId cell, float u, float vv, float scaleU, float scaleV,
+                            float coverage = kCoverage) {
+    SurfacePatch patch;
+    patch.cell = cell;
+    for (int i = 0; i < kSide; ++i) {
+      for (int j = 0; j < kSide; ++j) {
+        float ou = coverage * (static_cast<float>(i) / kSubdiv - 0.5f) / fnx;
+        float ov = coverage * (static_cast<float>(j) / kSubdiv - 0.5f) / fnz;
+        if (scaleU != 1.0f) ou *= scaleU;
+        if (scaleV != 1.0f) ov *= scaleV;
+        const std::size_t k = static_cast<std::size_t>(i * kSide + j);
+        patch.pos[k] = at(u + ou, vv + ov);
+        patch.normal[k] = nrm(u + ou, vv + ov);
+      }
+    }
+    return patch;
+  };
+
+  // The slab skin (M24.5b): the stretch of every cell against the flat board, the
+  // unshrunk sheet (the membrane behind the tiles) and the cells the sheet would have to
+  // pass through itself to form, which are drawn as light instead.
+  std::vector<SurfacePatch> sheet;
+  if (pose.skin) {
+    std::vector<CellId> cells;
+    cells.reserve(static_cast<std::size_t>(nx * nz));
+    sheet.reserve(static_cast<std::size_t>(nx * nz));
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        const CellId cell = v.dims.toCell(Coord::of({f, r}));
+        cells.push_back(cell);
+        sheet.push_back(cutPatch(cell, (static_cast<float>(f) + 0.5f) / fnx,
+                                 (static_cast<float>(r) + 0.5f) / fnz, 1.0f, 1.0f));
+      }
+    }
+    s.stretch_ = stretchOf(s, flatLengths(v, input), cells);
+    s.passThrough_ = passThroughOf(sheet, s, kPassThroughGap);
+  }
+  const auto lit = [&](CellId cell) {
+    return std::binary_search(s.passThrough_.begin(), s.passThrough_.end(), cell);
+  };
+
   for (int f = 0; f < nx; ++f) {
     for (int r = 0; r < nz; ++r) {
       const CellId cell = v.dims.toCell(Coord::of({f, r}));
       const float u = (static_cast<float>(f) + 0.5f) / fnx;
       const float vv = (static_cast<float>(r) + 0.5f) / fnz;
-
-      // The square, as a patch of the surface. Its corners run across the cell's own
-      // lattice footprint, inset so the line between squares is a real gap in the shape
-      // rather than a stripe painted on it.
-      SurfacePatch patch;
-      patch.cell = cell;
-      for (int i = 0; i < kSide; ++i) {
-        for (int j = 0; j < kSide; ++j) {
-          const float ou = kCoverage * (static_cast<float>(i) / kSubdiv - 0.5f) / fnx;
-          const float ov = kCoverage * (static_cast<float>(j) / kSubdiv - 0.5f) / fnz;
-          const std::size_t k = static_cast<std::size_t>(i * kSide + j);
-          patch.pos[k] = at(u + ou, vv + ov);
-          patch.normal[k] = nrm(u + ou, vv + ov);
+      if (pose.skin && !s.stretch_.empty()) {
+        // A rigid tile keeps its flat size inside a stretched cell; a compressed cell's
+        // tile shrinks with the sheet. Light needs no tile: a pass-through cell keeps its
+        // whole footprint and has no membrane behind it.
+        const std::size_t index = static_cast<std::size_t>(f * nz + r);
+        const CellStretch& st = s.stretch_[index];
+        if (lit(cell)) {
+          s.patches_.push_back(sheet[index]);
+        } else {
+          s.patches_.push_back(cutPatch(cell, u, vv, std::min(1.0f, 1.0f / st.u),
+                                        std::min(1.0f, 1.0f / st.v)));
+          // The membrane is the whole footprint, so the sheet is continuous: at the
+          // tiles' coverage the line between two cells is a slit, which on a stretched
+          // cell is wide enough to see the ribs through.
+          SurfacePatch back = cutPatch(cell, u, vv, 1.0f, 1.0f, 1.0f);
+          for (std::size_t k = 0; k < back.pos.size(); ++k)
+            back.pos[k] = back.pos[k] - back.normal[k] * kMembraneOffset;
+          s.membrane_.push_back(back);
         }
+      } else {
+        s.patches_.push_back(cutPatch(cell, u, vv, 1.0f, 1.0f));
       }
-      s.patches_.push_back(patch);
 
       SurfaceSeat seat;
       seat.cell = cell;
@@ -543,6 +673,17 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   b.maxZ += pad;
   s.bounds_ = b;
   return s;
+}
+
+std::vector<CellStretch> cellStretch(const PlaySurface& shaped, const PlaySurface& flat) {
+  std::vector<CellId> cells;
+  cells.reserve(shaped.seats().size());
+  for (const SurfaceSeat& seat : shaped.seats()) cells.push_back(seat.cell);
+  return stretchOf(shaped, cellLengths(flat), cells);
+}
+
+view::Vec3 PlaySurface::sampleAt(float u, float v) const {
+  return sample(kind_, surfacePose_, u + su_, v + sv_);
 }
 
 float morphFollowBlend(float dt) noexcept {

@@ -37,8 +37,8 @@ inline constexpr float kWallHologramRadiusMetres = .37179f;
 inline constexpr float kWallHologramDropMetres = .27029f;
 /// Where the wall projector centres its subject, in lab metres: in front of the lens
 /// (-X), 0.1 m clear of it, and lowered by `kWallHologramDropMetres`.
-[[nodiscard]] constexpr std::array<float, 3> wallHologramCentre(std::array<float, 3> lens,
-                                                             float radiusMetres) noexcept {
+[[nodiscard]] constexpr std::array<float, 3> wallHologramCentre(
+    std::array<float, 3> lens, float radiusMetres) noexcept {
   return {lens[0] - .10f - radiusMetres, lens[1], lens[2] - kWallHologramDropMetres};
 }
 
@@ -250,6 +250,13 @@ class Ui {
   [[nodiscard]] bool wallFade() const { return console_.wallFade(); }
   void setRigReport(std::function<std::string()> report) {
     console_.setRigReport(std::move(report));
+  }
+  /// M24.5b: the console's `skin` switch, `latch` request and `stretch` report.
+  [[nodiscard]] bool skin() const { return console_.skin(); }
+  void setSkin(bool on) { console_.setSkin(on); }
+  [[nodiscard]] std::optional<int> takeLatch() { return console_.takeLatch(); }
+  void setSkinReport(std::function<std::string()> report) {
+    console_.setSkinReport(std::move(report));
   }
   [[nodiscard]] HologramRequest hologramRequest() const;
   [[nodiscard]] std::array<float, 8> rackSlides() const;
