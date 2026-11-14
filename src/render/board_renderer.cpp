@@ -65,9 +65,10 @@ static_assert(sizeof(BlurPush) == 32);
 
 struct DofPush {
   float direction[2]{};
-  float focus{1}, cocScale{0}, maxPx{0}, nearZ{0.1f}, farZ{1000.f}, pad{0};
+  float focus{1}, cocScale{0}, maxPx{0}, nearZ{0.1f}, farZ{1000.f}, floorPx{0};
+  float spot[2]{}, spotRadius{0}, spotFeather{1}, spotFraction{1}, pad[3]{};
 };
-static_assert(sizeof(DofPush) == 32);
+static_assert(sizeof(DofPush) == 64);
 
 // The contact shadow (M18.2). The disc mesh's radius is half its extent, so an instance
 // scale of 0.68 wants a world radius of 0.34: a touch wider than a piece's own foot
@@ -3126,6 +3127,12 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         dp.maxPx = dof_->maxPx;
         dp.nearZ = nearZ;
         dp.farZ = camera.farZ;
+        dp.floorPx = dof_->floorPx;
+        dp.spot[0] = dof_->spot[0];
+        dp.spot[1] = dof_->spot[1];
+        dp.spotRadius = dof_->spotRadius;
+        dp.spotFeather = dof_->spotFeather;
+        dp.spotFraction = dof_->spotFraction;
         vkCmdBeginRendering(cmd, &info);
         vkCmdSetViewport(cmd, 0, 1, &full);
         vkCmdSetScissor(cmd, 0, 1, &fullScissor);

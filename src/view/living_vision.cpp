@@ -16,10 +16,6 @@ float unit(std::uint32_t x) {
   x *= 0x846ca68bu; x ^= x >> 16;
   return static_cast<float>(x >> 8)*(1.f/16777216.f);
 }
-Vec2f cap(Vec2f v, float limit) {
-  const float n = std::hypot(v[0],v[1]);
-  return n > limit ? Vec2f{v[0]*limit/n, v[1]*limit/n} : v;
-}
 }
 Vec2f lensWarpSource(Vec2f px, Vec2f size, float k) noexcept {
   const float x = px[0]-.5f*size[0], y=px[1]-.5f*size[1];
@@ -56,22 +52,26 @@ GazeState stepGaze(const GazeState& previous, const GazeInput& in) noexcept {
   if (!in.active) {
     s.uiFocus+=(1-s.uiFocus)*a;
     s.uiFocusTarget=1;
-    s.eyeShift=mix(s.eyeShift,{},a); s.eyeShiftTarget={}; s.eyeShiftFrom=s.eyeShift;
+    s.daydreamT=s.daydream=0;
     s.pointPx={in.viewport[0]*.5f,in.viewport[1]*.5f};
     s.fromPx=s.toPx=s.pointPx;
     s.idle=s.fixationLeft=s.outsidePanel=0; s.saccadeT=1;
     s.focusDistanceTarget=in.defaultDistance; easeFocus(); return s;
   }
-  s.idle=(in.mouseMoved || in.dragging) ? 0 : s.idle+dt;
+  const bool acted=in.mouseMoved || in.dragging || in.input;
+  s.idle=acted ? 0 : s.idle+dt;
   const bool wandering=s.idle>=kIdleBeforeWander && in.wander && in.intensity>=.5f;
   const auto project=[&](const GazeTarget& target)->std::optional<std::pair<Vec2f,float>> {
     if (target.key=="menu") return std::pair{in.panelCentrePx,s.focusDistanceTarget};
     return in.project ? in.project(target.world) : std::nullopt;
   };
   const auto start=[&](Vec2f to) {
-    s.fromPx=s.pointPx; s.toPx=to; s.eyeShiftFrom=s.eyeShift; s.saccadeT=0;
+    s.fromPx=s.pointPx; s.toPx=to; s.saccadeT=0;
   };
   if (!wandering) {
+    if (s.daydreamT>0) {  // waking: the spot jumps to the mouse
+      s.pointPx=s.fromPx=s.toPx=in.mousePx; s.saccadeT=1;
+    }
     if (distance(in.mousePx,s.toPx)>.04f*in.viewport[1]) start(in.mousePx);
     else s.toPx=in.mousePx;
     s.outsidePanel=in.mouseOverPanel ? 0 : s.outsidePanel+dt;
@@ -87,7 +87,7 @@ GazeState stepGaze(const GazeState& previous, const GazeInput& in) noexcept {
         }
       }
     }
-    s.eyeShiftTarget={}; s.eyeShiftFrom={}; s.eyeShift={}; s.fixationLeft=0;
+    s.fixationLeft=0;
   } else if (s.fixationLeft<=0) {
     const auto valid=[&](std::size_t i) {
       if (static_cast<int>(i)==s.lastTarget || in.targets[i].weight<=0) return false;
@@ -96,37 +96,41 @@ GazeState stepGaze(const GazeState& previous, const GazeInput& in) noexcept {
     };
     float sum=0;
     for (std::size_t i=0;i<in.targets.size();++i) if(valid(i)) sum+=in.targets[i].weight;
-    float choice=unit(in.seed ^ (s.fixationCount*0x9e3779b9u))*sum;
-    for (std::size_t i=0;i<in.targets.size() && sum>0;++i) {
-      if (!valid(i)) continue;
-      choice-=in.targets[i].weight;
-      if (choice>0) continue;
-      const auto& target=in.targets[i]; const auto p=*project(target);
-      start(p.first); s.lastTarget=static_cast<int>(i);
-      s.uiFocusTarget=target.key=="menu" ? 1.f : 0.f;
-      if (target.key!="menu") s.focusDistanceTarget=p.second;
-      s.eyeShiftTarget=target.key=="menu" ? Vec2f{} : eyeShiftToward(p.first,in.viewport,in.fovY);
-      s.fixationLeft=kFixationMin+(kFixationMax-kFixationMin)*unit(in.seed+s.fixationCount*0x846ca68bu+71);
-      ++s.fixationCount; break;
+    const std::uint32_t n=s.fixationCount;
+    const auto fixationLength=[&] { return kFixationMin+(kFixationMax-kFixationMin)*unit(in.seed+n*0x846ca68bu+71); };
+    bool chosen=false;
+    if (sum>0 && unit(in.seed+n*0x85ebca6bu+13)>=kRandomFixationChance) {
+      float choice=unit(in.seed ^ (n*0x9e3779b9u))*sum;
+      for (std::size_t i=0;i<in.targets.size();++i) {
+        if (!valid(i)) continue;
+        choice-=in.targets[i].weight;
+        if (choice>0) continue;
+        const auto& target=in.targets[i]; const auto p=*project(target);
+        start(p.first); s.lastTarget=static_cast<int>(i);
+        s.uiFocusTarget=target.key=="menu" ? 1.f : 0.f;
+        if (target.key!="menu") s.focusDistanceTarget=p.second;
+        chosen=true; break;
+      }
     }
+    if (!chosen) {  // a made-up glance inside the middle 80 %; focus distance is kept
+      start({in.viewport[0]*(.1f+.8f*unit(in.seed+n*0x27d4eb2fu+5)),
+             in.viewport[1]*(.1f+.8f*unit(in.seed+n*0x165667b1u+9))});
+      s.lastTarget=-1;
+    }
+    s.fixationLeft=fixationLength(); ++s.fixationCount;
   } else s.fixationLeft-=dt;
   s.saccadeT=std::min(1.f,s.saccadeT+dt/kSaccadeSeconds);
   s.pointPx=mix(s.fromPx,s.toPx,smooth(s.saccadeT));
   s.uiFocus+=(s.uiFocusTarget-s.uiFocus)*(1-std::exp(-dt/(s.uiFocusTarget==1 ? .15f : kAccommodationSeconds)));
   easeFocus();
-  if (wandering) {
-    s.eyeShift=mix(s.eyeShiftFrom,s.eyeShiftTarget,smooth(s.saccadeT));
-    const auto drift=cap({static_cast<float>(std::sin(.37*in.time+in.seed)),static_cast<float>(std::sin(.29*in.time+2.0*in.seed))},1);
-    s.eyeShift[0]+=drift[0]*kDriftRadians; s.eyeShift[1]+=drift[1]*kDriftRadians;
-    s.eyeShift=cap(s.eyeShift,kEyeShiftMaxRadians+kDriftRadians);
-  }
+  s.daydreamT=std::clamp(s.daydreamT+(wandering ? dt/kDaydreamRiseSeconds : -dt/kDaydreamWakeSeconds),0.f,1.f);
+  s.daydream=smooth(s.daydreamT);
   return s;
 }
-Vec2f eyeShiftToward(Vec2f px, Vec2f viewport, float fovY) noexcept {
-  const float f=.5f*viewport[1]/std::tan(fovY*.5f);
-  // Orbit yaw moves the image right; pitch moves it down. Look towards the target.
-  return cap({-kEyeShiftFraction*std::atan((px[0]-.5f*viewport[0])/f),
-              kEyeShiftFraction*std::atan((px[1]-.5f*viewport[1])/f)},kEyeShiftMaxRadians);
+float daydreamBlurPixels(float daydream,Vec2f px,Vec2f spot,float height,float pixelScale) noexcept {
+  const float d=distance(px,spot)/std::max(height,1.f);
+  const float inside=1-smooth((d-kSpotRadius)/kSpotFeather);
+  return daydream*kDaydreamBlurPixels*pixelScale*(1-(1-kSpotBlurFraction)*inside);
 }
 float circleOfConfusion(float z,float focus,float scale) noexcept {
   return std::clamp(std::abs(1/std::max(z,.001f)-1/std::max(focus,.001f))*scale,0.f,1.f)*kWorldDefocusPixels;

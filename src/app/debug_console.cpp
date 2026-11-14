@@ -149,7 +149,7 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
       std::ostringstream out;
       out << "gaze " << s.gazeState.pointPx[0] << ' ' << s.gazeState.pointPx[1]
           << " uiFocus " << s.gazeState.uiFocus << " focus " << s.gazeState.focusDistance
-          << " target " << s.gazeTarget << " index " << s.gazeState.lastTarget;
+          << " daydream " << s.gazeState.daydream << " target " << s.gazeTarget << " index " << s.gazeState.lastTarget;
       return out.str();
     }
     if (w.size()==2 && w[1]=="off") {
@@ -544,7 +544,7 @@ std::string DebugConsole::help() {
          "implant [on|off] toggle organic menu perception (also get/set implantFx)\n"
          "heartbeat [on|off] toggle the implant double pulse\n"
          "living [on|off] living vision: lens warp, gaze, focus (M24.4c)\n"
-         "tremor [on|off], wander [on|off] micro-tremor and idle gaze wander\n"
+         "tremor [on|off], wander [on|off] micro-tremor and the 10 s idle daydream (M24.4d)\n"
          "gaze [<x> <y>|off|ui|room|target <key>] show or pin the gaze\n"
          "warp <k>|default override the lens warp strength\n"
          "wake        replay the launch waking-up sequence: eyelids, blinks, handshake (M24.7)\n"

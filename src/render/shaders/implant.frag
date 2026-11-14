@@ -9,7 +9,7 @@ struct Panel { vec4 rect; vec4 state; vec4 originAge; };
 layout(std140,set=0,binding=1) uniform Params {
   Panel panels[16]; vec4 tools[4]; vec4 timing; vec4 screen; vec4 counts;
   vec4 warm; vec4 body; vec4 living; vec4 gazeTremor; vec4 periphery; vec4 optics; vec4 deep;
-  vec4 hand;  // M24.7: handshake age (-1 none), menu fade, 0, 0
+  vec4 hand;  // M24.7: handshake age (-1 none), menu fade; M24.4d: daydream amount, 0
 } p;
 float hash12(vec2 v) {
   vec3 q=fract(vec3(v.xyx)*.1031); q+=dot(q,q.yzx+33.33); return fract((q.x+q.y)*q.z);
@@ -118,7 +118,11 @@ vec4 shade() {
     float focus=clamp(p.living.z,0,1);
     float ecc=min(length(px-p.gazeTremor.xy),1.3*length(delta))/size.y;
     float peripheral=smoothstep(p.periphery.x,p.periphery.y,ecc);
-    c=mix(c,soft*local,max(.4*(1-focus),.5*peripheral));
+    // Daydream (M24.4d): the whole panel softens, less inside the gaze's focus spot.
+    // Mirrors view::kSpotRadius, kSpotFeather, kSpotBlurFraction and kDaydreamUiSoft.
+    float spotInside=1-smoothstep(0,1,(length(px-p.gazeTremor.xy)/size.y-.12)/.06);
+    float daydream=p.hand.z*.8*(1-.75*spotInside);
+    c=mix(c,soft*local,max(max(.4*(1-focus),.5*peripheral),daydream));
     // Resampling compensation is fixed in time, never applied to the breathing glow.
     c.rgb+=.25*max(vec3(0),sharp.rgb-soft.rgb)*local;
     c.rgb=mix(c.rgb,vec3(dot(c.rgb,vec3(.299,.587,.114))),peripheral*p.periphery.z);

@@ -18,6 +18,8 @@ struct ImplantParams {
   float tremor[2]{}, gaze[2]{};
   /// M24.7: seconds into the launch handshake (-1 = none) and how visible the layer is.
   float handshake{-1}, menuFade{1};
+  /// M24.4d: 0..1, how far the panel softens while the eyes daydream.
+  float daydream{0};
 
   struct Panel {
     float rect[4];

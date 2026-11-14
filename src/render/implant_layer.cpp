@@ -448,7 +448,7 @@ void ImplantLayer::composite(VkCommandBuffer cmd, const OffscreenTarget& target,
                     {view::kPeripheryStart,view::kPeripheryFull,view::kPeripheryDesaturate,view::kPeripheryFringePixels},
                     {view::kUiAwayAlpha,view::kUiDefocusPixels,view::kPeripheryBlurPixels,0},
                     {.2086f,.159f,.6724f,1},
-                    {params.handshake,params.menuFade,0,0}};
+                    {params.handshake,params.menuFade,params.daydream,0}};
   std::memcpy(s.mapped, &p, sizeof(p));
   // Two separable Gaussian copies: half-size sigma 4 and quarter-size sigma 14,
   // both sigmas measured in full-resolution 1080p pixels. No per-pixel Poisson taps.

@@ -66,39 +66,100 @@ TEST_CASE("living gaze accommodates with dwell and returns to reading quickly", 
   CHECK(s.uiFocus>.98f); // brief: dwell outside for 0.6 s before losing focus
   for(int i=0;i<90;++i) s=stepGaze(s,in);
   CHECK(s.uiFocus<.02f); CHECK(s.focusDistance==Approx(40).epsilon(.02));
-  in.active=false; s.eyeShift={.01f,.01f};
+  in.active=false;
   for(int i=0;i<120;++i) s=stepGaze(s,in);
-  CHECK(s.uiFocus>.99f); CHECK(std::hypot(s.eyeShift[0],s.eyeShift[1])<.0001f);
+  CHECK(s.uiFocus>.99f);
   CHECK(s.pointPx==Vec2f{960,540}); CHECK(s.idle==0); CHECK(s.saccadeT==1);
 }
-TEST_CASE("living wander is deterministic weighted visible and bounded", "[unit][view][living]") {
-  auto in=input();
-  const GazeTarget targets[]={{"menu",{},.25f},{"lamp",{400,100,30},.2f},
-    {"hologram",{600,600,20},.4f},{"rack",{800,700,50},.15f},
-    {"behind",{100,100,-1},100},{"outside",{4000,100,10},100}};
-  in.targets=targets;
-  GazeState a,b; std::set<int> visited;
-  int last=-1; float fixationStart=0;
+namespace {
+const GazeTarget kTargets[]={{"menu",{},.25f},{"lamp",{400,100,30},.2f},
+  {"hologram",{600,600,20},.4f},{"rack",{800,700,50},.15f},
+  {"behind",{100,100,-1},100},{"outside",{4000,100,10},100}};
+}
+TEST_CASE("daydream stays off while the player keeps acting", "[unit][view][living]") {
+  auto in=input(); in.targets=kTargets;
+  GazeState s;
   for(int i=0;i<3600;++i) {
+    in.time=static_cast<double>(i)/60;
+    in.mouseMoved=i%300==0;  // input every 5 s
+    const auto count=s.fixationCount;
+    s=stepGaze(s,in);
+    REQUIRE(s.fixationCount==count); REQUIRE(s.daydream==0);
+  }
+  CHECK(kIdleBeforeWander==10.f);
+}
+TEST_CASE("daydream defocuses within 1.6 s of ten seconds idle and input clears it", "[unit][view][living]") {
+  auto in=input(); in.targets=kTargets; in.mouseOverPanel=false;
+  GazeState s;
+  int frames=0;
+  for(;frames<60*30 && s.daydream<1;++frames) { in.time=frames/60.0; s=stepGaze(s,in); }
+  CHECK(s.daydream==1);
+  CHECK(static_cast<float>(frames)/60>=kIdleBeforeWander);
+  CHECK(static_cast<float>(frames)/60<=kIdleBeforeWander+1.6f);
+  for(int i=0;i<60;++i) s=stepGaze(s,in);
+  CHECK(s.daydream==1);
+  in.mouseMoved=true; in.mousePx={300,300};
+  for(int i=0;i<18;++i) s=stepGaze(s,in);  // 0.3 s
+  CHECK(s.daydream<.05f);
+  CHECK(s.pointPx==Vec2f{300,300});  // the spot jumps to the mouse
+  CHECK(s.idle==0);
+  in.mouseMoved=false;  // a key or click clears it too
+  GazeState t;
+  for(int i=0;i<60*12;++i) t=stepGaze(t,in);
+  REQUIRE(t.daydream>0);
+  for(int i=0;i<18;++i) { auto k=in; k.input=true; t=stepGaze(t,k); }
+  CHECK(t.daydream<.05f);
+}
+TEST_CASE("daydream fixations last two to five seconds on several places and are deterministic", "[unit][view][living]") {
+  auto in=input(); in.targets=kTargets; in.mouseOverPanel=false;
+  GazeState a,b; std::set<std::pair<int,int>> places;
+  int lastTarget=-1; float fixationStart=-1; int fixations=0;
+  for(int i=0;i<60*70;++i) {
     in.time=static_cast<double>(i)/60;
     const auto count=a.fixationCount;
     a=stepGaze(a,in); b=stepGaze(b,in);
-    REQUIRE(a.pointPx==b.pointPx); REQUIRE(a.eyeShift==b.eyeShift);
-    REQUIRE(a.focusDistance==b.focusDistance);
-    REQUIRE(std::hypot(a.eyeShift[0],a.eyeShift[1])<=kEyeShiftMaxRadians+kDriftRadians+1e-5f);
+    REQUIRE(a.pointPx==b.pointPx); REQUIRE(a.daydream==b.daydream);
+    REQUIRE(a.focusDistance==b.focusDistance); REQUIRE(a.toPx==b.toPx);
     if(a.fixationCount!=count) {
-      CHECK(a.lastTarget!=last); CHECK(a.lastTarget<4);
-      if(last>=0) {CHECK(float(in.time)-fixationStart>=kFixationMin-1.f/60); CHECK(float(in.time)-fixationStart<=kFixationMax+2.f/60);}
-      fixationStart=float(in.time); last=a.lastTarget; visited.insert(last);
+      const float now=static_cast<float>(in.time);
+      if(fixationStart>=0) { CHECK(now-fixationStart>=kFixationMin-1.f/60); CHECK(now-fixationStart<=kFixationMax+2.f/60); }
+      fixationStart=now; ++fixations;
+      if(a.lastTarget>=0) { CHECK(a.lastTarget!=lastTarget); CHECK(a.lastTarget<4); lastTarget=a.lastTarget; }
+      else {
+        CHECK(a.toPx[0]>=.1f*1920); CHECK(a.toPx[0]<=.9f*1920);
+        CHECK(a.toPx[1]>=.1f*1080); CHECK(a.toPx[1]<=.9f*1080);
+      }
+      places.insert({int(a.toPx[0]),int(a.toPx[1])});
     }
-    if(i==151) CHECK(a.fixationCount>0);
   }
-  CHECK(visited.size()>=3);
+  CHECK(kFixationMin==2.f); CHECK(kFixationMax==5.f);
+  CHECK(fixations>=8);
+  CHECK(places.size()>=3);
   for(const auto intensity : {0.f,1.f}) {
-    in.wander=false; in.intensity=intensity; a={};
-    for(int i=0;i<600;++i) a=stepGaze(a,in);
-    CHECK(a.fixationCount==0); CHECK(a.eyeShift==Vec2f{}); CHECK(a.saccadeT==1);
+    in.wander=intensity==1.f ? false : true; in.intensity=intensity; a={};
+    for(int i=0;i<60*30;++i) a=stepGaze(a,in);
+    CHECK(a.fixationCount==0); CHECK(a.daydream==0); CHECK(a.saccadeT==1);
   }
+}
+TEST_CASE("daydream blur is uniform far from the spot and softer inside it", "[unit][view][living]") {
+  const Vec2f spot{960,540};
+  CHECK(daydreamBlurPixels(0,{100,100},spot,1080,1)==0);
+  const float far=daydreamBlurPixels(1,{100,100},spot,1080,1);
+  CHECK(far>=6.f);
+  CHECK(daydreamBlurPixels(1,spot,spot,1080,1)==Approx(.25f*far));
+  CHECK(daydreamBlurPixels(1,{960+.12f*1080,540},spot,1080,1)==Approx(.25f*far));
+  CHECK(daydreamBlurPixels(1,{960+.18f*1080,540},spot,1080,1)==Approx(far));
+  const float mid=daydreamBlurPixels(1,{960+.15f*1080,540},spot,1080,1);
+  CHECK(mid>.25f*far); CHECK(mid<far);
+  CHECK(daydreamBlurPixels(1,{100,100},spot,2160,2)==Approx(2*far));
+}
+TEST_CASE("the gaze never shifts the camera", "[unit][view][living]") {
+  auto in=input(); in.targets=kTargets; in.mouseOverPanel=false;
+  OrbitCamera cam; const auto reference=cam.viewProj(16.f/9);
+  GazeState s;
+  for(int i=0;i<60*30;++i) { in.time=i/60.0; s=stepGaze(s,in); }
+  CHECK(s.fixationCount>=3);  // it did wander through several saccades
+  CHECK(cam.viewProj(16.f/9)==reference);
 }
 TEST_CASE("living depth uses the camera's finite Vulkan projection", "[unit][view][living]") {
   OrbitCamera c;
@@ -112,13 +173,4 @@ TEST_CASE("living depth uses the camera's finite Vulkan projection", "[unit][vie
   CHECK(circleOfConfusion(20,9,cocScaleFor(20))==Approx(.7f*kWorldDefocusPixels));
   CHECK(circleOfConfusion(1,1000,cocScaleFor(20))==kWorldDefocusPixels);
   CHECK(circleOfConfusion(10,20,1)==circleOfConfusion(20,10,1));
-}
-TEST_CASE("living eye shift looks towards a pixel and is capped", "[unit][view][living]") {
-  const Vec2f size{1920,1080};
-  CHECK(eyeShiftToward({960,540},size,.9f)==Vec2f{0,0});
-  const auto right=eyeShiftToward({1900,540},size,.9f);
-  CHECK(right[0]<0); CHECK(right[1]==0);  // yaw towards +x pans the view right
-  const auto down=eyeShiftToward({960,1080},size,.9f);
-  CHECK(down[1]>0);
-  CHECK(std::hypot(eyeShiftToward({1e6f,1e6f},size,.9f)[0],eyeShiftToward({1e6f,1e6f},size,.9f)[1])<=kEyeShiftMaxRadians+1e-6f);
 }

@@ -69,6 +69,11 @@ int gHeartbeat = -1;
 int gLiving = -1;
 int gTremor = -1;
 int gWander = -1;
+/// --daydream-t <s>: a capture states the eye after `s` idle seconds (negative: off), and
+/// --daydream-wake <s> then moves the mouse and steps `s` more seconds (M24.4d).
+float gDaydreamT = -1.0f, gDaydreamWake = -1.0f;
+/// A click or key press since the last gaze step.
+bool gGazeInput = false;
 std::optional<view::Vec2f> gCliGazePin;
 int gCliGazeUi = -1;
 std::string gCliGazeTarget;
@@ -284,9 +289,20 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
     p.uiFocus = settings.gazeState.uiFocus;
     // The room blurs at every depth but the one the eye is on (section 4.4); where depth
     // cannot be read, the uniform defocus follows how much the eye is on the menu.
-    renderer.setDepthOfField(render::BoardRenderer::DepthOfField{
+    const auto& gaze = settings.gazeState;
+    render::BoardRenderer::DepthOfField dof{
         living.focus, view::cocScaleFor(render::kCellsPerMetre),
-        view::kWorldDefocusPixels * p.pixelScale, .35f * p.uiFocus});
+        view::kWorldDefocusPixels * p.pixelScale,
+        std::max(.35f * p.uiFocus, .5f * gaze.daydream)};
+    // Daydream (M24.4d): the whole viewport softens; a small spot at the gaze stays sharper.
+    p.daydream = gaze.daydream;
+    dof.floorPx = gaze.daydream * view::kDaydreamBlurPixels * p.pixelScale;
+    dof.spot[0] = gaze.pointPx[0];
+    dof.spot[1] = gaze.pointPx[1];
+    dof.spotRadius = view::kSpotRadius * static_cast<float>(height);
+    dof.spotFeather = view::kSpotFeather * static_cast<float>(height);
+    dof.spotFraction = view::kSpotBlurFraction;
+    renderer.setDepthOfField(dof);
   }
   for (const auto& record : ui.implantRecords()) {
     if (p.panelCount == p.panels.size()) break;
@@ -370,9 +386,9 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
   return wall ? std::array{0.f, req.alpha} : std::array{req.alpha, 0.f};
 }
 
-/// One step of the eye (M24.4c sections 4.5-4.6): choose the gaze, ease the focus, shift
-/// the camera by a fraction of a degree. Called once per frame after the lab camera is
-/// known and before the implant parameters are handed to the renderer.
+/// One step of the eye (M24.4c section 4.6, M24.4d): choose the gaze, ease the focus,
+/// daydream when idle. The camera is never touched. Called once per frame after the lab
+/// camera is known and before the implant parameters are handed to the renderer.
 LivingFrame stepLiving(render::Ui& ui, app::Shell& shell, view::OrbitCamera& camera,
                        bool capture, double seconds, float dt, std::uint32_t width,
                        std::uint32_t height, float intensity) {
@@ -465,8 +481,34 @@ LivingFrame stepLiving(render::Ui& ui, app::Shell& shell, view::OrbitCamera& cam
   in.seed = 0xC0FFEEu;
   (void)inWindow;
   auto& gaze = settings.gazeState;
-  const auto previous = gaze;
-  gaze = view::stepGaze(gaze, in);
+  in.input = gGazeInput;
+  gGazeInput = false;
+  if (capture && gDaydreamT >= 0) {
+    // Replay the idle seconds from a fresh eye, so the capture is the same however many
+    // warm-up frames ran. Then optionally wake it with a mouse move.
+    gaze = {};
+    in.dt = 1.f / 60;
+    in.mouseMoved = false;
+    in.wander = true;
+    in.mouseOverPanel = false;
+    const int steps = static_cast<int>(std::lround(gDaydreamT * 60));
+    for (int i = 0; i < steps; ++i) {
+      in.time = i / 60.0;
+      gaze = view::stepGaze(gaze, in);
+    }
+    if (gDaydreamWake >= 0) {
+      in.mouseMoved = true;
+      in.mousePx = {viewport[0] * .3f, viewport[1] * .4f};
+      const int wake = static_cast<int>(std::lround(gDaydreamWake * 60));
+      for (int i = 0; i < wake; ++i) {
+        in.time = (steps + i) / 60.0;
+        gaze = view::stepGaze(gaze, in);
+      }
+    }
+    in.dt = 0;
+  } else {
+    gaze = view::stepGaze(gaze, in);
+  }
   // A capture states the settled gaze outright, so the frame does not depend on how many
   // warm-up frames preceded it (a finished move equals a cut).
   if (capture && !in.wander && gaze.saccadeT < 1) {
@@ -489,7 +531,6 @@ LivingFrame stepLiving(render::Ui& ui, app::Shell& shell, view::OrbitCamera& cam
     gaze.saccadeT = 1;
     gaze.uiFocus = gaze.uiFocusTarget = menu ? 1.f : 0.f;
     gaze.focusDistance = gaze.focusDistanceTarget = p->second;
-    gaze.eyeShift = gaze.eyeShiftTarget = menu ? view::Vec2f{} : view::eyeShiftToward(p->first, viewport, camera.fovY);
   };
   if (!settings.gazeTarget.empty()) {
     pinTarget(settings.gazeTarget);
@@ -502,19 +543,9 @@ LivingFrame stepLiving(render::Ui& ui, app::Shell& shell, view::OrbitCamera& cam
     gaze.uiFocus = gaze.uiFocusTarget = static_cast<float>(settings.gazeUi);
   }
 
-  camera.yaw += gaze.eyeShift[0];
-  camera.pitch += gaze.eyeShift[1];
-
   const bool tremorOn = gTremor >= 0 ? gTremor == 1 : !capture && settings.tremor;
   out.tremor = tremorOn ? view::tremorOffset(seconds, intensity, 0xA11CEu) : view::Vec2f{};
-  // The eye shift's own angular speed joins the camera's, so a wander saccade dims the
-  // layer as real saccadic suppression does: 25 % for the 45 ms it takes (brief 4).
-  const float sx = gaze.eyeShift[0] - previous.eyeShift[0];
-  const float sy = gaze.eyeShift[1] - previous.eyeShift[1];
-  const float speed = dt > 0 ? std::hypot(sx, sy) / dt : 0.f;
-  const bool wanderSaccade = gaze.idle >= view::kIdleBeforeWander && in.wander &&
-                             gaze.saccadeT < 1 && intensity >= .5f;
-  out.dip = std::max(view::saccadicDip(speed, intensity), wanderSaccade ? .25f : 0.f);
+  out.dip = 0;  // the eye-shift term was the gaze's only input; the camera's own dip is the UI's
 
   // The room's focus, in dioptres: between the gazed depth and the menu's depth.
   const float menuFocus = view::kMenuFocusDistanceMetres * render::kCellsPerMetre;
@@ -2151,6 +2182,8 @@ int main(int argc, char** argv) {
           "--tremor 0|1 and --gaze-wander 0|1 (captures default off); --gaze X,Y pins the\n"
           "gaze (fractions); --gaze-ui 0|1 pins menu/room focus; --gaze-target KEY pins a\n"
           "fixation; --warp K overrides the lens warp.\n"
+          "--daydream-t S pins the eye S idle seconds into its daydream (blurred viewport,\n"
+          "sharper focus spot); --daydream-wake S then moves the mouse and steps S more.\n"
           "--hud-framing 0|1 toggles HUD-safe camera framing for this run.\n"
           "--capture-t SECONDS pins the newest tray icon scan (0..0.35).\n"
           "--event-t SECONDS pins the HUD turn flip and newest ledger row; --think-t "
@@ -2333,6 +2366,12 @@ int main(int argc, char** argv) {
        : arg == "--tremor" ? gTremor
        : arg == "--gaze-ui" ? gCliGazeUi
                             : gWander) = value;
+    } else if (arg == "--daydream-t" || arg == "--daydream-wake") {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "%s requires seconds\n", arg.c_str());
+        return 1;
+      }
+      (arg == "--daydream-t" ? gDaydreamT : gDaydreamWake) = std::strtof(argv[++i], nullptr);
     } else if (arg == "--gaze-target") {
       if (i + 1 >= argc) {
         std::fprintf(stderr, "--gaze-target requires a key\n");
@@ -2659,6 +2698,7 @@ int main(int argc, char** argv) {
       // The first click or key completes the board's boot at once and is then handled
       // normally (M23.10 section 3).
       if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        gGazeInput = true;
         fxTimeline.skipBoot();
         (*ui)->skipTransition();
       }

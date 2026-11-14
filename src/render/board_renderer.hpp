@@ -315,6 +315,12 @@ class BoardRenderer {
     float cocScale{0};
     float maxPx{0};
     float fallback{0};
+    /// Daydream (M24.4d): a uniform floor on the circle of confusion, in pixels, and the
+    /// soft-edged focus spot (centre in target pixels, radius and feather in pixels) inside
+    /// which that floor falls to `spotFraction` of itself.
+    float floorPx{0};
+    float spot[2]{0, 0};
+    float spotRadius{0}, spotFeather{1}, spotFraction{1};
   };
   void setDepthOfField(std::optional<DepthOfField> dof) noexcept { dof_ = dof; }
   /// True when depth of field would run the depth-aware pass on this device.
