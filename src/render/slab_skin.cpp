@@ -82,7 +82,8 @@ int latticeDistance(const PlaySurface& s, int f1, int r1, int f2, int r2) {
 }  // namespace
 
 std::vector<Rib> slabRibs(const PlaySurface& shaped, int count, const view::Vec3& yoke,
-                          float formed, const std::vector<CellId>* skip) {
+                          float formed, const std::vector<CellId>* skip,
+                          const view::Vec3* eye) {
   std::vector<Rib> ribs;
   if (shaped.stacked() || shaped.empty() || count <= 0) return ribs;
   // Each rib grows out from its middle over the first stretch of the morph.
@@ -94,6 +95,7 @@ std::vector<Rib> slabRibs(const PlaySurface& shaped, int count, const view::Vec3
   const auto skipped = [&](const view::Vec3& p) {
     const SurfaceSeat& seat = nearestSeat(shaped, p);
     if (view::dot(p - seat.centre, seat.normal) > -0.5f * kRibBehindCells) return true;
+    if (eye != nullptr && !shaped.blocked(*eye, p, kRibEyeEps)) return true;
     if (skip == nullptr || skip->empty()) return false;
     return std::binary_search(skip->begin(), skip->end(), seat.cell);
   };
@@ -166,6 +168,54 @@ std::vector<Rib> slabRibs(const PlaySurface& shaped, int count, const view::Vec3
   for (std::size_t i = 0; i < spokes; ++i)
     ribs.push_back(Rib{{yoke, nearest[near[i].second]}});
   return ribs;
+}
+
+std::vector<Rib> outsideHoops(const PlaySurface& shaped, int count, float formed) {
+  std::vector<Rib> hoops;
+  if (shaped.stacked() || shaped.empty() || count <= 0 ||
+      shaped.kind() != app::SurfaceKind::Torus)
+    return hoops;
+  const float grow = smooth(view::kTorusRollEnd, view::kTorusRollEnd + 0.2f, formed);
+  if (grow <= 0.0f) return hoops;
+  const float n = static_cast<float>(shaped.files());
+  const float mid = 0.5f * n, half = grow * mid;
+  // Two points per cell round the tube; a hoop still growing ends exactly at its tips.
+  std::vector<float> ts;
+  if (grow >= 1.0f) {
+    for (float t = 0.0f; t <= n + 1e-4f; t += 0.5f) ts.push_back(t);
+  } else {
+    ts.push_back(mid - half);
+    for (float t = 0.0f; t <= n; t += 0.5f)
+      if (std::abs(t - mid) < half) ts.push_back(t);
+    ts.push_back(mid + half);
+  }
+  const int ranks = shaped.ranks();
+  for (int k = 0; k < count; ++k) {
+    // Evenly spaced, on the nearest boundary between two rows of tiles.
+    const float rank = std::round((static_cast<float>(k) + 0.5f) *
+                                  static_cast<float>(ranks) / static_cast<float>(count));
+    // Hardware belongs to the physical outside, independently of which side carries
+    // the pieces. Once the tube has rolled shut, its section centre gives that side
+    // even when the play normals are inverted or the tiles have slid around the tube.
+    view::Vec3 centre{};
+    constexpr int kSectionSamples = 32;
+    for (int i = 0; i < kSectionSamples; ++i) {
+      view::Vec3 p{};
+      (void)shaped.pointAt(n * static_cast<float>(i) / kSectionSamples, rank, p);
+      centre = centre + p * (1.0f / kSectionSamples);
+    }
+    Rib hoop;
+    for (const float t : ts) {
+      view::Vec3 p{};
+      if (!shaped.pointAt(t, rank, p)) continue;
+      auto normal = normalAt(shaped, std::min(t, n - 1e-3f), rank);
+      if (view::dot(normal, p - centre) < 0.0f) normal = normal * -1.0f;
+      hoop.points.push_back(p + normal * kHoopLiftCells);
+    }
+    if (grow >= 1.0f && hoop.points.size() >= 2) hoop.points.back() = hoop.points.front();
+    if (hoop.points.size() >= 2) hoops.push_back(std::move(hoop));
+  }
+  return hoops;
 }
 
 std::array<float, 2> wrapCloseAt(app::SurfaceKind kind) {
@@ -306,13 +356,13 @@ std::size_t insertLabCylinders(InstanceSet& set, const std::vector<Instance>& ba
   return bars.size();
 }
 
-std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs) {
+std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs, float diameter) {
   std::vector<Instance> bars;
   const view::Rgba metal = view::Rgba::hex(0x2A2E35);
   for (const Rib& rib : ribs) {
     for (std::size_t i = 1; i < rib.points.size(); ++i) {
       if (view::length(rib.points[i] - rib.points[i - 1]) < 1e-5f) continue;
-      Instance bar = cylinderBetween(rib.points[i - 1], rib.points[i], kRibDiameter);
+      Instance bar = cylinderBetween(rib.points[i - 1], rib.points[i], diameter);
       bar.color[0] = metal.r;
       bar.color[1] = metal.g;
       bar.color[2] = metal.b;

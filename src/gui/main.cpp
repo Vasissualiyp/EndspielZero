@@ -621,20 +621,44 @@ struct RigTrack {
 };
 RigTrack gRigTrack;
 
+render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight);
+
+/// The placements the rig stands in: the session's, moved under the shape while the
+/// geometry view draws a glued 2-D board as its surface (M24.9), so the shape sits on its
+/// slab. Cached: the shape's centre is a whole surface build.
+const std::vector<view::Placement>& rigPlacements(const app::Shell& shell) {
+  const app::Session& session = *shell.session();
+  if (!optionsFor(shell, -1).surface) return session.placements();
+  static const VariantSpec* variant = nullptr;
+  static std::vector<view::Placement> from, moved;
+  if (variant != &session.variant() || from.size() != session.placements().size() ||
+      !std::equal(from.begin(), from.end(), session.placements().begin(),
+                  [](const auto& a, const auto& b) {
+                    return a.cell == b.cell && a.x == b.x && a.y == b.y && a.z == b.z &&
+                           a.slice == b.slice;
+                  })) {
+    variant = &session.variant();
+    from = session.placements();
+    moved = render::shapeRigPlacements(session.variant(), from);
+  }
+  return moved;
+}
+
 /// Remember the layout before a capture's script runs, so the change it makes is a move.
-void primeRigTrack(const app::Session& session) {
+void primeRigTrack(const app::Shell& shell) {
   gRigTrack = RigTrack{};
-  gRigTrack.session = session.id();
-  gRigTrack.placements = session.placements();
+  gRigTrack.session = shell.session()->id();
+  gRigTrack.placements = rigPlacements(shell);
 }
 
 /// The rig around the current layout (M24.6: it follows layout changes, `trackLayout`).
-const render::RigLayout* rigLayoutFor(const app::Session& session) {
+const render::RigLayout* rigLayoutFor(const app::Shell& shell) {
+  const app::Session& session = *shell.session();
   auto& t = gRigTrack;
   if (t.session != session.id()) {
     t = RigTrack{};
     t.session = session.id();
-    t.placements = session.placements();
+    t.placements = rigPlacements(shell);
   }
   if (!t.layout && !t.placements.empty())
     t.layout = render::rigLayout(*gLabScene, t.placements);
@@ -651,13 +675,33 @@ bool samePlacements(const std::vector<view::Placement>& a,
   return true;
 }
 
+/// `b` is `a` moved as a whole in x and y: the shape view switching on or off (M24.9).
+bool shiftedPlacements(const std::vector<view::Placement>& a,
+                       const std::vector<view::Placement>& b) {
+  if (a.size() != b.size() || a.empty()) return false;
+  const float dx = b[0].x - a[0].x, dy = b[0].y - a[0].y;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (a[i].cell != b[i].cell || a[i].slice != b[i].slice || a[i].z != b[i].z ||
+        std::abs(b[i].x - a[i].x - dx) > 1e-4f || std::abs(b[i].y - a[i].y - dy) > 1e-4f)
+      return false;
+  return true;
+}
+
 /// Follow the session's layout: a change becomes a relayout move when `animate` (no
-/// deploy or stow is running), else the rig snaps to it.
-void trackLayout(const app::Session& session, bool animate) {
-  const auto* current = rigLayoutFor(session);
+/// deploy or stow is running), else the rig snaps to it. The shape view switching on or
+/// off moves the whole lab with the board (the camera reframes by the same amount), so
+/// nothing on screen jumps (M24.9).
+void trackLayout(const app::Shell& shell, bool animate) {
+  const auto* current = rigLayoutFor(shell);
   auto& t = gRigTrack;
-  const auto& next = session.placements();
+  const auto& next = rigPlacements(shell);
   if (samePlacements(t.placements, next)) return;
+  if (shiftedPlacements(t.placements, next)) {
+    t.move.reset();
+    t.placements = next;
+    t.layout = render::rigLayout(*gLabScene, next);
+    return;
+  }
   auto layout = current ? render::rigLayoutAfter(*gLabScene, *current, next)
                         : render::rigLayout(*gLabScene, next);
   if (animate && current && layout) {
@@ -720,7 +764,7 @@ bool stackedShapeView(const app::Shell& shell) {
 void configureRigMoves(render::Ui& ui, const app::Shell& shell) {
   const bool on = labEnabled(shell) && gStation.empty() && shell.hasGame() &&
                   !shell.attracting() && gLabScene->doc().deploy.has_value();
-  const render::RigLayout* layout = on ? rigLayoutFor(*shell.session()) : nullptr;
+  const render::RigLayout* layout = on ? rigLayoutFor(shell) : nullptr;
   const int groups = layout ? layout->slots : 1;
   const float shutdown =
       on && shell.session()->endEvent().has_value() ? 0.0f : app::kStowShutdownSeconds;
@@ -746,8 +790,8 @@ RigFrame rigFrame(app::Shell& shell, const render::Ui& ui, bool hold, float inte
   RigFrame f;
   if (!labGame(shell, hold)) return f;
   if (const auto m = ui.rigMove(); m && !m->done) f.move = m;
-  trackLayout(*shell.session(), !f.move && (gCapturing ? gRelayoutT >= 0.0f : true));
-  f.layout = rigLayoutFor(*shell.session());
+  trackLayout(shell, !f.move && (gCapturing ? gRelayoutT >= 0.0f : true));
+  f.layout = rigLayoutFor(shell);
   if (f.layout == nullptr) return f;
   render::constrainGameCamera(*shell.session(), *f.layout);
   // A layout change in flight moves the slabs (M24.6).
@@ -795,81 +839,44 @@ std::optional<float> stowShutdown(const RigFrame& rig) {
   return std::clamp(rig.move->age / rig.move->shutdown, 0.0f, 1.0f);
 }
 
-/// The camera re-aimed at `aim` from where it stands.
-view::OrbitCamera lookAt(view::OrbitCamera c, const view::Vec3& aim) {
-  const auto back = c.eye() - aim;
-  c.target = aim;
-  c.distance = std::max(1e-3f, view::length(back));
-  c.pitch = std::asin(std::clamp(back.z / c.distance, -1.f, 1.f));
-  c.yaw = std::atan2(back.x, -back.y);
-  return c;
-}
-
-/// The flight of a deploy (the lab's station to `game`) or a stow (back), in board space.
-/// The eye rides `view::blendCamera` with `rigEase`; the aim watches the travelling slab
-/// - the first group's out of the rack, the last group's back in - turning onto it and
-/// off it smoothly, so every endpoint is held exactly. (The spec blends the target by
-/// smoothstep 0.4..1.4; a target-only blend lost the slab while it ran overhead.)
+/// The deploy's or stow's camera flight (`render::rigFlightCamera`) for this frame.
 view::OrbitCamera rigFlightCamera(const RigFrame& rig, const view::OrbitCamera& game,
                                   const view::OrbitCamera& lab) {
-  const auto smooth = [](float x) {
-    x = std::clamp(x, 0.f, 1.f);
-    return x * x * (3 - 2 * x);
-  };
   const auto& m = *rig.move;
-  const auto& layout = *rig.layout;
-  if (m.move == app::ScreenMove::Deploy) {
-    constexpr float kFlyStart = 0.4f;  // the menu has dissolved; the slab is out
-    if (m.age <= kFlyStart) return lab;
-    if (m.age >= m.lock) return game;
-    const auto slab = layout.groups.front().slabs.front();
-    // On the slab until it has run along the rail, then onto the game's target.
-    const float overhead = layout.paths[slab].departure + view::kSlabTravelEnd;
-    const auto follow =
-        rig.poses[slab].centre +
-        (game.target - rig.poses[slab].centre) *
-            smooth((m.age - overhead) / std::max(.01f, m.lock - overhead));
-    const auto aim =
-        lab.target + (follow - lab.target) * smooth((m.age - kFlyStart) / 0.3f);
-    return lookAt(
-        view::blendCamera(lab, game,
-                          view::rigEase((m.age - kFlyStart) / (m.lock - kFlyStart))),
-        aim);
-  }
-  if (m.age <= m.shutdown) return game;
-  if (m.age >= m.lock) return lab;
-  const float u = m.age - m.shutdown, span = m.lock - m.shutdown;
-  const auto slab = layout.groups.back().slabs.front();
-  // Onto the slab as it leaves its mast, off it once it is tilting into its bay.
-  const float inBay = view::stowTravelSeconds(layout.slots) -
-                      (view::kSlabLockSeconds - view::kSlabTiltEnd);
-  const float off = smooth((u - inBay) / std::max(.01f, span - inBay));
-  const auto follow =
-      rig.poses[slab].centre + (lab.target - rig.poses[slab].centre) * off;
-  const auto aim = game.target + (follow - game.target) * smooth(u / 0.3f);
-  return lookAt(view::blendCamera(game, lab, view::rigEase(u / span)), aim);
+  render::RigFlight f;
+  f.deploy = m.move == app::ScreenMove::Deploy;
+  f.age = m.age;
+  f.lock = m.lock;
+  f.shutdown = m.shutdown;
+  return render::rigFlightCamera(*rig.layout, rig.poses, f, game, lab);
 }
 
 render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight);
 
 /// The ribs for the board's current shape (M24.5b), joined by two spokes to the yoke
-/// under its slab - the M24.5 yoke of the board's (single) slab.
-std::vector<render::Rib> skinRibs(const app::Shell& shell,
-                                  const std::vector<render::RigPiece>& pieces) {
+/// under its slab - the M24.5 yoke of the board's (single) slab, at its boss under the
+/// slab's centre, where M24.9 centres the shape. M24.9: no rib shows outside a Klein
+/// bottle's skin from `eye`, and the closed torus adds thin hoops on the outside.
+void appendSkinFrame(render::InstanceSet& instances, const app::Shell& shell,
+                     const RigFrame& rig, const std::vector<render::RigPiece>& pieces,
+                     const view::Vec3& eye) {
   const auto& v = shell.session()->variant();
   render::SurfacePose pose = render::surfacePose(shell.settings(), v);
   pose.skin = true;
   const render::PlaySurface surf = render::PlaySurface::build(v, pose);
-  if (surf.empty() || surf.stacked()) return {};
-  const auto yoke = std::find_if(pieces.begin(), pieces.end(), [](const auto& p) {
-    return p.kind == render::RigPiece::Kind::Yoke;
+  if (surf.empty() || surf.stacked() || rig.poses.empty()) return;
+  const bool yoke = std::any_of(pieces.begin(), pieces.end(), [](const auto& p) {
+    return p.kind == render::RigPiece::Kind::Yoke && p.slab == 0;
   });
-  if (yoke == pieces.end()) return {};
-  const view::Bounds& b = yoke->bounds;
-  const view::Vec3 centre{(b.minX + b.maxX) * 0.5f, (b.minY + b.maxY) * 0.5f,
-                          (b.minZ + b.maxZ) * 0.5f};
-  return render::slabRibs(surf, render::kRibCount, centre, pose.formed,
-                          &surf.passThrough());
+  if (!yoke) return;
+  const bool klein = surf.kind() == app::SurfaceKind::Klein;
+  (void)render::appendRibs(
+      instances, render::slabRibs(
+                     surf, render::kRibCount, render::yokeBoss(*rig.layout, rig.poses, 0),
+                     pose.formed, &surf.passThrough(), klein ? &eye : nullptr));
+  (void)render::appendRibs(instances,
+                           render::outsideHoops(surf, render::kRibCount, pose.formed),
+                           render::kHoopDiameter);
 }
 
 /// Draw the lab around the board (M24.5): the camera flies between the lab's station and
@@ -961,7 +968,7 @@ render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
   }
   // The ribs that hold the skin into its shape (M24.5b), joined to the board's yoke.
   if (renderer.options().slabSkin && renderer.options().surface)
-    (void)render::appendRibs(instances, skinRibs(shell, rigPieces));
+    appendSkinFrame(instances, shell, rig, rigPieces, eye);
   const auto projected =
       appendProjector(ui, shell.settings(), instances, renderer.theme());
   render::placeInstances(instances.holo, layout.xform);
@@ -1033,7 +1040,7 @@ std::string skinReport(const app::Shell& shell) {
 /// The console's `rig` dump: scale, groups, slab centres and their current poses.
 std::string rigReport(const app::Shell& shell, const render::Ui& ui) {
   if (!labEnabled(shell) || !shell.hasGame() || !gLabScene->doc().deploy) return {};
-  const auto* layout = rigLayoutFor(*shell.session());
+  const auto* layout = rigLayoutFor(shell);
   if (layout == nullptr) return {};
   const auto rig = rigFrame(const_cast<app::Shell&>(shell), ui, true,
                             1.0f);  // a report never moves the camera it describes
@@ -1202,7 +1209,7 @@ render::BoardFxState captureFx(const render::BoardRenderer& renderer,
 #ifdef CB_HAVE_IMGUI
   // A pinned deploy: the board stays dark until the last slab locks, then boots.
   if (gDeployT >= 0.0f && labGame(shell, false))
-    if (const auto* layout = rigLayoutFor(session))
+    if (const auto* layout = rigLayoutFor(shell))
       fx.bootAge = deployBootAge(gDeployT, renderer.options().presentationIntensity < .5f
                                                ? 0.0f
                                                : layout->lastLock);
@@ -1678,8 +1685,10 @@ void updateShapeSequence(app::Shell& shell, render::ShapeMoveSequence& seq, floa
   render::stepShapeSequenceOnce(shell, seq, dt);
 }
 
+/// `lab`: a lab game frames its board on more of the screen (`render::labStageArea`,
+/// M24.9); the same framing feeds the pick ray, so clicks stay exact.
 bool applyStage(app::Session& session, const render::UiRequest& request,
-                render::BoardRect viewport, bool enabled) {
+                render::BoardRect viewport, bool enabled, bool lab) {
   if (!enabled || request.stageRect[2] <= 0 || request.stageRect[3] <= 0)
     return session.setFramingArea(1, 1);
   const float cx = viewport.x + viewport.width * .5f;
@@ -1688,7 +1697,12 @@ bool applyStage(app::Session& session, const render::UiRequest& request,
                                request.stageRect[0] + request.stageRect[2] - cx);
   const float halfH = std::min(cy - request.stageRect[1],
                                request.stageRect[1] + request.stageRect[3] - cy);
-  return session.setFramingArea(2 * halfW / viewport.width, 2 * halfH / viewport.height);
+  const float w = 2 * halfW / viewport.width, h = 2 * halfH / viewport.height;
+  if (lab) {
+    const auto area = render::labStageArea(w, h);
+    return session.setFramingArea(area[0], area[1]);
+  }
+  return session.setFramingArea(w, h);
 }
 
 /// Put the camera round whatever the board has just become.
@@ -1844,7 +1858,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
   // light bridge.
   gCapturing = true;
   if (shell->session() != nullptr) {
-    primeRigTrack(*shell->session());
+    primeRigTrack(*shell);
     shell->session()->setLightBridges(gLab == 1);
   }
   if (!playing && !script.empty()) {
@@ -2171,9 +2185,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
       renderer->setBlur(away);
       if (frame.valid()) {
         shell->session()->setBoardAspect(frame.width / frame.height);
-        if (applyStage(
-                *shell->session(), request, frame,
-                gHudFraming >= 0 ? gHudFraming == 1 : shell->settings().hudFraming))
+        if (applyStage(*shell->session(), request, frame,
+                       gHudFraming >= 0 ? gHudFraming == 1 : shell->settings().hudFraming,
+                       labGame(*shell, false)))
           frameBoard(*shell);
       }
       // The attract board is the menu's subject and its frame is only the left half. A
@@ -4075,9 +4089,9 @@ int main(int argc, char** argv) {
       if (boardRect.valid()) {
         shell->session()->setBoardAspect(boardRect.width / boardRect.height);
 #ifdef CB_HAVE_IMGUI
-        if (applyStage(
-                *shell->session(), request, boardRect,
-                gHudFraming >= 0 ? gHudFraming == 1 : shell->settings().hudFraming))
+        if (applyStage(*shell->session(), request, boardRect,
+                       gHudFraming >= 0 ? gHudFraming == 1 : shell->settings().hudFraming,
+                       labGame(*shell, false)))
           frameBoard(*shell);
 #endif
       }

@@ -769,11 +769,11 @@ fov = 64.99525
 
 [[station]]
 name = "watch"
-target = [2.3275, 1.5246, 1.2159]
-distance = 2.5
-yaw = -10
-pitch = 10
-fov = 68
+target = [-0.147565, 1.930461, 1.249241]
+distance = 1.3
+yaw = -95.117554
+pitch = 8.928346
+fov = 65.559388
 
 [[station]]
 name = "settings"

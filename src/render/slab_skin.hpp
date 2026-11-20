@@ -22,6 +22,8 @@ namespace cb::render {
 inline constexpr float kRibBehindCells = 0.6f;
 inline constexpr int kRibCount = 6;
 inline constexpr float kRibDiameter = 0.012f * kCellsPerMetre;
+/// How near the skin a sight line may pass and still count as hidden by it (cells).
+inline constexpr float kRibEyeEps = 0.05f;
 /// Two corners nearer than this (cells) that the lattice keeps more than two cells apart
 /// mark a pass-through cell.
 inline constexpr float kPassThroughGap = 0.35f;
@@ -39,9 +41,27 @@ struct Rib {
 /// when `formed` is 0. Each rib shows from its middle outwards over
 /// smoothstep(0, 0.35, formed) of its length. Spokes come last. A rib point whose nearest
 /// seat is in `skip` (the Klein light band, sorted) is left out, splitting its rib.
+///
+/// M24.9: with `eye`, a rib point (or the chord to the one before it) that the skin does
+/// not hide from `eye` is left out too - on a Klein bottle the playing side faces into
+/// the bottle, so "behind the skin" is outside it, and a rib piece there would stand in
+/// the open. Such a piece vanishes exactly as it would come into view, so nothing pops.
 [[nodiscard]] std::vector<Rib> slabRibs(const PlaySurface& shaped, int count,
                                         const view::Vec3& yoke, float formed,
-                                        const std::vector<CellId>* skip = nullptr);
+                                        const std::vector<CellId>* skip = nullptr,
+                                        const view::Vec3* eye = nullptr);
+
+/// M24.9: on the closed torus the ribs are inside the tube, so the structure shows as
+/// thin hoops round the tube on the outside instead: `count` loops along the files at
+/// rank boundaries (between two rows of tiles, evenly spaced), two points per cell, clear
+/// of the tiles' physical outside by `kHoopLiftCells`, regardless of playing-side
+/// inversion. They grow from their middle once the files have rolled shut
+/// (`view::kTorusRollEnd`), over the next 0.2 of the morph. Empty for any other shape.
+inline constexpr float kHoopDiameter = 0.006f * kCellsPerMetre;
+inline constexpr float kHoopLiftCells =
+    PlaySurface::kThickness * 0.5f + kHoopDiameter * 0.5f + 0.02f;
+[[nodiscard]] std::vector<Rib> outsideHoops(const PlaySurface& shaped, int count,
+                                            float formed);
 
 /// The `formed` value at which each lattice axis (0 files, 1 ranks) closes, read off the
 /// same stage table the seam rails use; NaN for an axis that never closes.
@@ -66,7 +86,8 @@ struct Rib {
 
 /// Draw the ribs as a chain of thin lab cylinders (metal, #2A2E35) in the lab batch.
 /// Returns the number of cylinder instances added.
-std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs);
+std::size_t appendRibs(InstanceSet& set, const std::vector<Rib>& ribs,
+                       float diameter = kRibDiameter);
 /// A lab `cylinder` instance from `a` to `b` (its axis is local +Z), `diameter` across,
 /// a touch longer than the segment so consecutive ones meet without a crack. Colour,
 /// material and signals are the caller's.
