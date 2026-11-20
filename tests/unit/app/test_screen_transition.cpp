@@ -117,3 +117,53 @@ TEST_CASE("station panels leave early arrive late and calm cross fades",
   CHECK(calm.leaveAlpha == Approx(.5));
   CHECK(calm.arriveAlpha == Approx(.5));
 }
+
+TEST_CASE("deploy and stow are the lab's menu-game moves (M24.5)", "[unit][app][rig]") {
+  // The classification stays; the interface upgrades it on the lab path, as it does
+  // Cut to Station.
+  CHECK(classifyMove(Screen::MainMenu, Screen::Game) == ScreenMove::MenuToGame);
+  CHECK(classifyMove(Screen::Game, Screen::MainMenu) == ScreenMove::GameToMenu);
+  CHECK(moveSeconds(ScreenMove::Deploy, 1) == Approx(kDeploySeconds));
+  CHECK(kDeploySeconds == Approx(3.0f));
+  CHECK(moveSeconds(ScreenMove::Stow, 1) == Approx(kStowSeconds));
+  CHECK(moveSeconds(ScreenMove::Deploy, .3f) == Approx(kCalmFadeSeconds));
+  CHECK(moveSeconds(ScreenMove::Stow, .3f) == Approx(kCalmFadeSeconds));
+
+  // Deploy: the menu dissolves over 0.3 s; the HUD forms only after the last lock.
+  const float lock = 1.62f;
+  CHECK(moveFx(ScreenMove::Deploy, 0, 1, 3, lock).leaveAlpha == Approx(1));
+  CHECK(moveFx(ScreenMove::Deploy, .3f, 1, 3, lock).leaveAlpha == Approx(0));
+  CHECK(moveFx(ScreenMove::Deploy, lock - .01f, 1, 3, lock).arriveAlpha == 0);
+  const auto forming = moveFx(ScreenMove::Deploy, lock + .3f, 1, 3, lock);
+  CHECK(forming.arriveAlpha > 0);
+  CHECK(forming.arriveAlpha < 1);
+  CHECK_FALSE(forming.holdsBoard);
+  CHECK_FALSE(forming.done);
+  CHECK(moveFx(ScreenMove::Deploy, 3, 1, 3, lock).done);
+
+  // Stow: the board stays drawn until the slabs are home, then the menu forms.
+  const auto held = moveFx(ScreenMove::Stow, 1.5f, 1, 3.8f, 2.8f);
+  CHECK(held.holdsBoard);
+  CHECK(held.arriveAlpha == 0);
+  CHECK(held.powerDown == 0);  // the stow's shutdown is the front end's, compressed
+  const auto menu = moveFx(ScreenMove::Stow, 3.3f, 1, 3.8f, 2.8f);
+  CHECK_FALSE(menu.holdsBoard);
+  CHECK(menu.arriveAlpha > 0);
+  CHECK(menu.arriveAlpha < 1);
+
+  for (const auto move : {ScreenMove::Deploy, ScreenMove::Stow})
+    for (const float intensity : {1.0f, 0.0f}) {
+      const float total = moveSeconds(move, intensity);
+      const auto fx = moveFx(move, total, intensity);
+      CHECK(fx.done);
+      CHECK(fx.arriveAlpha == 1.0f);
+      CHECK(fx.leaveAlpha == 0.0f);
+      CHECK_FALSE(fx.holdsBoard);
+      // Calm is the one cross-fade.
+      if (intensity < .5f) {
+        const auto mid = moveFx(move, total / 2, intensity);
+        CHECK_FALSE(mid.holdsBoard);
+        CHECK(mid.leaveAlpha + mid.arriveAlpha == Approx(1.0f));
+      }
+    }
+}

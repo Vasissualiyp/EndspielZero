@@ -379,28 +379,31 @@ TEST_CASE("implant and heartbeat toggles persist and have debug aliases",
   CHECK(has(app::DebugConsole::help(), "heartbeat [on|off]"));
 }
 
-TEST_CASE("living gaze controls are inspectable and living preference persists", "[unit][app][living]") {
-  auto shell=app::Shell::create({"standard"},{}); REQUIRE(shell);
+TEST_CASE("living gaze controls are inspectable and living preference persists",
+          "[unit][app][living]") {
+  auto shell = app::Shell::create({"standard"}, {});
+  REQUIRE(shell);
   app::DebugConsole c;
   CHECK(shell->settings().livingVision);
-  CHECK(c.run(*shell,"living off")=="living off");
-  CHECK(c.run(*shell,"get livingVision")=="living_vision = false");
-  CHECK(c.run(*shell,"tremor off")=="tremor off");
-  CHECK(c.run(*shell,"wander off")=="wander off");
-  CHECK(c.run(*shell,"gaze .3 .8")=="gaze pinned");
-  REQUIRE(shell->settings().gazePin); CHECK((*shell->settings().gazePin)[0]==.3f);
-  CHECK(c.run(*shell,"gaze ui")=="gaze ui");
-  CHECK(shell->settings().gazeUi==1);
-  CHECK(c.run(*shell,"gaze off")=="gaze off");
+  CHECK(c.run(*shell, "living off") == "living off");
+  CHECK(c.run(*shell, "get livingVision") == "living_vision = false");
+  CHECK(c.run(*shell, "tremor off") == "tremor off");
+  CHECK(c.run(*shell, "wander off") == "wander off");
+  CHECK(c.run(*shell, "gaze .3 .8") == "gaze pinned");
+  REQUIRE(shell->settings().gazePin);
+  CHECK((*shell->settings().gazePin)[0] == .3f);
+  CHECK(c.run(*shell, "gaze ui") == "gaze ui");
+  CHECK(shell->settings().gazeUi == 1);
+  CHECK(c.run(*shell, "gaze off") == "gaze off");
   CHECK_FALSE(shell->settings().gazePin);
-  CHECK(c.run(*shell,"warp .02")=="warp set");
-  CHECK(shell->settings().warpOverride==.02f);
-  CHECK(c.run(*shell,"warp default")=="warp default");
+  CHECK(c.run(*shell, "warp .02") == "warp set");
+  CHECK(shell->settings().warpOverride == .02f);
+  CHECK(c.run(*shell, "warp default") == "warp default");
   CHECK_FALSE(shell->settings().warpOverride);
-  CHECK(has(c.run(*shell,"gaze"),"focus"));
-  CHECK(has(c.run(*shell,"gaze nan .1"),"usage"));
-  CHECK(has(c.run(*shell,"warp inf"),"usage"));
-  const auto path=std::filesystem::temp_directory_path()/"cb-living-settings.conf";
+  CHECK(has(c.run(*shell, "gaze"), "focus"));
+  CHECK(has(c.run(*shell, "gaze nan .1"), "usage"));
+  CHECK(has(c.run(*shell, "warp inf"), "usage"));
+  const auto path = std::filesystem::temp_directory_path() / "cb-living-settings.conf";
   REQUIRE(shell->settings().save(path));
   CHECK_FALSE(app::Settings::load(path).livingVision);
   std::filesystem::remove(path);
@@ -408,21 +411,106 @@ TEST_CASE("living gaze controls are inspectable and living preference persists",
 
 TEST_CASE("wake and handshake replay requests and the launch preference persist",
           "[unit][app][wake]") {
-  auto shell=app::Shell::create({"standard"},{}); REQUIRE(shell);
+  auto shell = app::Shell::create({"standard"}, {});
+  REQUIRE(shell);
   app::DebugConsole c;
   CHECK(shell->settings().wakeOnLaunch);
-  CHECK(shell->settings().wakeReplay==0);
-  CHECK(c.run(*shell,"wake")=="wake replaying");
-  CHECK(shell->settings().wakeReplay==1);
-  CHECK(c.run(*shell,"handshake")=="handshake replaying");
-  CHECK(shell->settings().handshakeReplay==1);
-  CHECK(shell->settings().wakeReplay==1);
-  CHECK(c.run(*shell,"set wakeOnLaunch false")=="wakeOnLaunch is now false");
+  CHECK(shell->settings().wakeReplay == 0);
+  CHECK(c.run(*shell, "wake") == "wake replaying");
+  CHECK(shell->settings().wakeReplay == 1);
+  CHECK(c.run(*shell, "handshake") == "handshake replaying");
+  CHECK(shell->settings().handshakeReplay == 1);
+  CHECK(shell->settings().wakeReplay == 1);
+  CHECK(c.run(*shell, "set wakeOnLaunch false") == "wakeOnLaunch is now false");
   CHECK_FALSE(shell->settings().wakeOnLaunch);
-  CHECK(has(app::DebugConsole::help(),"wake"));
-  CHECK(has(app::DebugConsole::help(),"handshake"));
-  const auto path=std::filesystem::temp_directory_path()/"cb-wake-settings.conf";
+  CHECK(has(app::DebugConsole::help(), "wake"));
+  CHECK(has(app::DebugConsole::help(), "handshake"));
+  const auto path = std::filesystem::temp_directory_path() / "cb-wake-settings.conf";
   REQUIRE(shell->settings().save(path));
   CHECK_FALSE(app::Settings::load(path).wakeOnLaunch);
   std::filesystem::remove(path);
+}
+
+TEST_CASE("deploy, stow, focus, rig and wallfade reach the lab game (M24.5)",
+          "[unit][app][rig]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(has(c.run(*shell, "deploy"), "lab is off"));
+  io::LabDoc doc;
+  c.setLabDoc(&doc);
+  CHECK(has(c.run(*shell, "deploy"), "no game"));
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK(c.run(*shell, "deploy") == "deploy");
+  CHECK(shell->screen() == Screen::Game);
+  CHECK(shell->transitionFrom() == Screen::MainMenu);
+  CHECK(c.run(*shell, "stow") == "stow");
+  CHECK(shell->screen() == Screen::MainMenu);
+  CHECK(shell->transitionFrom() == Screen::Game);
+
+  CHECK_FALSE(c.focusPin().has_value());
+  CHECK(c.run(*shell, "focus 0.4") == "focus 0.40");
+  REQUIRE(c.focusPin().has_value());
+  CHECK(*c.focusPin() == 0.4f);
+  CHECK(has(c.run(*shell, "focus 2"), "usage"));
+  CHECK(c.run(*shell, "focus auto") == "focus auto");
+  CHECK_FALSE(c.focusPin().has_value());
+
+  CHECK(c.wallFade());
+  CHECK(c.run(*shell, "wallfade off") == "wallfade off");
+  CHECK_FALSE(c.wallFade());
+  CHECK(c.run(*shell, "wallfade on") == "wallfade on");
+  CHECK(c.wallFade());
+
+  CHECK(has(c.run(*shell, "rig"), "no game in the lab"));
+  c.setRigReport([] { return std::string("labScale 1"); });
+  CHECK(c.run(*shell, "rig") == "labScale 1");
+  for (const char* word : {"deploy", "stow", "focus", "rig", "wallfade"})
+    CHECK(has(DebugConsole::help(), word));
+}
+
+TEST_CASE("the console switches the slab skin, forces a latch and reports the stretch",
+          "[unit][app][skin]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(c.skin());
+  CHECK(c.run(*shell, "skin off") == "skin off");
+  CHECK_FALSE(c.skin());
+  CHECK(c.run(*shell, "skin on") == "skin on");
+  CHECK(c.skin());
+  CHECK(has(c.run(*shell, "skin maybe"), "usage"));
+
+  CHECK_FALSE(c.takeLatch().has_value());
+  CHECK(c.run(*shell, "latch 1") == "latch 1");
+  const auto latch = c.takeLatch();
+  REQUIRE(latch.has_value());
+  CHECK(*latch == 1);
+  CHECK_FALSE(c.takeLatch().has_value());  // taken once
+  CHECK(has(c.run(*shell, "latch 2"), "usage"));
+
+  CHECK(has(c.run(*shell, "stretch"), "no skinned shape"));
+  c.setSkinReport([] { return std::string("u 0.99..0.99"); });
+  CHECK(c.run(*shell, "stretch") == "u 0.99..0.99");
+  for (const char* word : {"skin", "stretch", "latch"})
+    CHECK(has(DebugConsole::help(), word));
+}
+
+TEST_CASE("the console switches light bridges and replays a relayout (M24.6)",
+          "[unit][app][rig]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK(c.bridges());
+  CHECK(c.run(*shell, "bridges off") == "bridges off");
+  CHECK_FALSE(c.bridges());
+  CHECK(c.run(*shell, "bridges on") == "bridges on");
+  CHECK(c.bridges());
+  CHECK(has(c.run(*shell, "bridges maybe"), "usage"));
+
+  CHECK_FALSE(c.takeRelayout());
+  CHECK(has(c.run(*shell, "relayout"), "no game in the lab"));
+  c.setRigReport([] { return std::string("labScale 1"); });
+  CHECK(c.run(*shell, "relayout") == "relayout");
+  CHECK(c.takeRelayout());
+  CHECK_FALSE(c.takeRelayout());  // taken once
+  CHECK(has(c.run(*shell, "relayout now"), "usage"));
+  for (const char* word : {"relayout", "bridges"}) CHECK(has(DebugConsole::help(), word));
 }

@@ -475,12 +475,14 @@ TEST_CASE("boot frames: dark at the start, lit rank by rank, identical once sett
   REQUIRE(settled.size() == none.size());
   int worst = 0;
   for (std::size_t i = 0; i < none.size(); ++i)
-    worst = std::max(worst, std::abs(static_cast<int>(none[i]) - static_cast<int>(settled[i])));
+    worst = std::max(worst,
+                     std::abs(static_cast<int>(none[i]) - static_cast<int>(settled[i])));
   CHECK(worst <= 2);
   CHECK(ctx->takeValidationMessages().empty());
 }
 
-TEST_CASE("check ripple fx: records follow the wave and nothing else", "[render][fx][ripple]") {
+TEST_CASE("check ripple fx: records follow the wave and nothing else",
+          "[render][fx][ripple]") {
   const auto s = standardSession();
   InstanceSet set;
   BoardFxState st;
@@ -488,23 +490,25 @@ TEST_CASE("check ripple fx: records follow the wave and nothing else", "[render]
   st.rippleAge = 2.0f / view::kRippleCellsPerSecond;
   applyBoardFx(set, *s, st);
   REQUIRE(set.cellFx.size() == s->snapshot().cellCount() + 1);
-  CHECK(set.cellFx[at(*s, 2, 2) + 1].rippleAmp > 0.3f);       // two steps away: at its peak
+  CHECK(set.cellFx[at(*s, 2, 2) + 1].rippleAmp > 0.3f);  // two steps away: at its peak
   CHECK(set.cellFx[at(*s, 2, 2) + 1].tintMix > 0.0f);
-  CHECK(set.cellFx[at(*s, 6, 2) + 1].rippleAmp == 0.0f);      // six steps: not yet
-  CHECK(set.cellFx[at(*s, 6, 2) + 1].power == 1.0f);          // light untouched
+  CHECK(set.cellFx[at(*s, 6, 2) + 1].rippleAmp == 0.0f);  // six steps: not yet
+  CHECK(set.cellFx[at(*s, 6, 2) + 1].power == 1.0f);      // light untouched
   CHECK(set.fxGlobals.tint[0] == st.tint[0]);
-  st.intensity = 0.0f;                                         // calm: no ripple
+  st.intensity = 0.0f;  // calm: no ripple
   applyBoardFx(set, *s, st);
   CHECK(set.cellFx[at(*s, 2, 2) + 1].rippleAmp == 0.0f);
   st.intensity = 1.0f;
-  st.ledCells = false;                                         // non-LED: none either
+  st.ledCells = false;  // non-LED: none either
   applyBoardFx(set, *s, st);
   CHECK(set.cellFx[at(*s, 2, 2) + 1].rippleAmp == 0.0f);
 }
 
-TEST_CASE("end fx: the wave, the hold and the sides of a finished game", "[render][fx][endfx]") {
+TEST_CASE("end fx: the wave, the hold and the sides of a finished game",
+          "[render][fx][endfx]") {
   auto s = standardSession();
-  for (const char* m : {"f2f3", "e7e5", "g2g4", "d8h4"}) REQUIRE(s->playMoveText(m).has_value());
+  for (const char* m : {"f2f3", "e7e5", "g2g4", "d8h4"})
+    REQUIRE(s->playMoveText(m).has_value());
   REQUIRE(s->endEvent().has_value());
   InstanceSet set;
   BoardFxState st;
@@ -515,14 +519,16 @@ TEST_CASE("end fx: the wave, the hold and the sides of a finished game", "[rende
   st.endAge = 9.0f;
   applyBoardFx(set, *s, st);
   const CellId king = at(*s, 4, 0);
-  CHECK(set.cellFx[king + 1].power == 1.0f);                              // the mated king
-  CHECK(set.cellFx[at(*s, 0, 4) + 1].power == view::kDecisiveHold);       // an empty far cell
+  CHECK(set.cellFx[king + 1].power == 1.0f);                         // the mated king
+  CHECK(set.cellFx[at(*s, 0, 4) + 1].power == view::kDecisiveHold);  // an empty far cell
   CHECK(set.cellFx[at(*s, 0, 4) + 1].glitch == 0.0f);
   // White lost: its pieces destabilise, black's are solid and brighter.
-  CHECK(set.cellFx[at(*s, 0, 0) + 1].opacity == Catch::Approx(view::kLoserOpacity).margin(0.05));
+  CHECK(set.cellFx[at(*s, 0, 0) + 1].opacity ==
+        Catch::Approx(view::kLoserOpacity).margin(0.05));
   CHECK(set.cellFx[at(*s, 0, 7) + 1].opacity == 1.0f);
   CHECK(set.cellFx[at(*s, 0, 7) + 1].gain == Catch::Approx(view::kWinnerGain));
-  // Inside the delay the board is untouched, losers included (age counts from the decision).
+  // Inside the delay the board is untouched, losers included (age counts from the
+  // decision).
   for (float age : {0.0f, 1.0f, 2.9f}) {
     st.endAge = age;
     applyBoardFx(set, *s, st);
@@ -537,7 +543,7 @@ TEST_CASE("end fx: the wave, the hold and the sides of a finished game", "[rende
   st.endAge = view::kEndDelaySeconds + 0.1f;
   applyBoardFx(set, *s, st);
   CHECK(set.cellFx[at(*s, 4, 0) + 1].power == 1.0f);
-  CHECK(set.cellFx[at(*s, 4, 4) + 1].power == 1.0f);   // four steps: 1.3 s later
+  CHECK(set.cellFx[at(*s, 4, 4) + 1].power == 1.0f);  // four steps: 1.3 s later
   CHECK(set.cellFx[at(*s, 4, 1) + 1].power < 1.0f + 1e-6f);
   // A draw dims every cell alike and leaves both armies at 0.85.
   st.end.kind = view::EndKind::Draw;
@@ -568,7 +574,8 @@ double windowMean(const std::vector<std::uint8_t>& px, int w, int h,
       const int x = static_cast<int>(sp.x) + dx, y = static_cast<int>(sp.y) + dy;
       if (x < 0 || y < 0 || x >= w || y >= h) continue;
       const std::size_t i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) +
-                             static_cast<std::size_t>(x)) * 4;
+                             static_cast<std::size_t>(x)) *
+                            4;
       sum += px[i] + px[i + 1] + px[i + 2];
       ++n;
     }
@@ -576,8 +583,9 @@ double windowMean(const std::vector<std::uint8_t>& px, int w, int h,
 }
 }  // namespace
 
-TEST_CASE("ripple and end frames: the wave reaches a near cell, not a far one; the hold dims",
-          "[render][gpu][fx][ripple][endfx]") {
+TEST_CASE(
+    "ripple and end frames: the wave reaches a near cell, not a far one; the hold dims",
+    "[render][gpu][fx][ripple][endfx]") {
   auto ctx = VulkanContext::create();
   if (!ctx.has_value()) SKIP("no Vulkan device");
   constexpr int W = 640, H = 400;
@@ -587,7 +595,8 @@ TEST_CASE("ripple and end frames: the wave reaches a near cell, not a far one; t
   REQUIRE(renderer.has_value());
   renderer->setTheme(view::Theme::manifold());
   auto s = standardSession();
-  for (const char* m : {"f2f3", "e7e5", "g2g4", "d8h4"}) REQUIRE(s->playMoveText(m).has_value());
+  for (const char* m : {"f2f3", "e7e5", "g2g4", "d8h4"})
+    REQUIRE(s->playMoveText(m).has_value());
   const auto placements = view::layout(s->variant().dims, s->viewConfig());
   const view::OrbitCamera cam = view::OrbitCamera::frame(view::boundsOf(placements));
   const auto where = [&](CellId c, float dx = 0.0f) {
@@ -634,3 +643,35 @@ TEST_CASE("ripple and end frames: the wave reaches a near cell, not a far one; t
   CHECK(ctx->takeValidationMessages().empty());
 }
 #endif
+
+TEST_CASE("a slab that just arrived boots on its own clock (M24.6)",
+          "[render][fx][rig]") {
+  auto s = app::Session::create(test::loadVariant("standard"));
+  REQUIRE(s.has_value());
+  const auto count = (*s)->snapshot().cellCount();
+  BoardFxState st;
+  st.cellBootAge.assign(count, -1.0f);
+  // The first rank's cells are a slab that has just locked: dark at age 0.
+  for (CellId c = 0; c < 8; ++c) st.cellBootAge[c] = 0.0f;
+  InstanceSet set;
+  applyBoardFx(set, **s, st);
+  REQUIRE(set.cellFx.size() == count + 1);
+  for (CellId c = 0; c < count; ++c) {
+    CAPTURE(c);
+    if (c < 8)
+      CHECK(set.cellFx[c + 1].power < 0.5f);
+    else
+      CHECK(set.cellFx[c + 1].power == 1.0f);
+  }
+  // Booted after the full boot; the short boot is done in 0.4 s.
+  for (CellId c = 0; c < 8; ++c) st.cellBootAge[c] = view::kBootSeconds;
+  applyBoardFx(set, **s, st);
+  CHECK(set.cellFx[1].power == Catch::Approx(1.0f));
+  st.shortBoot = true;
+  for (CellId c = 0; c < 8; ++c) st.cellBootAge[c] = kShortBootSeconds;
+  applyBoardFx(set, **s, st);
+  CHECK(set.cellFx[1].power == Catch::Approx(1.0f));
+  for (CellId c = 0; c < 8; ++c) st.cellBootAge[c] = 0.0f;
+  applyBoardFx(set, **s, st);
+  CHECK(set.cellFx[1].power < 0.5f);
+}

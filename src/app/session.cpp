@@ -122,6 +122,7 @@ Result<void> Session::reviewTo(std::size_t ply, bool animate) {
   pendingMove_ = PendingMove{};
   if (animating) {
     anim_.start(viewCfg_, placements_, seams_, theme_, path, animSeconds_);
+    attachBridge(path);
     lastPath_ = path;
     pathValid_ = true;
   } else {
@@ -324,10 +325,62 @@ void Session::refreshView() {
                      [&](const view::Placement& p) { return !boardVisible(p.cell); }),
       placements_.end());
   seams_ = view::SeamMap::build(*variant_, viewCfg_, theme_);
+  bridges_ = bridgesOn_ ? view::lightBridges(*variant_, viewCfg_, placements_, theme_)
+                        : std::vector<view::LightBridge>{};
   // Framed for the shape of the area the board is drawn into, which the interface
   // narrows with its rails - not for the whole window.
   camera_ = framedCamera(view::boundsOf(placements_), 1.4f);
   applyViewMode();
+}
+
+void Session::setLightBridges(bool on) {
+  if (on == bridgesOn_) return;
+  bridgesOn_ = on;
+  bridges_ = on ? view::lightBridges(*variant_, viewCfg_, placements_, theme_)
+                : std::vector<view::LightBridge>{};
+}
+
+void Session::attachBridge(const view::MovePath& path) {
+  if (bridges_.empty() || !anim_.active()) return;
+  const auto at = [&](CellId c) -> const view::Placement* {
+    for (const auto& p : placements_)
+      if (p.cell == c) return &p;
+    return nullptr;
+  };
+  const std::size_t drawn = std::min<std::size_t>(viewCfg_.screenAxes.size(), 2);
+  for (const view::PathStep& step : path.steps) {
+    if (step.kind != view::StepKind::Portal) continue;
+    bool onScreen = false;
+    for (std::size_t i = 0; i < drawn; ++i)
+      onScreen = onScreen || viewCfg_.screenAxes[i] == step.faceAxis;
+    if (onScreen) continue;
+    const auto* a = at(step.from);
+    const auto* b = at(step.to);
+    const auto* start = at(path.from);
+    const auto* end = at(path.to);
+    if (!a || !b || !start || !end) return;
+    const auto on = [](const view::Placement& p, std::uint32_t slice,
+                       const view::Vec3& e) {
+      return p.slice == slice && std::abs(p.z - e.z) < 1e-3f;
+    };
+    for (const auto& br : bridges_) {
+      view::BridgeRide ride;
+      if (on(*a, br.sliceA, br.a) && on(*b, br.sliceB, br.b)) {
+        ride.a = br.a;
+        ride.b = br.b;
+      } else if (on(*a, br.sliceB, br.b) && on(*b, br.sliceA, br.a)) {
+        ride.a = br.b;
+        ride.b = br.a;
+      } else {
+        continue;
+      }
+      ride.control = br.control;
+      ride.start = {start->x, start->y, start->z};
+      ride.end = {end->x, end->y, end->z};
+      anim_.setBridge(ride);
+      return;
+    }
+  }
 }
 
 void Session::refreshTemporalView() {
@@ -365,6 +418,7 @@ void Session::setTheme(const view::Theme& t) {
   theme_ = t;
   // The seam colours come out of the palette, so they are rebuilt with it.
   seams_ = view::SeamMap::build(*variant_, viewCfg_, theme_);
+  if (bridgesOn_) bridges_ = view::lightBridges(*variant_, viewCfg_, placements_, theme_);
 }
 
 void Session::setFlatView(bool flat) {
@@ -585,6 +639,7 @@ Result<void> Session::playChecked(const Move& m) {
   if (game_->inCheck()) audio::play(audio::Sound::Check);
   if (animating) {
     anim_.start(viewCfg_, placements_, seams_, theme_, path, animSeconds_);
+    attachBridge(path);
     // The camera reads the same route the animation draws, so the two cannot disagree
     // about which way round a glued board the piece went.
     lastPath_ = path;

@@ -26,6 +26,10 @@ class FxTimeline {
   [[nodiscard]] bool booting(double now) const { return bootAge(now).has_value(); }
   /// The first click, key or engine move completes the boot at once.
   void skipBoot() noexcept { bootStart_.reset(); }
+  /// Hold the boot until `visualSeconds` (M24.5: the deploy's last lock): a boot stamps
+  /// at max(now, gate), and until then the board is dark and powered off (age 0). The
+  /// gate survives a new session, since a deploy starts one. 0 releases it.
+  void holdBootUntil(double visualSeconds) noexcept { bootGate_ = visualSeconds; }
 
   /// A newly captured tray icon scans on for 0.35 s; absent for settled captures.
   [[nodiscard]] std::optional<float> captureAge(double now) const;
@@ -54,6 +58,19 @@ class FxTimeline {
   [[nodiscard]] std::optional<End> end(double now) const;
   /// The power-up after an undo out of a finished game, for `kPowerUpSeconds`.
   [[nodiscard]] std::optional<End> powerUp(double now) const;
+  /// A seam latch (M24.5b): the front end stamps one when the live morph closes a wrap
+  /// axis (`render::latchCrossed`), or the console's `latch <axis>` forces one. Only the
+  /// newest is kept; it lasts `kLatchSeconds`.
+  struct LatchFx {
+    int axis;
+    float age;
+  };
+  static constexpr float kLatchSeconds = 0.25f;
+  void latch(int axis, double now) noexcept {
+    latchAxis_ = axis;
+    latchStart_ = now;
+  }
+  [[nodiscard]] std::optional<LatchFx> latchAge(double now) const;
   /// Whether any of the above is running (what the frame loop keeps redrawing for).
   [[nodiscard]] bool animating(double now) const;
 
@@ -61,6 +78,7 @@ class FxTimeline {
   std::uint64_t sessionId_{0};
   std::uint64_t bootSeen_{0};
   std::optional<double> bootStart_;
+  double bootGate_{0};
   std::uint64_t captureSeen_{0};
   std::optional<double> captureStart_;
   std::uint64_t turnSeen_{0};
@@ -77,6 +95,8 @@ class FxTimeline {
   std::optional<view::EndFx> endFx_;
   std::optional<double> powerUpStart_;
   std::optional<view::EndFx> powerUpFx_;
+  int latchAxis_{0};
+  std::optional<double> latchStart_;
 };
 
 }  // namespace cb::app

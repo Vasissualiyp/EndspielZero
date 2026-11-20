@@ -9,6 +9,7 @@
 #include "render/lab_scene.hpp"
 #include "render/vulkan_context.hpp"
 #include "support/variants.hpp"
+#include "view/rig_deploy.hpp"
 #include "view/rig_move.hpp"
 #ifdef CB_HAVE_IMGUI
 #include <SDL3/SDL.h>
@@ -61,7 +62,11 @@ TEST_CASE("lab coordinates cameras and batches use metres", "[unit][render][lab]
   lab->setFileRanges(ranges);
   InstanceSet set;
   lab->appendTo(set, view::Theme::manifold());
-  REQUIRE(set.lab.size() == doc->parts.size());
+  // Rig templates (M24.5) are drawn only as per-mast copies.
+  REQUIRE(set.lab.size() ==
+          doc->parts.size() - static_cast<std::size_t>(std::count_if(
+                                  doc->parts.begin(), doc->parts.end(),
+                                  [](const auto& p) { return p.group == "template"; })));
   std::size_t count = 0;
   for (auto b : set.labBatches) {
     CHECK(b.first == count);
@@ -148,13 +153,61 @@ TEST_CASE("lab station framing keeps the hardware visible and eyes inside the ro
         CAPTURE(anchor);
         const auto projected = view::transformPoint(camera.viewProj(16.f / 9),
                                                     lab->toWorld(*doc->anchor(anchor)));
-        // The menu panels occupy the right half; hardware must clear them.
+        CAPTURE(projected.x, projected.y);
+        // The menu panels occupy the right half; hardware must clear them. M24.4e:
+        // from a standing Library eye the rack lies right of the wall subject, so its
+        // front is only required on screen (it shows beside and through the pane).
         CHECK(projected.x > -.9f);
-        CHECK(projected.x < 0);
+        if (st.name == "library" && std::string_view(anchor) == "magazine.front")
+          CHECK(projected.x < .9f);
+        else
+          CHECK(projected.x < 0);
         CHECK(std::abs(projected.y) < .9f);
-        if (st.name != "menu" && std::string_view(anchor) == "projector.lens")
-          CHECK(projected.y > .5f);  // Below the retained 2-D library decoration.
+        // M24.4e: the old "bench lens below the 2-D library decoration" rule went
+        // with the Library's move to the wall; a standing Watch eye looks down.
       }
+    }
+  }
+}
+TEST_CASE("every lab station is a standing eye on the floor, clear of the furniture",
+          "[unit][render][lab]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto centre = *doc->anchor("gantry.centre");
+  const view::Vec3 origin{centre[0], centre[1], centre[2]};
+  const auto metres = [&](view::Vec3 world) {
+    return world * (1 / kCellsPerMetre) + origin;
+  };
+  const auto room = lab->roomBounds();
+  const auto lo = metres({room.minX, room.minY, room.minZ}),
+             hi = metres({room.maxX, room.maxY, room.maxZ});
+  REQUIRE(lo.z == Catch::Approx(0).margin(1e-4));
+  REQUIRE_FALSE(doc->stations.empty());
+  for (const auto& st : doc->stations) {
+    CAPTURE(st.name);
+    const auto eye = metres(lab->station(st.name)->eye());
+    CAPTURE(eye.x, eye.y, eye.z);
+    // No station is authored as seated, so every eye is a standing adult's.
+    CHECK(eye.z >= 1.45f);
+    CHECK(eye.z <= 1.75f);
+    CHECK(eye.x >= lo.x + .3f);
+    CHECK(eye.x <= hi.x - .3f);
+    CHECK(eye.y >= lo.y + .3f);
+    CHECK(eye.y <= hi.y - .3f);
+    // Furniture is any authored part a standing body could walk into: not the room
+    // shell, not a rig template, and with its bottom below head height.
+    for (const auto& part : doc->parts) {
+      if (part.group == "room" || part.group == "template") continue;
+      const auto b = lab->partBounds(part.name);
+      const auto bl = metres({b.minX, b.minY, b.minZ}),
+                 bh = metres({b.maxX, b.maxY, b.maxZ});
+      if (bl.z >= 1.8f) continue;
+      CAPTURE(part.name);
+      const float gap =
+          std::max({bl.x - eye.x, eye.x - bh.x, bl.y - eye.y, eye.y - bh.y});
+      CHECK(gap >= .25f);
     }
   }
 }
@@ -190,7 +243,8 @@ TEST_CASE("every lab station renders a nonuniform room", "[render][lab]") {
   REQUIRE(doc.has_value());
   auto lab = LabScene::create(*doc);
   REQUIRE(lab.has_value());
-  REQUIRE(lab->fileMeshes().size() == 14);
+  // 14 room models plus the three rig templates of M24.5 (masts, slab back).
+  REQUIRE(lab->fileMeshes().size() == 17);
   auto ctx = VulkanContext::create();
   REQUIRE(ctx.has_value());
   auto renderer = BoardRenderer::create(*ctx);
@@ -298,6 +352,8 @@ TEST_CASE("menu station flights keep their eyes within the room", "[unit][render
         CHECK(std::abs(eye.y) < 3.f);
         CHECK(eye.z > 0);
         CHECK(eye.z < 2.7f);
+        // A standing player's flight may rise, but not above 1.9 m (M24.4e).
+        CHECK(eye.z <= 1.9f);
       }
     }
 }
@@ -429,29 +485,121 @@ TEST_CASE("library looks into the rack beside a large wall hologram",
   auto lab = LabScene::create(*doc);
   REQUIRE(lab);
   const auto cam = *lab->station("library");
-  const auto direction = view::normalize(cam.target - cam.eye());
-  CHECK(direction.x >= std::cos(35.f * std::numbers::pi_v<float> / 180));
-  CHECK(std::abs(cam.pitch) <= 8.f * std::numbers::pi_v<float> / 180);
+  // M24.4c-3d-fix measures the view into the rack below, rather than the
+  // optical-axis yaw: the subjects deliberately occupy the left half. M24.4e
+  // amends the pitch limit from 12 to 20 degrees: a standing eye looks down on
+  // the board, which hangs below it.
+  CHECK(std::abs(cam.pitch) <= 20.f * std::numbers::pi_v<float> / 180);
   const auto origin = *doc->anchor("gantry.centre");
   const float eyeZ = cam.eye().z / kCellsPerMetre + origin[2];
-  CHECK(eyeZ >= 1.3f);
-  CHECK(eyeZ <= 1.5f);
+  // M24.4e's standing eye replaces M24.4c-3d-fix's 1.3-1.6 m.
+  CHECK(eyeZ >= 1.45f);
+  CHECK(eyeZ <= 1.75f);
   const auto front = lab->toWorld(*doc->anchor("magazine.front"));
   CHECK(view::dot(view::normalize(cam.eye() - front), view::Vec3{-1, 0, 0}) >=
         std::cos(50.f * std::numbers::pi_v<float> / 180));
-  auto lens = doc->anchor("wallprojector.lens");
-  REQUIRE(lens);
-  (*lens)[0] -= .52f;
-  const auto centre = lab->toWorld(*lens);
-  const view::Vec3 r{8.4f, 8.4f, 8.4f};
-  ProjectedBox holo, rack;
-  holo.cube(cam, 16.f / 9, centre - r, centre + r);
+  ProjectedBox rack;
   partBox(rack, *lab, cam, 16.f / 9, "magazine.frame");
-  CAPTURE(holo.left, holo.right, holo.area(), rack.left, rack.right);
-  CHECK(holo.left >= .04f);
-  CHECK(holo.right <= .50f);
-  CHECK(holo.area() >= .15f);
-  CHECK(rack.left >= .04f);
-  CHECK(rack.right <= .50f);
+  CAPTURE(rack.left, rack.right, rack.area());
+  // M24.4e: standing in front of the bench, the rack is right of the wall subject
+  // and reaches behind the Library pane (was right <= 0.56, box <= 25 %). The
+  // clipped rack hull in test_library_framing.cpp keeps 7-25 %.
+  CHECK(rack.left >= .02f);
+  CHECK(rack.right <= .92f);
+  CHECK(rack.area() >= .07f);
+  CHECK(rack.area() <= .30f);
+}
+namespace {
+LabScene shippedLab() {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  std::vector<std::uint32_t> ranges(lab->fileMeshes().size());
+  std::iota(ranges.begin(), ranges.end(), 0u);
+  lab->setFileRanges(ranges);
+  return std::move(*lab);
+}
+}  // namespace
+TEST_CASE("a carriage copy reuses the template's mesh and material (M24.5)",
+          "[unit][render][lab][rig]") {
+  const auto lab = shippedLab();
+  InstanceSet set;
+  lab.appendTo(set, view::Theme::manifold());
+  const auto before = set.lab.size();
+  const auto beforeFiles = set.labFileBatches;
+  const auto beforeShapes = set.labBatches;
+  InstanceSet only;
+  lab.appendCopy(only, "gantry.carriage.0", {0.5f, 0.2f, 2.46f}, {0, 0, 0, 1}, {1, 1, 1});
+  REQUIRE(only.lab.size() == 1);
+  lab.appendCopy(set, "gantry.carriage.0", {0.5f, 0.2f, 2.46f}, {0, 0, 0, 1}, {1, 1, 1});
+  REQUIRE(set.lab.size() == before + 1);
+  // Exactly one batch grew by one, and every batch is still contiguous.
+  int grown = 0;
+  std::size_t at = 0;
+  for (std::size_t b = 0; b < set.labFileBatches.size(); ++b) {
+    if (set.labFileBatches[b].count != beforeFiles[b].count) {
+      ++grown;
+      CHECK(set.labFileBatches[b].count == beforeFiles[b].count + 1);
+      at = set.labFileBatches[b].first + set.labFileBatches[b].count - 1;
+    }
+  }
+  for (std::size_t b = 0; b < set.labBatches.size(); ++b)
+    CHECK(set.labBatches[b].count == beforeShapes[b].count);
+  CHECK(grown == 1);
+  std::size_t count = 0;
+  for (auto b : set.labBatches) {
+    CHECK(b.first == count);
+    count += b.count;
+  }
+  for (auto b : set.labFileBatches) {
+    CHECK(b.first == count);
+    count += b.count;
+  }
+  const auto& copy = set.lab[at];
+  const auto want = lab.toWorld({0.5f, 0.2f, 2.46f});
+  CHECK(copy.center[0] == Catch::Approx(want.x));
+  CHECK(copy.center[1] == Catch::Approx(want.y));
+  CHECK(copy.center[2] == Catch::Approx(want.z));
+  // The parked template is drawn at its own place with the same material.
+  const auto parked = lab.toWorld({0, 0.6f, 2.46f});
+  bool found = false;
+  for (std::size_t i = set.labFileBatches[0].first; i < set.lab.size(); ++i)
+    if (i != at && set.lab[i].center[0] == parked.x && set.lab[i].center[1] == parked.y &&
+        set.lab[i].center[2] == parked.z && set.lab[i].material == copy.material) {
+      found = true;
+      CHECK(set.lab[i].scale[0] == copy.scale[0]);
+    }
+  CHECK(found);
+  CHECK(only.lab[0].material == copy.material);
+}
+TEST_CASE("the lab placed around a board goes through the rig transform",
+          "[unit][render][lab][rig]") {
+  const auto lab = shippedLab();
+  InstanceSet plain, placed;
+  lab.appendTo(plain, view::Theme::manifold());
+  const view::RigXform x{{1.5f, -2.f, .25f}, 2.f};
+  lab.appendTo(placed, view::Theme::manifold(), {}, x);
+  REQUIRE(plain.lab.size() == placed.lab.size());
+  for (std::size_t i = 0; i < plain.lab.size(); ++i) {
+    const auto want = x.toBoard(
+        {plain.lab[i].center[0], plain.lab[i].center[1], plain.lab[i].center[2]});
+    CHECK(placed.lab[i].center[0] == Catch::Approx(want.x));
+    CHECK(placed.lab[i].center[1] == Catch::Approx(want.y));
+    CHECK(placed.lab[i].center[2] == Catch::Approx(want.z));
+    CHECK(placed.lab[i].scale[0] == Catch::Approx(plain.lab[i].scale[0] * 2));
+    CHECK(placed.lab[i].scale[2] == Catch::Approx(plain.lab[i].scale[2] * 2));
+  }
+  const auto room = lab.roomBounds();
+  CHECK(room.minX == Catch::Approx(-2.5f * 20));
+  CHECK(room.maxY == Catch::Approx((3.0f - .6f) * 20));
+  CHECK(room.minZ == Catch::Approx(-1.05f * 20));
+  CHECK(room.maxZ == Catch::Approx((2.7f - 1.05f) * 20));
+}
+TEST_CASE("the slab-underside constant matches the renderer's plinth",
+          "[unit][render][rig]") {
+  CHECK(view::kSlabBelowFace ==
+        Catch::Approx(BoardRenderer::cellHalfExtent().z + 2 * kPlinthDepth));
+  CHECK(kBezelMargin == Catch::Approx(kPlinthOutset - .5f));
 }
 #endif

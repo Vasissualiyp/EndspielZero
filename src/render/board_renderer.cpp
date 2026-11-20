@@ -635,16 +635,20 @@ Result<void> BoardRenderer::buildDofPipeline() {
   if (const VkResult r =
           vkCreateDescriptorSetLayout(ctx_->device(), &dlci, nullptr, &dofSetLayout_);
       r != VK_SUCCESS)
-    return fail(ErrorCode::Internal, "cannot create the depth-of-field set layout: " + describe(r));
-  VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * kFramesInFlight};
+    return fail(ErrorCode::Internal,
+                "cannot create the depth-of-field set layout: " + describe(r));
+  VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                            4 * kFramesInFlight};
   VkDescriptorPoolCreateInfo dpci{};
   dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   dpci.maxSets = 2 * kFramesInFlight;
   dpci.poolSizeCount = 1;
   dpci.pPoolSizes = &size;
-  if (const VkResult r = vkCreateDescriptorPool(ctx_->device(), &dpci, nullptr, &dofPool_);
+  if (const VkResult r =
+          vkCreateDescriptorPool(ctx_->device(), &dpci, nullptr, &dofPool_);
       r != VK_SUCCESS)
-    return fail(ErrorCode::Internal, "cannot create the depth-of-field pool: " + describe(r));
+    return fail(ErrorCode::Internal,
+                "cannot create the depth-of-field pool: " + describe(r));
   std::array<VkDescriptorSetLayout, 2 * kFramesInFlight> layouts{};
   layouts.fill(dofSetLayout_);
   VkDescriptorSetAllocateInfo dsai{};
@@ -655,7 +659,8 @@ Result<void> BoardRenderer::buildDofPipeline() {
   std::array<VkDescriptorSet, 2 * kFramesInFlight> sets{};
   if (const VkResult r = vkAllocateDescriptorSets(ctx_->device(), &dsai, sets.data());
       r != VK_SUCCESS)
-    return fail(ErrorCode::Internal, "cannot allocate the depth-of-field sets: " + describe(r));
+    return fail(ErrorCode::Internal,
+                "cannot allocate the depth-of-field sets: " + describe(r));
   for (std::uint32_t f = 0; f < kFramesInFlight; ++f) {
     dofFromColor_[f] = sets[2 * f];
     dofFromScratch_[f] = sets[2 * f + 1];
@@ -667,9 +672,11 @@ Result<void> BoardRenderer::buildDofPipeline() {
   plci.pSetLayouts = &dofSetLayout_;
   plci.pushConstantRangeCount = 1;
   plci.pPushConstantRanges = &push;
-  if (const VkResult r = vkCreatePipelineLayout(ctx_->device(), &plci, nullptr, &dofLayout_);
+  if (const VkResult r =
+          vkCreatePipelineLayout(ctx_->device(), &plci, nullptr, &dofLayout_);
       r != VK_SUCCESS)
-    return fail(ErrorCode::Internal, "cannot create the depth-of-field layout: " + describe(r));
+    return fail(ErrorCode::Internal,
+                "cannot create the depth-of-field layout: " + describe(r));
 
   VkPipelineVertexInputStateCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -730,20 +737,24 @@ Result<void> BoardRenderer::buildDofPipeline() {
   gpi.pColorBlendState = &cb;
   gpi.pDynamicState = &dy;
   gpi.layout = dofLayout_;
-  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1, &gpi,
-                                                   nullptr, &dofPipeline_);
+  if (const VkResult r = vkCreateGraphicsPipelines(ctx_->device(), VK_NULL_HANDLE, 1,
+                                                   &gpi, nullptr, &dofPipeline_);
       r != VK_SUCCESS)
-    return fail(ErrorCode::Internal, "cannot create the depth-of-field pipeline: " + describe(r));
+    return fail(ErrorCode::Internal,
+                "cannot create the depth-of-field pipeline: " + describe(r));
   return {};
 }
 
-Result<void> BoardRenderer::bindDofTarget(const OffscreenTarget& target, std::uint32_t frame) {
-  if (dofBoundColor_[frame] == target.colorView() && dofBoundDepth_[frame] == target.depthView())
+Result<void> BoardRenderer::bindDofTarget(const OffscreenTarget& target,
+                                          std::uint32_t frame) {
+  if (dofBoundColor_[frame] == target.colorView() &&
+      dofBoundDepth_[frame] == target.depthView())
     return {};
   VkDescriptorImageInfo images[3]{
       {blurSampler_, target.colorView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
       {blurSampler_, target.scratchView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-      {blurSampler_, target.depthView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL}};
+      {blurSampler_, target.depthView(),
+       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL}};
   VkWriteDescriptorSet writes[4]{};
   for (std::uint32_t i = 0; i < 4; ++i) {
     writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1292,6 +1303,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     pose.collapsePhase = nx > 0.0f ? options_.surfaceCollapseSquares / nx : 0.0f;
     pose.formed = options_.surfaceFormed;
     pose.shellSpread = options_.surfaceShellSpread;
+    pose.skin = options_.slabSkin;
     const PlaySurface surf = PlaySurface::build(v, pose);
     out.panelCells = ledCells ? static_cast<std::uint32_t>(surf.patches().size()) : 0;
 
@@ -1337,6 +1349,8 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     std::array<float, 4> prevNow{0.0f, 0.0f, 0.0f,
                                  -1.0f};  // per patch, see the capture pulse
     std::uint32_t fxCellPlus = 0;         // the patch being pushed, for its fx record
+    // The slab skin's light band (M24.5b): its patches take the projector's opacity flag.
+    bool lightPass = false;
     const auto push = [&](const view::Vec3& at, const view::Vec3& n, float h,
                           const float rgba[4], float u, float panelV, float tag,
                           float seed = 0, float effectWeight = 0, float heat = 0) {
@@ -1356,7 +1370,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
                                      : (tag > 0.0f ? 1.0f : -1.0f) *
                                            (1.0f + 2.0f * static_cast<float>(fxCellPlus));
       mv.panelSignal[0] = seed;
-      mv.panelSignal[2] = effectWeight;
+      mv.panelSignal[2] = lightPass ? -1.0f : effectWeight;
       mv.panelSignal[3] = heat;
       std::copy(prevNow.begin(), prevNow.end(), mv.panelPrev);
       for (int c = 0; c < 4; ++c) mv.color[c] = rgba[c];
@@ -1368,15 +1382,30 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       for (const std::uint32_t i : {a, b, c, a, c, d}) out.surfaceIndices.push_back(i);
     };
 
-    for (const SurfacePatch& patch : surf.patches()) {
+    // The slab skin (M24.5b): a Klein bottle's pass-through cells are drawn as light, in
+    // their own index range after the LED tiles; with the skin off the set is empty and
+    // the one loop below is the whole board, exactly as before.
+    const std::vector<CellId>& lit = surf.passThrough();
+    const bool latching = options_.slabSkin && options_.latchBoost != 1.0f &&
+                          (options_.latchAxis == 0 || options_.latchAxis == 1);
+    std::vector<std::uint32_t> latchIndices;
+    // A stacked shape in the lab is light throughout (M24.6).
+    const bool allLight = options_.stackedLight > 0.0f && surf.stacked();
+    const auto isLit = [&](CellId c) {
+      return allLight || std::binary_search(lit.begin(), lit.end(), c);
+    };
+    const auto emitPatch = [&](const SurfacePatch& patch) {
       fxCellPlus = patch.cell + 1;
-      const view::Rgba fill = fillFor(patch.cell);
+      view::Rgba fill = fillFor(patch.cell);
+      // Light completes what the skin cannot: the cell's own colour as a hologram cell.
+      if (lightPass) fill.a = allLight ? options_.stackedLight : 0.7f;
       // An LED capture: the captured cell's own emitters switch to the capture colour and
       // settle back through the per-emitter transition (no slab drawn over the board).
       view::Rgba shown = fill;
       prevNow = {0.0f, 0.0f, 0.0f, -1.0f};
       bool pulseCell = false;
-      if (ledCells && moving && anim->captures() && patch.cell == anim->captureCell()) {
+      if (!lightPass && ledCells && moving && anim->captures() &&
+          patch.cell == anim->captureCell()) {
         const view::CapturePulse pulse =
             view::capturePulse(anim->progress(), anim->duration());
         if (pulse.active) {
@@ -1386,8 +1415,9 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           prevNow = {from.r, from.g, from.b, pulse.age};
         }
       }
-      const float seed =
-          theme_.materials.cells == view::Material::Led ? panelSeed(patch.cell) : 0;
+      const float seed = !lightPass && theme_.materials.cells == view::Material::Led
+                             ? panelSeed(patch.cell)
+                             : 0;
       const bool cue = ledCells && isCue(patch.cell);
       const float heat = heatFor(patch.cell);
       // The seam rails (M17.21): a closed shape has no edge to draw a rim on the way the
@@ -1449,7 +1479,8 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       // underside is the square's own colour, the same as its face, so a board turned
       // over - or a shape seen from inside, as on a Klein bottle - still reads as the
       // same board rather than a uniform grey shell.
-      const view::Rgba grooveBase = mix(fill, theme_.boardRim, 0.62f);
+      view::Rgba grooveBase = mix(fill, theme_.boardRim, 0.62f);
+      grooveBase.a = fill.a;
       const std::uint32_t base = static_cast<std::uint32_t>(out.surfaceVertices.size());
       // The face a player looks at, then the same grid pushed in along its own normals.
       // A square has thickness for the same reason the flat board's cells do: an edge you
@@ -1490,6 +1521,54 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           quad(bot(i, j), bot(i, j + 1), bot(i + 1, j + 1), bot(i + 1, j));
         }
       }
+      // A seam latch (M24.5b): the closing axis's rail flashes in its own colour, as a
+      // blended glow strip just over the face. The LED emitters normalise their own
+      // brightness, so the flash cannot ride the face colour; a separate strip also
+      // leaves every frame without a latch exactly as it was.
+      if (latching && rails && !lightPass) {
+        const int axis = options_.latchAxis;
+        const float stage = axis == 0 ? railW0 : railW1;
+        const auto railAt = [&](int i, int j) {
+          SurfaceRail r = surfaceRail(*seams, patch.cell, axis, i, j);
+          r.color = hoveredSeam(r.color, static_cast<std::uint8_t>(axis),
+                                view::SeamKind::Glued, options_.seamHighlightAxis);
+          r.weight *= stage;
+          return r;
+        };
+        for (int i = 0; i + 1 < kSide; ++i) {
+          for (int j = 0; j + 1 < kSide; ++j) {
+            const int ci[4]{i, i + 1, i + 1, i};
+            const int cj[4]{j, j, j + 1, j + 1};
+            SurfaceRail r[4];
+            float any = 0.0f;
+            for (int c = 0; c < 4; ++c) {
+              r[c] = railAt(ci[c], cj[c]);
+              any = std::max(any, r[c].weight);
+            }
+            if (any <= 0.0f) continue;
+            std::uint32_t ids[4]{};
+            for (int c = 0; c < 4; ++c) {
+              const std::size_t k = static_cast<std::size_t>(ci[c] * kSide + cj[c]);
+              // A corner off the rail fades out (alpha 0) in the rail's colour.
+              view::Rgba glow = r[c].color;
+              if (r[c].weight <= 0.0f)
+                for (const SurfaceRail& o : r)
+                  if (o.weight > 0.0f) glow = o.color;
+              glow.r *= options_.latchBoost;
+              glow.g *= options_.latchBoost;
+              glow.b *= options_.latchBoost;
+              glow.a = std::clamp(r[c].weight, 0.0f, 1.0f);
+              float rgba[4]{};
+              toFloat4(glow, rgba);
+              ids[c] = push(patch.pos[k] + patch.normal[k] * (kHalf + 0.004f),
+                            patch.normal[k], 1.0f, rgba, 0, 0, 0);
+            }
+            for (const std::uint32_t id :
+                 {ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]})
+              latchIndices.push_back(id);
+          }
+        }
+      }
       // The rim, one band of quads round the patch's border. Its own vertices, so the
       // edge stays a crease instead of smearing the face's shading round the corner. On a
       // wrap edge the rim carries the rail colour end to end, which is the line a player
@@ -1527,12 +1606,61 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
         rim(0, j + 1, 0, j);
         rim(kSide - 1, j, kSide - 1, j + 1);
       }
-      if (collectPanels && !pulseCell) {
+      if (collectPanels && !pulseCell && !lightPass) {
         panelTargets->push_back(
             {patch.cell, fill, PanelDestination::Surface, base,
              static_cast<std::uint32_t>(out.surfaceVertices.size()) - base});
       }
+    };
+    for (const SurfacePatch& patch : surf.patches())
+      if (!isLit(patch.cell)) emitPatch(patch);
+    const auto ledIndices = static_cast<std::uint32_t>(out.surfaceIndices.size());
+    lightPass = true;
+    for (const SurfacePatch& patch : surf.patches())
+      if (isLit(patch.cell)) emitPatch(patch);
+    lightPass = false;
+    const auto lightIndices = static_cast<std::uint32_t>(out.surfaceIndices.size());
+    // The membrane (M24.5b): the unshrunk sheet behind the tiles, matte #0B0F14, with
+    // its stretched bridges glowing faintly. One sheet (the pipeline draws both sides);
+    // the cell's fx record rides along so it powers down with the board. The glow is
+    // carried in the heat channel and added in board.frag (material 0.5), where the
+    // serpentine modulates it.
+    if (!surf.membranePatches().empty()) {
+      std::vector<float> glowOf(v.dims.cellCount() + 1, 0.0f);
+      for (const CellStretch& st : surf.stretch()) {
+        const float t =
+            std::clamp((std::max(st.u, st.v) - 1.02f) / (1.35f - 1.02f), 0.0f, 1.0f);
+        glowOf[st.cell] = 0.12f * t * t * (3.0f - 2.0f * t);
+      }
+      view::Rgba sheet = view::Rgba::hex(0x0B0F14);
+      sheet.a *= surfaceOpacity(theme_, options_);
+      float rgba[4]{};
+      toFloat4(sheet, rgba);
+      for (const SurfacePatch& patch : surf.membranePatches()) {
+        fxCellPlus = patch.cell + 1;
+        prevNow = {0.0f, 0.0f, 0.0f, -1.0f};
+        const auto first = static_cast<std::uint32_t>(out.surfaceVertices.size());
+        for (int i = 0; i < kSide; ++i) {
+          for (int j = 0; j < kSide; ++j) {
+            const std::size_t k = static_cast<std::size_t>(i * kSide + j);
+            push(patch.pos[k], patch.normal[k], 1.0f, rgba,
+                 static_cast<float>(j) / PlaySurface::kSubdiv,
+                 static_cast<float>(i) / PlaySurface::kSubdiv, -1, 0, 0,
+                 glowOf[patch.cell]);
+          }
+        }
+        const auto at = [&](int i, int j) {
+          return first + static_cast<std::uint32_t>(i * kSide + j);
+        };
+        for (int i = 0; i + 1 < kSide; ++i)
+          for (int j = 0; j + 1 < kSide; ++j)
+            quad(at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+      }
     }
+    const auto membraneIndices = static_cast<std::uint32_t>(out.surfaceIndices.size());
+    out.surfaceIndices.insert(out.surfaceIndices.end(), latchIndices.begin(),
+                              latchIndices.end());
+    const auto latchEnd = static_cast<std::uint32_t>(out.surfaceIndices.size());
 
     std::vector<std::vector<Instance>> byShape(kShapeSlots);
     // The token discs (M17.26) live in their own groups and are concatenated ahead of the
@@ -1679,6 +1807,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       if (wp > 0.0f && !surf.seats().empty()) {
         SurfacePose flatPose = pose;
         flatPose.formed = 0.0f;
+        flatPose.skin = false;
         const PlaySurface flat = PlaySurface::build(v, flatPose);
         float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
         float sumU = 0.0f, sumV = 0.0f;
@@ -1825,6 +1954,27 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     identity.material = shaderMaterial(theme_.materials.cells, Cut::Plank, 0.25f);
     out.surfaceInstance = static_cast<std::uint32_t>(out.instances.size());
     out.instances.push_back(identity);
+    // The skin's other two materials: the light band is hologram (4) with the
+    // projector's opacity path, the membrane matte with the 0.5 sub-flag (M24.5b).
+    if (lightIndices > ledIndices || membraneIndices > lightIndices ||
+        latchEnd > membraneIndices) {
+      out.surfaceDraws.push_back({0, ledIndices, out.surfaceInstance});
+      const auto addDraw = [&](std::uint32_t from, std::uint32_t to, float material) {
+        if (to <= from) return;
+        Instance skin = identity;
+        skin.material = material;
+        out.surfaceDraws.push_back(
+            {from, to - from, static_cast<std::uint32_t>(out.instances.size())});
+        out.instances.push_back(skin);
+      };
+      addDraw(ledIndices, lightIndices, 4.0f);
+      addDraw(lightIndices, membraneIndices, 0.5f);
+      // The latch strip is glow (5), blended over the opaque faces.
+      if (latchEnd > membraneIndices) {
+        addDraw(membraneIndices, latchEnd, 5.0f);
+        out.surfaceDraws.back().blend = true;
+      }
+    }
     return out;
   }
 #endif
@@ -2053,8 +2203,9 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       if (!e.seen) continue;
       byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinthInstance(
           view::Vec3{(e.minX + e.maxX) * 0.5f, (e.minY + e.maxY) * 0.5f, 0.0f},
-          (e.maxX - e.minX) * 0.5f + 0.78f, (e.maxY - e.minY) * 0.5f + 0.78f,
-          e.z - half.z, 0.13f, e.present, half, theme_));
+          (e.maxX - e.minX) * 0.5f + kPlinthOutset,
+          (e.maxY - e.minY) * 0.5f + kPlinthOutset, e.z - half.z, kPlinthDepth, e.present,
+          half, theme_));
     }
   }
 
@@ -2341,6 +2492,39 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
         if (shadows.size() > shadowsBefore) shadows.back().color[3] *= copy.opacity;
       }
     }
+    // A piece on a light bridge (M24.6) travels as a hologram: scan lines only,
+    // stretched 1.3x along the curve.
+    if (!mover.empty() && !options_.flat && anim->onBridge()) {
+      const auto s = anim->sample();
+      const float t = anim->progress();
+      const auto tangent = view::bridgeRide(anim->bridge(), std::min(1.0f, t + 0.01f)) -
+                           view::bridgeRide(anim->bridge(), std::max(0.0f, t - 0.01f));
+      const std::size_t sh = static_cast<std::size_t>(shape[mover.type]);
+      auto& group = byShape[sh];
+      const std::size_t before = group.size();
+      emitPiece(mover, s.x, s.y, s.z, false, kInvalidCell, true);
+      if (group.size() > before) {
+        Instance inst = group.back();
+        group.pop_back();
+        inst.panelSignal[3] = 1.0f;
+        const float flat = std::hypot(tangent.x, tangent.y);
+        if (std::abs(tangent.z) > flat) {
+          inst.scale[2] *= 1.3f;
+        } else if (flat > 1e-6f) {
+          // Turn the piece's own x onto the travel, then stretch it there.
+          const float yaw = std::atan2(tangent.y, tangent.x);
+          const std::array<float, 4> a{0, 0, std::sin(yaw / 2), std::cos(yaw / 2)};
+          const std::array<float, 4> b{inst.quat[0], inst.quat[1], inst.quat[2],
+                                       inst.quat[3]};
+          inst.quat[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+          inst.quat[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+          inst.quat[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+          inst.quat[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+          inst.scale[0] *= 1.3f;
+        }
+        byShapeFlourish[sh].push_back(inst);
+      }
+    }
     for (const view::MoveAnimation::Portal& portal : anim->openPortals()) {
       // A doorway standing across the seam the piece crossed: thin on the axis the
       // portal faces, wide along the seam, and growing as it opens. It uses the cube
@@ -2612,8 +2796,9 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     if (auto r = bindDofTarget(target, frame); !r.has_value()) return r;
   }
   const float blurStrength =
-      blur_ > 0.001f ? blur_
-                     : (dof_ && !dofDepth ? std::clamp(dof_->fallback, 0.0f, 1.0f) : 0.0f);
+      blur_ > 0.001f
+          ? blur_
+          : (dof_ && !dofDepth ? std::clamp(dof_->fallback, 0.0f, 1.0f) : 0.0f);
 
   // The effective scene format for this whole recording (ADR-0025): requested and
   // supported. The background callback reads the same answer through `hdrScene()`.
@@ -2739,7 +2924,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     depth.imageView = target.depthView();
     depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth.storeOp = dofDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.storeOp =
+        dofDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depth.clearValue.depthStencil = {1.0f, 0};
 
     VkRenderingInfo ri{};
@@ -2920,8 +3106,17 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
             surfaceOpacity(theme_, options_) < 0.99f ? blendPipeline : scenePipeline);
         vkCmdBindVertexBuffers(cmd, 0, 1, &surfaceVertexBuffer_[frame], &zero);
         vkCmdBindIndexBuffer(cmd, surfaceIndexBuffer_[frame], 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1, 0,
-                         0, set.surfaceInstance);
+        if (set.surfaceDraws.empty()) {
+          vkCmdDrawIndexed(cmd, static_cast<std::uint32_t>(set.surfaceIndices.size()), 1,
+                           0, 0, set.surfaceInstance);
+        } else {
+          for (const auto& d : set.surfaceDraws) {
+            if (d.indexCount == 0) continue;
+            if (d.blend)
+              vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blendPipeline);
+            vkCmdDrawIndexed(cmd, d.indexCount, 1, d.firstIndex, 0, d.instance);
+          }
+        }
       }
     }
     // The projector beam is translucent, depth-tested against the opaque room.
@@ -3105,8 +3300,10 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
 
     // Depth of field: across into the scratch image, then down back into the colour.
     if (dofDepth) {
-      const float nearZ = options_.labMode ? camera.nearZ : std::max(camera.nearZ, options_.nearClip);
-      const auto dofPass = [&](VkImageView into, VkDescriptorSet from, float dx, float dy) {
+      const float nearZ =
+          options_.labMode ? camera.nearZ : std::max(camera.nearZ, options_.nearClip);
+      const auto dofPass = [&](VkImageView into, VkDescriptorSet from, float dx,
+                               float dy) {
         VkRenderingAttachmentInfo att{};
         att.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         att.imageView = into;
@@ -3139,8 +3336,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dofPipeline_);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dofLayout_, 0, 1,
                                 &from, 0, nullptr);
-        vkCmdPushConstants(cmd, dofLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DofPush),
-                           &dp);
+        vkCmdPushConstants(cmd, dofLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                           sizeof(DofPush), &dp);
         vkCmdDraw(cmd, 3, 1, 0, 0);
         vkCmdEndRendering(cmd);
       };
@@ -3149,29 +3346,34 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
               VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
               VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
       barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
       barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-              0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-      dofPass(target.scratchView(), dofFromColor_[frame], 1.0f / static_cast<float>(target.width()),
-              0.0f);
+      dofPass(target.scratchView(), dofFromColor_[frame],
+              1.0f / static_cast<float>(target.width()), 0.0f);
       barrier(target.scratchImage(), VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
       barrier(target.colorImage(), VK_IMAGE_ASPECT_COLOR_BIT,
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
       dofPass(target.colorView(), dofFromScratch_[frame], 0.0f,
@@ -3332,7 +3534,8 @@ BoardRenderer::~BoardRenderer() {
   if (dofPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(d, dofPipeline_, nullptr);
   if (dofLayout_ != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, dofLayout_, nullptr);
   if (dofPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(d, dofPool_, nullptr);
-  if (dofSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(d, dofSetLayout_, nullptr);
+  if (dofSetLayout_ != VK_NULL_HANDLE)
+    vkDestroyDescriptorSetLayout(d, dofSetLayout_, nullptr);
   if (dofFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, dofFrag_, nullptr);
   if (backdropVert_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropVert_, nullptr);
   if (backdropFrag_ != VK_NULL_HANDLE) vkDestroyShaderModule(d, backdropFrag_, nullptr);

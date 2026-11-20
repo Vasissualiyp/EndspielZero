@@ -327,8 +327,9 @@ TEST_CASE("lab focus is optional free text", "[unit][io][rig]") {
   CHECK(d->parts[0].focus == "any object");
 }
 
-TEST_CASE("lab gaze targets validate keys weights and anchor references", "[unit][io][living]") {
-  const std::string text=R"(version=1
+TEST_CASE("lab gaze targets validate keys weights and anchor references",
+          "[unit][io][living]") {
+  const std::string text = R"(version=1
 [anchors]
 lens=[0,1,2]
 [[gaze]]
@@ -343,17 +344,114 @@ key="projector"
 at="lens"
 weight=0.1
 )";
-  auto doc=io::parseLabDoc(text,"gaze.toml");
+  auto doc = io::parseLabDoc(text, "gaze.toml");
   REQUIRE(doc);
-  REQUIRE(doc->gaze.size()==3);
-  CHECK(doc->gaze[0].key=="hologram");
-  CHECK(doc->gaze[1].at==std::array<float,3>{1,2,3});
-  CHECK(doc->gaze[2].at==std::array<float,3>{0,1,2});
-  for(const auto& [from,to]:std::vector<std::pair<std::string,std::string>>{
-    {"key=\"lamp\"",""},{"weight=0.4","weight=-1"},{"at=\"lens\"","at=\"missing\""},
-    {"key=\"lamp\"","key=\"\""},{"key=\"lamp\"","key=\"hologram\""}}) {
-    auto bad=text; bad.replace(bad.find(from),from.size(),to);
-    const auto result=io::parseLabDoc(bad,"bad-gaze.toml");
-    CAPTURE(to); REQUIRE_FALSE(result); CHECK(result.error().line>0);
+  REQUIRE(doc->gaze.size() == 3);
+  CHECK(doc->gaze[0].key == "hologram");
+  CHECK(doc->gaze[1].at == std::array<float, 3>{1, 2, 3});
+  CHECK(doc->gaze[2].at == std::array<float, 3>{0, 1, 2});
+  for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
+           {"key=\"lamp\"", ""},
+           {"weight=0.4", "weight=-1"},
+           {"at=\"lens\"", "at=\"missing\""},
+           {"key=\"lamp\"", "key=\"\""},
+           {"key=\"lamp\"", "key=\"hologram\""}}) {
+    auto bad = text;
+    bad.replace(bad.find(from), from.size(), to);
+    const auto result = io::parseLabDoc(bad, "bad-gaze.toml");
+    CAPTURE(to);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().line > 0);
+  }
+}
+
+namespace {
+const std::string deployTable = R"(
+[deploy]
+min = [-1.45, -0.40, 0.45]
+max = [ 1.45,  1.60, 2.05]
+rail_z = 2.46
+mast_edge_gap = 0.06
+yoke_drop = 0.035
+slab_bay = "magazine.slab"
+)";
+}
+
+TEST_CASE("the deploy table parses into metres (M24.5)", "[unit][io][lab][rig]") {
+  auto plain = io::parseLabDoc(minimal, "lab.toml");
+  REQUIRE(plain);
+  CHECK_FALSE(plain->deploy.has_value());
+  auto d = io::parseLabDoc(minimal + deployTable, "lab.toml");
+  REQUIRE(d);
+  REQUIRE(d->deploy.has_value());
+  CHECK(d->deploy->min == std::array<float, 3>{-1.45f, -.40f, .45f});
+  CHECK(d->deploy->max == std::array<float, 3>{1.45f, 1.60f, 2.05f});
+  CHECK(d->deploy->railZ == 2.46f);
+  CHECK(d->deploy->mastEdgeGap == .06f);
+  CHECK(d->deploy->yokeDrop == .035f);
+  CHECK(d->deploy->slabBay == "magazine.slab");
+}
+
+TEST_CASE("a lab document keeps gaze targets and the deployment volume together",
+          "[unit][io][lab][rig][living]") {
+  const auto doc = io::parseLabDoc(minimal + deployTable + R"(
+[[gaze]]
+key = "rack"
+at = "gantry.centre"
+weight = 0.15
+[[gaze]]
+key = "wallholo"
+weight = 0.35
+)",
+                                   "combined-lab.toml");
+  REQUIRE(doc);
+  REQUIRE(doc->deploy);
+  CHECK(doc->deploy->slabBay == "magazine.slab");
+  REQUIRE(doc->gaze.size() == 2);
+  CHECK(doc->gaze[0].at == *doc->anchor("gantry.centre"));
+  CHECK(doc->gaze[1].key == "wallholo");
+  REQUIRE(doc->station("menu"));
+  CHECK(doc->station("menu")->distance == 2);
+}
+
+TEST_CASE("the deploy table diagnoses its errors", "[unit][io][lab][rig]") {
+  for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
+           {"min = [-1.45, -0.40, 0.45]", "min = [-1.45, 1.60, 0.45]"},
+           {"max = [ 1.45,  1.60, 2.05]", "max = [ -1.50,  1.60, 2.05]"},
+           {"rail_z = 2.46", "rail_z = 2.05"},
+           {"rail_z = 2.46", "rail = 2.46"},
+           {"min = [-1.45, -0.40, 0.45]", "min = [-1.45, 0.70, 0.45]"},
+           {"max = [ 1.45,  1.60, 2.05]", "max = [ 1.45,  1.60, 1.00]\nrail_z = 3"},
+           {"mast_edge_gap = 0.06", "mast_edge_gap = -0.06"}}) {
+    auto table = deployTable;
+    table.replace(table.find(from), from.size(), to);
+    if (to.find("rail_z = 3") != std::string::npos)
+      table.replace(table.find("rail_z = 2.46"), 13, "");
+    CAPTURE(to);
+    const auto d = io::parseLabDoc(minimal + table, "bad.toml");
+    REQUIRE_FALSE(d.has_value());
+    CHECK(d.error().message.find("deploy") != std::string::npos);
+  }
+}
+
+TEST_CASE("the shipped lab has a deploy volume around gantry.centre",
+          "[unit][io][lab][rig]") {
+  const auto d =
+      io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(d);
+  REQUIRE(d->deploy.has_value());
+  const auto c = *d->anchor("gantry.centre");
+  for (std::size_t a = 0; a < 3; ++a) {
+    CHECK(d->deploy->min[a] <= c[a]);
+    CHECK(c[a] <= d->deploy->max[a]);
+  }
+  CHECK(d->deploy->railZ > d->deploy->max[2]);
+  // The carriage template and the rig hardware the deploy copies (M24.5 Step 1.2).
+  for (const auto* name : {"gantry.carriage.0", "gantry.bridge.a", "gantry.bridge.b",
+                           "rig.mast.outer", "rig.mast.inner", "rig.yoke",
+                           "rig.slab.back", "rig.clamp.glow", "magazine.slab.0"}) {
+    CAPTURE(name);
+    CHECK(std::any_of(d->parts.begin(), d->parts.end(),
+                      [&](const io::LabPart& p) { return p.name == name; }));
   }
 }

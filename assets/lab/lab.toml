@@ -11,6 +11,17 @@ version = 1
 "door.centre" = [0.0, -2.98, 1.2]
 "bench.top" = [-0.3, 2.65, 0.925]
 
+
+# The gantry's deployment volume (M24.5): where slabs can hang, in metres. The
+# board's layout centre is placed at "gantry.centre".
+[deploy]
+min = [-1.45, -0.40, 0.45]
+max = [ 1.45,  1.60, 2.05]
+rail_z = 2.46            # carriage underside: masts start here
+mast_edge_gap = 0.06     # metres between the slab's far bezel edge and the mast axis
+yoke_drop = 0.035        # the yoke's centre below the slab's back face
+slab_bay = "magazine.slab"   # prefix of the parked stand-ins, 0..7
+
 [[part]]
 name = "floor"
 mesh = "box"
@@ -524,6 +535,54 @@ material = "metal"
 color = "#3A3F47"
 group = "rig"
 
+
+# Rig hardware templates (M24.5): group "template" parts are never drawn where they
+# stand; the deploy copies them per mast group with LabScene::appendCopy.
+[[part]]
+name = "rig.mast.outer"
+mesh = "file:models/gantry_mast_outer.obj"
+pos = [0, 0.6, 2.46]
+size = [1, 1, 1]
+material = "metal"
+color = "#3A3F47"
+group = "template"
+
+[[part]]
+name = "rig.mast.inner"
+mesh = "file:models/gantry_mast_inner.obj"
+pos = [0, 0.6, 1.86]
+size = [1, 1, 1]
+material = "metal"
+color = "#4A5059"
+group = "template"
+
+[[part]]
+name = "rig.yoke"
+mesh = "bevel"
+pos = [0, 0.6, 1.0]
+size = [0.03, 0.03, 0.03]
+material = "metal"
+color = "#1E2126"
+group = "template"
+
+[[part]]
+name = "rig.slab.back"
+mesh = "file:models/slab_back.obj"
+pos = [0, 0.6, 1.0]
+size = [1, 1, 1]
+material = "metal"
+color = "#1E2126"
+group = "template"
+
+[[part]]
+name = "rig.clamp.glow"
+mesh = "cylinder"
+pos = [0, 0.6, 1.0]
+size = [0.094, 0.094, 0.012]
+material = "glow"
+color = "#6FE3FF"
+group = "template"
+
 [[part]]
 name = "cable.tray"
 mesh = "box"
@@ -697,31 +756,31 @@ name = "tutorial"
 target = [-0.45, 2.6, 1.15]
 distance = 1.1
 yaw = 8
-pitch = 12
+pitch = 22
 fov = 50
 
 [[station]]
 name = "library"
-target = [1.9095, 1.4131, 1.2759]
-distance = 3.0438
-yaw = -112.534
-pitch = 3.6237
-fov = 47.8809
+target = [2.809901, 2.351864, 1.122881]
+distance = 1.95285
+yaw = -79.94032
+pitch = 18.10446
+fov = 64.99525
 
 [[station]]
 name = "watch"
-target = [2.8, 2.2, 2.4]
-distance = 4.0
+target = [2.3275, 1.5246, 1.2159]
+distance = 2.5
 yaw = -10
-pitch = 0
-fov = 65
+pitch = 10
+fov = 68
 
 [[station]]
 name = "settings"
 target = [-0.2, 2.4, 1]
 distance = 2.6
 yaw = 0
-pitch = 18
+pitch = 15
 fov = 55
 
 [[station]]
@@ -805,7 +864,7 @@ soft = 15
 [[station]]
 name = "sky"
 target = [0, 0.4, 2.78]
-distance = 1.6
+distance = 1.3
 yaw = 0
 pitch = -60
 fov = 50

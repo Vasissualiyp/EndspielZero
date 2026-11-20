@@ -74,6 +74,63 @@ TEST_CASE("library projector keeps a1 on the near left corner",
   CHECK(view::length(a1 - camera.eye()) < view::length(a8 - camera.eye()));
 }
 
+TEST_CASE("wall subjects fit their geometry and turn flat faces toward the room",
+          "[unit][render][hologram][library-framing]") {
+  const auto theme = view::Theme::manifold();
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  const auto camera = *lab->station("library");
+  const auto anchor = *doc->anchor("wallprojector.lens");
+  const auto lens = lab->toWorld(anchor);
+  HologramPlacement at{
+      lab->toWorld(wallHologramCentre(anchor, kWallHologramRadiusMetres)),
+      kWallHologramRadiusMetres * kCellsPerMetre,
+      0,
+      1,
+      1,
+      1,
+      lens,
+      true};
+  for (auto which : {app::Overture::Standard, app::Overture::Cylinder}) {
+    const auto scene = overtureScene(which, 0, false, theme);
+    const auto h = overtureHologram(scene, theme, at);
+    REQUIRE_FALSE(h.quads.empty());
+    const auto n = rotated({0, 0, 1}, h.quads.front().quat);
+    // Face visibility is measured from the actual viewer, not the world's X axis.
+    const auto towardEye = view::normalize(camera.eye() - at.centre);
+    const float angle =
+        std::asin(std::abs(view::dot(n, towardEye))) * 180 / std::acos(-1.f);
+    CHECK(angle >= 25);
+    CHECK(angle <= 40);
+    CHECK(n.x < 0);
+    auto padded = scene;
+    padded.cam.reach *= 3;
+    const auto same = overtureHologram(padded, theme, at);
+    REQUIRE(same.quads.size() == h.quads.size());
+    for (std::size_t j = 0; j < h.quads.size(); ++j) {
+      CHECK(view::length(centre(same.quads[j]) - centre(h.quads[j])) < 1e-5f);
+      CHECK(same.quads[j].scale[0] == h.quads[j].scale[0]);
+    }
+    at.wallSubject = false;
+    const auto bench = overtureHologram(scene, theme, at);
+    CHECK(std::abs(rotated({0, 0, 1}, bench.quads.front().quat).z) > .999f);
+    at.wallSubject = true;
+  }
+  for (auto which : {app::Overture::Cube5, app::Overture::Hyper4}) {
+    const auto scene = overtureScene(which, 1, false, theme);
+    const auto wall = overtureHologram(scene, theme, at);
+    at.wallSubject = false;
+    const auto bench = overtureHologram(scene, theme, at);
+    at.wallSubject = true;
+    REQUIRE(wall.quads.size() == bench.quads.size());
+    for (std::size_t j = 0; j < wall.quads.size(); ++j)
+      CHECK(view::length(rotated({0, 0, 1}, wall.quads[j].quat) -
+                         rotated({0, 0, 1}, bench.quads[j].quat)) < 1e-4f);
+  }
+}
+
 TEST_CASE("projector collapse squashes world Z about its lens", "[unit][render][rig]") {
   const auto theme = view::Theme::manifold();
   HologramPlacement at{{1, 2, 12}, 4, .4f, 1, 1};
@@ -323,7 +380,7 @@ TEST_CASE("Ui requests projector subjects and refreshes overtures without flat d
     shell->overtures().setProgress(0);
     CHECK(frame().kind == HologramRequest::Overture);
     CHECK((*ui)->hologramRequest().projector == HologramRequest::Projector::Wall);
-    CHECK((*ui)->hologramRequest().radiusMetres == .42f);
+    CHECK((*ui)->hologramRequest().radiusMetres == kWallHologramRadiusMetres);
     REQUIRE((*ui)->overtureScene());
     const auto flat = (*ui)->overtureScene()->quads.front().p[0];
     shell->overtures().setProgress(1);

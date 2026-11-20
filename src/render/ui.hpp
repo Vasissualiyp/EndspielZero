@@ -18,11 +18,11 @@
 #include "app/shell.hpp"
 #include "assets/piece_model.hpp"
 #include "render/deco.hpp"
-#include "view/living_vision.hpp"
 #include "render/overture_scene.hpp"
 #include "render/piece_icon.hpp"
 #include "render/piece_mesh.hpp"
 #include "render/vulkan_context.hpp"
+#include "view/living_vision.hpp"
 #include "view/theme.hpp"
 
 struct SDL_Window;
@@ -33,7 +33,15 @@ namespace cb::render {
 /// The manifold is the menu centrepiece; other bench previews retain their radius.
 inline constexpr float kMenuHologramRadiusMetres = .26f;
 inline constexpr float kHologramRadiusMetres = .20f;
-inline constexpr float kWallHologramRadiusMetres = .42f;
+inline constexpr float kWallHologramRadiusMetres = .37179f;
+/// M24.4e: the wall subject hangs below its lens so a standing eye looks down on it.
+inline constexpr float kWallHologramDropMetres = .27029f;
+/// Where the wall projector centres its subject, in lab metres: in front of the lens
+/// (-X), 0.1 m clear of it, and lowered by `kWallHologramDropMetres`.
+[[nodiscard]] constexpr std::array<float, 3> wallHologramCentre(
+    std::array<float, 3> lens, float radiusMetres) noexcept {
+  return {lens[0] - .10f - radiusMetres, lens[1], lens[2] - kWallHologramDropMetres};
+}
 
 struct HologramRequest {
   enum Kind { None, Manifold, Overture, Tesseract } kind{None};
@@ -244,6 +252,22 @@ class Ui {
   [[nodiscard]] std::optional<view::OrbitCamera> labCamera() const;
   [[nodiscard]] float salience(std::string_view focus) const;
   [[nodiscard]] std::string_view stationPin() const { return console_.stationPin(); }
+  /// M24.5: the console's `focus` pin, `wallfade` switch and the `rig` dump.
+  [[nodiscard]] std::optional<float> focusPin() const { return console_.focusPin(); }
+  [[nodiscard]] bool wallFade() const { return console_.wallFade(); }
+  /// M24.6: the console's `bridges` switch and `relayout` request.
+  [[nodiscard]] bool bridges() const { return console_.bridges(); }
+  [[nodiscard]] bool takeRelayout() { return console_.takeRelayout(); }
+  void setRigReport(std::function<std::string()> report) {
+    console_.setRigReport(std::move(report));
+  }
+  /// M24.5b: the console's `skin` switch, `latch` request and `stretch` report.
+  [[nodiscard]] bool skin() const { return console_.skin(); }
+  void setSkin(bool on) { console_.setSkin(on); }
+  [[nodiscard]] std::optional<int> takeLatch() { return console_.takeLatch(); }
+  void setSkinReport(std::function<std::string()> report) {
+    console_.setSkinReport(std::move(report));
+  }
   [[nodiscard]] HologramRequest hologramRequest() const;
   [[nodiscard]] std::array<float, 8> rackSlides() const;
   [[nodiscard]] const OvertureScene* overtureScene() const {
@@ -282,6 +306,24 @@ class Ui {
   [[nodiscard]] bool holdsBoard() const noexcept { return moveFx().holdsBoard; }
   [[nodiscard]] float powerDownProgress() const noexcept { return moveFx().powerDown; }
   [[nodiscard]] app::ScreenMove screenMove() const noexcept { return move_; }
+  /// The lab's game moves (M24.5): with `enabled`, menu to game becomes Deploy and game
+  /// to menu Stow. `deployLock` is the last slab lock; the stow runs its shutdown
+  /// (0 when the game is over), then max(travel, 1.8 s) home, then the menu forms.
+  void setRigMoves(bool enabled, float deployLock, float stowShutdown,
+                   float stowTravel) noexcept {
+    rigEnabled_ = enabled;
+    rigDeployLock_ = deployLock;
+    rigStowShutdown_ = stowShutdown;
+    rigStowTravel_ = stowTravel;
+  }
+  struct RigMove {
+    app::ScreenMove move;
+    float age, total, lock, shutdown;
+    bool done;
+    app::Screen from;  ///< the screen the move left (a deploy flies from its station)
+  };
+  /// The running (or finished) Deploy or Stow, in seconds on the shell's one clock.
+  [[nodiscard]] std::optional<RigMove> rigMove() const noexcept;
   void setHudFx(float draw, float content, float level) noexcept {
     hudDraw_ = draw;
     hudContent_ = content;
@@ -309,6 +351,10 @@ class Ui {
 
  private:
   bool labBackdrop_{false}, labLast_{false}, labLeaving_{false};
+  bool rigEnabled_{false};
+  float rigDeployLock_{1.62f}, rigStowShutdown_{0}, rigStowTravel_{1.42f};
+  float rigTotal_{0}, rigLock_{0}, rigShutdown_{0};
+  app::Screen rigFrom_{app::Screen::MainMenu};
   std::function<std::optional<view::OrbitCamera>(app::Screen)> stationCamera_;
   std::function<std::string_view(app::Screen)> focusFor_;
   std::optional<view::OrbitCamera> fromCam_, toCam_;

@@ -94,6 +94,24 @@ if(TARGET endspielzero_gui)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lab_stations.cmake)
   set_tests_properties(gui-lab-stations PROPERTIES LABELS "render;gui" TIMEOUT 300
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-lab-deploy
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lab_deploy.cmake)
+  set_tests_properties(gui-lab-deploy PROPERTIES LABELS "render;gui" TIMEOUT 600
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-slab-skin
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_slab_skin.cmake)
+  set_tests_properties(gui-slab-skin PROPERTIES LABELS "render;gui" TIMEOUT 600
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-lab-multislab
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lab_multislab.cmake)
+  set_tests_properties(gui-lab-multislab PROPERTIES LABELS "render;gui" TIMEOUT 900
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   add_test(NAME gui-implant
     COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
             -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures

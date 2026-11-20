@@ -36,23 +36,33 @@ void applyBoardFx(InstanceSet& set, const app::Session& session,
   set.fxGlobals.tint[1] = state.tint[1];
   set.fxGlobals.tint[2] = state.tint[2];
 
+  const auto bootCell = [&](CellId c, float age, float intensity) {
+    const view::BootState b =
+        view::bootState(age, session.bootOrder()[c], intensity, cellSeed(c));
+    view::CellFx& fx = set.cellFx[c + 1];
+    fx.power = b.power;
+    fx.flicker = b.flicker;
+    fx.reveal = pos.at(c).empty() ? 1.0f : b.reveal;
+    fx.heat = pos.at(c).empty() ? 0.0f : b.heat;
+    // -2: not yet on (the shader keeps it quiet); -1 no transition; otherwise the age.
+    fx.onAge = b.onAge < 0.0f && b.power < 0.5f ? -2.0f : b.onAge;
+  };
+  // Slabs on their own boot clock (M24.6), over whatever the rest of the board does.
+  const auto bootSlabs = [&] {
+    const float intensity = state.ledCells && !state.shortBoot ? state.intensity : 0.0f;
+    const float stretch = state.shortBoot ? view::kBootSeconds / kShortBootSeconds : 1.0f;
+    for (CellId c = 0; c < count && c < state.cellBootAge.size(); ++c)
+      if (state.cellBootAge[c] >= 0.0f)
+        bootCell(c, state.cellBootAge[c] * stretch, intensity);
+  };
+
   if (state.bootAge) {
-    const std::vector<float>& order = session.bootOrder();
     const float intensity = state.ledCells ? state.intensity : 0.0f;
-    for (CellId c = 0; c < count; ++c) {
-      const view::BootState b =
-          view::bootState(*state.bootAge, order[c], intensity, cellSeed(c));
-      view::CellFx& fx = set.cellFx[c + 1];
-      fx.power = b.power;
-      fx.flicker = b.flicker;
-      fx.reveal = pos.at(c).empty() ? 1.0f : b.reveal;
-      fx.heat = pos.at(c).empty() ? 0.0f : b.heat;
-      // -2: not yet on (the shader keeps it quiet); -1 no transition; otherwise the age.
-      fx.onAge = b.onAge < 0.0f && b.power < 0.5f ? -2.0f : b.onAge;
-    }
+    for (CellId c = 0; c < count; ++c) bootCell(c, *state.bootAge, intensity);
     const view::BootState g = view::bootState(*state.bootAge, 0.0f, intensity);
     set.fxGlobals.bezel = g.bezel;
     set.fxGlobals.backdrop = g.backdrop;
+    bootSlabs();
     return;  // the boot replaces whatever the board was doing
   }
 
@@ -171,6 +181,7 @@ void applyBoardFx(InstanceSet& set, const app::Session& session,
       fx.tintMix = r.tint;
     }
   }
+  bootSlabs();
   if (set.fxGlobals.standbyCell != kInvalidCell)
     set.standbyLed = BoardRenderer::buildStandbyLed(
         set, view::layout(pos.variant().dims, session.viewConfig()));

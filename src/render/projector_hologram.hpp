@@ -16,6 +16,8 @@ struct Hologram {
     return !quads.empty() || !tokens.empty() || !lines.empty();
   }
 };
+/// How far a flat wall subject is tipped about its own horizontal axis, toward the room.
+inline constexpr float kWallSubjectTiltDegrees = 18.70188f;
 struct HologramPlacement {
   view::Vec3 centre{};
   float radius{1};
@@ -24,6 +26,7 @@ struct HologramPlacement {
   float scale{1};
   float squashZ{1};  ///< Historical name: squash along lens-to-centre, about the lens.
   view::Vec3 lens{};
+  bool wallSubject{false};  ///< Fit visible geometry; tip flat subjects toward the room.
 };
 /// Columns of a right-handed orthonormal frame; quaternion order is x,y,z,w.
 [[nodiscard]] std::array<float, 4> quatFromBasis(view::Vec3 t, view::Vec3 b,

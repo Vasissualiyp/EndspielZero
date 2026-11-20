@@ -45,7 +45,7 @@ add_custom_command(OUTPUT ${CB_SPV_HEADER}
 set(CB_RENDER_SOURCES
   vulkan_context.cpp offscreen_target.cpp board_renderer.cpp image_io.cpp
   piece_mesh.cpp piece_icon.cpp panel_response.cpp panel_alive.cpp board_glow.cpp
-  post_params.cpp post_process.cpp implant_layer.cpp board_fx.cpp lab_scene.cpp lab_light.cpp hud_layout.cpp
+  post_params.cpp post_process.cpp implant_layer.cpp board_fx.cpp lab_scene.cpp lab_light.cpp lab_rig.cpp hud_layout.cpp
   ${CB_SPV_HEADER})
 
 # SDL3 supplies the window and the surface; Dear ImGui supplies the panels. Without
@@ -58,7 +58,7 @@ if(SDL3_FOUND)
   if(imgui_FOUND)
     list(APPEND CB_RENDER_SOURCES ui.cpp ui_menus.cpp ui_widgets.cpp deco.cpp
                                  overture_scene.cpp play_surface.cpp ui_designer.cpp
-                                 shape_sequence.cpp projector_hologram.cpp)
+                                 shape_sequence.cpp projector_hologram.cpp slab_skin.cpp)
   endif()
 endif()
 

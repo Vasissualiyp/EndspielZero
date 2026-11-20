@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/fx_timeline.hpp"
 
+#include <algorithm>
+
 #include "app/session.hpp"
 #include "view/board_boot.hpp"
 #include "view/check_ripple.hpp"
@@ -15,7 +17,9 @@ void FxTimeline::observe(const Session* session, double now, bool eligible,
     return;
   }
   if (session->id() != sessionId_) {
+    const double gate = bootGate_;
     *this = FxTimeline{};
+    bootGate_ = gate;
     sessionId_ = session->id();
   }
   if (session->bootSerial() != bootSeen_) {
@@ -119,8 +123,10 @@ std::optional<float> FxTimeline::thinkingAge(double now) const {
 }
 
 std::optional<float> FxTimeline::bootAge(double now) const {
-  if (!bootStart_ || now < *bootStart_) return std::nullopt;
-  const double age = now - *bootStart_;
+  if (!bootStart_) return std::nullopt;
+  const double start = std::max(*bootStart_, bootGate_);
+  if (now < start) return now < *bootStart_ ? std::nullopt : std::optional<float>(0.0f);
+  const double age = now - start;
   if (age >= static_cast<double>(view::kBootSeconds)) return std::nullopt;
   return static_cast<float>(age);
 }
@@ -144,9 +150,16 @@ std::optional<FxTimeline::End> FxTimeline::powerUp(double now) const {
   return End{static_cast<float>(age), *powerUpFx_};
 }
 
+std::optional<FxTimeline::LatchFx> FxTimeline::latchAge(double now) const {
+  if (!latchStart_) return std::nullopt;
+  const double age = now - *latchStart_;
+  if (age < 0.0 || age >= static_cast<double>(kLatchSeconds)) return std::nullopt;
+  return LatchFx{latchAxis_, static_cast<float>(age)};
+}
+
 bool FxTimeline::animating(double now) const {
   return captureAge(now) || booting(now) || ripple(now) || end(now) || powerUp(now) ||
-         turnAge(now) || moveAge(now) || thinkingAge(now);
+         turnAge(now) || moveAge(now) || thinkingAge(now) || latchAge(now);
 }
 
 }  // namespace cb::app

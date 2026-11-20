@@ -193,6 +193,11 @@ struct SurfacePose {
   /// (M13.9's trailer attract sequence: "klein folds back into a torus, which then
   /// visibly copies itself into the nested shells").
   float shellSpread{1.0f};
+  /// The lab's slab skin (M24.5b): `PlaySurface::build` keeps each tile at its flat size
+  /// inside a stretched cell, and adds the membrane behind it. Off by default, so every
+  /// existing caller is unchanged; only the lab game path turns it on. Ignored by the
+  /// overtures and by the stacked D >= 3 shapes.
+  bool skin{false};
 };
 
 /// A sequential sub-window of a morph's own 0..1 progress (M18 revision, items 2 and 3).

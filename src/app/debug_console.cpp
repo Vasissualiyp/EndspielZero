@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/debug_console.hpp"
 
+#include <cstdio>
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -103,20 +105,23 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
   if (cmd == "help" || cmd == "?") return DebugConsole::help();
 
   if (cmd == "dev" || cmd == "post" || cmd == "lab" || cmd == "projector" ||
-      cmd == "implant" || cmd == "heartbeat" || cmd == "living" || cmd == "tremor" || cmd == "wander") {
+      cmd == "implant" || cmd == "heartbeat" || cmd == "living" || cmd == "tremor" ||
+      cmd == "wander") {
     if (w.size() > 2 || (w.size() == 2 && w[1] != "on" && w[1] != "off"))
       return "usage: " + cmd + " [on|off]";
-    bool& enabled = cmd == "living" ? shell.settings().livingVision
-                    : cmd == "tremor" ? shell.settings().tremor
-                    : cmd == "wander" ? shell.settings().gazeWander
-                    : cmd == "implant"     ? shell.settings().implantFx
+    bool& enabled = cmd == "living"      ? shell.settings().livingVision
+                    : cmd == "tremor"    ? shell.settings().tremor
+                    : cmd == "wander"    ? shell.settings().gazeWander
+                    : cmd == "implant"   ? shell.settings().implantFx
                     : cmd == "heartbeat" ? shell.settings().heartbeat
                     : cmd == "projector" ? shell.settings().projector
                     : cmd == "lab"       ? shell.settings().labScene
                     : cmd == "dev"       ? shell.settings().devOverlay
                                          : shell.settings().postProcess;
     enabled = w.size() == 1 ? !enabled : w[1] == "on";
-    const std::string label = cmd == "living" || cmd == "tremor" || cmd == "wander" ? cmd + " " : cmd == "implant"     ? "implant "
+    const std::string label = cmd == "living" || cmd == "tremor" || cmd == "wander"
+                                  ? cmd + " "
+                              : cmd == "implant"   ? "implant "
                               : cmd == "heartbeat" ? "heartbeat "
                               : cmd == "projector" ? "projector "
                               : cmd == "lab"       ? "lab "
@@ -134,38 +139,56 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
 
   if (cmd == "warp" || cmd == "gaze") {
     auto& s = shell.settings();
-    const auto number = [](const std::string& word)->std::optional<float> {
+    const auto number = [](const std::string& word) -> std::optional<float> {
       float value{};
-      const auto [end, ec] = std::from_chars(word.data(), word.data()+word.size(), value);
-      if (ec != std::errc{} || end != word.data()+word.size() || !std::isfinite(value)) return {};
+      const auto [end, ec] =
+          std::from_chars(word.data(), word.data() + word.size(), value);
+      if (ec != std::errc{} || end != word.data() + word.size() || !std::isfinite(value))
+        return {};
       return value;
     };
     if (cmd == "warp") {
-      if (w.size()==2 && w[1]=="default") { s.warpOverride.reset(); return "warp default"; }
-      if (w.size()!=2 || !number(w[1])) return "usage: warp <k>|default";
-      s.warpOverride=*number(w[1]); return "warp set";
+      if (w.size() == 2 && w[1] == "default") {
+        s.warpOverride.reset();
+        return "warp default";
+      }
+      if (w.size() != 2 || !number(w[1])) return "usage: warp <k>|default";
+      s.warpOverride = *number(w[1]);
+      return "warp set";
     }
-    if (w.size()==1) {
+    if (w.size() == 1) {
       std::ostringstream out;
       out << "gaze " << s.gazeState.pointPx[0] << ' ' << s.gazeState.pointPx[1]
           << " uiFocus " << s.gazeState.uiFocus << " focus " << s.gazeState.focusDistance
-          << " daydream " << s.gazeState.daydream << " target " << s.gazeTarget << " index " << s.gazeState.lastTarget;
+          << " daydream " << s.gazeState.daydream << " target " << s.gazeTarget
+          << " index " << s.gazeState.lastTarget;
       return out.str();
     }
-    if (w.size()==2 && w[1]=="off") {
-      s.gazePin.reset(); s.gazeUi=-1; s.gazeTarget.clear(); return "gaze off";
+    if (w.size() == 2 && w[1] == "off") {
+      s.gazePin.reset();
+      s.gazeUi = -1;
+      s.gazeTarget.clear();
+      return "gaze off";
     }
-    if (w.size()==2 && (w[1]=="ui" || w[1]=="room")) {
-      s.gazeUi=w[1]=="ui" ? 1 : 0; return "gaze " + w[1];
+    if (w.size() == 2 && (w[1] == "ui" || w[1] == "room")) {
+      s.gazeUi = w[1] == "ui" ? 1 : 0;
+      return "gaze " + w[1];
     }
-    if (w.size()==3 && w[1]=="target") {
-      if (!lab || std::none_of(lab->gaze.begin(),lab->gaze.end(),[&](const auto& g){return g.key==w[2];})) return "unknown gaze target";
-      s.gazeTarget=w[2]; s.gazePin.reset(); s.gazeUi=-1; return "gaze target " + w[2];
+    if (w.size() == 3 && w[1] == "target") {
+      if (!lab || std::none_of(lab->gaze.begin(), lab->gaze.end(),
+                               [&](const auto& g) { return g.key == w[2]; }))
+        return "unknown gaze target";
+      s.gazeTarget = w[2];
+      s.gazePin.reset();
+      s.gazeUi = -1;
+      return "gaze target " + w[2];
     }
-    if (w.size()==3) {
-      const auto x=number(w[1]), y=number(w[2]);
-      if (x && y && *x>=0 && *x<=1 && *y>=0 && *y<=1) {
-        s.gazePin=view::Vec2f{*x,*y}; s.gazeTarget.clear(); return "gaze pinned";
+    if (w.size() == 3) {
+      const auto x = number(w[1]), y = number(w[2]);
+      if (x && y && *x >= 0 && *x <= 1 && *y >= 0 && *y <= 1) {
+        s.gazePin = view::Vec2f{*x, *y};
+        s.gazeTarget.clear();
+        return "gaze pinned";
       }
     }
     return "usage: gaze [<x> <y>|off|ui|room|target <key>]";
@@ -544,12 +567,26 @@ std::string DebugConsole::help() {
          "implant [on|off] toggle organic menu perception (also get/set implantFx)\n"
          "heartbeat [on|off] toggle the implant double pulse\n"
          "living [on|off] living vision: lens warp, gaze, focus (M24.4c)\n"
-         "tremor [on|off], wander [on|off] micro-tremor and the 10 s idle daydream (M24.4d)\n"
+         "tremor [on|off], wander [on|off] micro-tremor and the 10 s idle daydream "
+         "(M24.4d)\n"
          "gaze [<x> <y>|off|ui|room|target <key>] show or pin the gaze\n"
          "warp <k>|default override the lens warp strength\n"
-         "wake        replay the launch waking-up sequence: eyelids, blinks, handshake (M24.7)\n"
-         "handshake    replay only the implant handshake (set wakeOnLaunch false to skip it)\n"
+         "wake        replay the launch waking-up sequence: eyelids, blinks, handshake "
+         "(M24.7)\n"
+         "handshake    replay only the implant handshake (set wakeOnLaunch false to skip "
+         "it)\n"
          "lab [on|off]  toggle the lab room (also get/set labScene)\n"
+         "deploy | stow  replay the current game's slab deploy / stow in the lab\n"
+         "focus <0..1>|auto  pin the room-light focus level during a lab game\n"
+         "rig          lab scale, mast groups and racks, slab poses, light bridges\n"
+         "relayout     replay the lab game's last layout change (the gantry moves)\n"
+         "bridges on|off  light bridges between glued slabs that cannot touch "
+         "(default on)\n"
+         "wallfade on|off  fade walls between the eye and the board (default on)\n"
+         "skin on|off  the lab game's slab skin: rigid tiles, membrane, ribs (default "
+         "on)\n"
+         "stretch      min/max cell stretch (u, v) and the pass-through cell count\n"
+         "latch <axis>  flash the seam latch on axis 0 (files) or 1 (ranks)\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"
          "boot                     replay the board's power-on sequence\n"
@@ -587,6 +624,94 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
   const std::string text(line);
   if (words(text).empty()) return {};
   const auto args = words(text);
+  if (args[0] == "deploy" || args[0] == "stow" || args[0] == "focus" ||
+      args[0] == "rig" || args[0] == "wallfade" || args[0] == "skin" ||
+      args[0] == "stretch" || args[0] == "latch" || args[0] == "relayout" ||
+      args[0] == "bridges") {
+    std::string result;
+    const auto& cmd = args[0];
+    if (cmd == "deploy" || cmd == "stow") {
+      // Replay the lab's game move for the current game (M24.5).
+      if (args.size() != 1)
+        result = "usage: " + cmd;
+      else if (!labDoc_)
+        result = "lab is off";
+      else if (!shell.hasGame())
+        result = "no game loaded";
+      else {
+        if (cmd == "deploy")
+          shell.previewTransition(Screen::MainMenu, Screen::Game);
+        else
+          shell.previewTransition(Screen::Game, Screen::MainMenu);
+        result = cmd;
+      }
+    } else if (cmd == "focus") {
+      float level = -1;
+      if (args.size() == 2 && args[1] == "auto") {
+        focusPin_.reset();
+        result = "focus auto";
+      } else if (args.size() == 2 && std::sscanf(args[1].c_str(), "%f", &level) == 1 &&
+                 level >= 0 && level <= 1) {
+        focusPin_ = level;
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "focus %.2f", static_cast<double>(level));
+        result = buf;
+      } else {
+        result = "usage: focus <0..1>|auto";
+      }
+    } else if (cmd == "skin") {
+      if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
+        result = "usage: skin on|off";
+      else {
+        skin_ = args[1] == "on";
+        result = "skin " + args[1];
+      }
+    } else if (cmd == "latch") {
+      if (args.size() != 2 || (args[1] != "0" && args[1] != "1"))
+        result = "usage: latch <axis>  (0 files, 1 ranks)";
+      else {
+        latch_ = args[1] == "1" ? 1 : 0;
+        result = "latch " + args[1];
+      }
+    } else if (cmd == "stretch") {
+      const std::string report = skinReport_ ? skinReport_() : std::string{};
+      result = args.size() != 1 ? "usage: stretch"
+               : report.empty() ? "no skinned shape in the lab"
+                                : report;
+    } else if (cmd == "bridges") {
+      if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
+        result = "usage: bridges on|off";
+      else {
+        bridges_ = args[1] == "on";
+        result = "bridges " + args[1];
+      }
+    } else if (cmd == "relayout") {
+      if (args.size() != 1)
+        result = "usage: relayout";
+      else if (!rigReport_ || rigReport_().empty())
+        result = "no game in the lab";
+      else {
+        relayout_ = true;
+        result = "relayout";
+      }
+    } else if (cmd == "wallfade") {
+      if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))
+        result = "usage: wallfade on|off";
+      else {
+        wallFade_ = args[1] == "on";
+        result = "wallfade " + args[1];
+      }
+    } else {
+      const std::string report = rigReport_ ? rigReport_() : std::string{};
+      result = args.size() != 1 ? "usage: rig"
+               : report.empty() ? "no game in the lab"
+                                : report;
+    }
+    history_.push_back(text);
+    log_.push_back("> " + text);
+    log_.push_back(result);
+    return result;
+  }
   if (args[0] == "station" || args[0] == "salience") {
     const bool station = args[0] == "station";
     auto& pin = station ? stationPin_ : saliencePin_;

@@ -56,6 +56,7 @@ struct Mapping {
   float reach;
   float yaw;
   const HologramPlacement& at;
+  float tilt{0};
   Vec3 point(Vec3 p) const {
     auto world = at.centre + direction(p - centre) * (at.radius * at.scale / reach);
     if (at.squashZ != 1) {
@@ -64,7 +65,14 @@ struct Mapping {
     }
     return world;
   }
-  Vec3 direction(Vec3 p) const { return turn(axes(p), yaw); }
+  Vec3 direction(Vec3 p) const {
+    const auto v = turn(axes(p), yaw);
+    if (tilt == 0) return v;
+    // The wall lens faces -X. Tip about the subject centre, after its own yaw,
+    // so its normal faces into the room; pieces and trails share this rotation.
+    return {v.x * std::cos(tilt) - v.z * std::sin(tilt), v.y,
+            v.x * std::sin(tilt) + v.z * std::cos(tilt)};
+  }
 };
 Instance instance(Vec3 p, Vec3 size, view::Rgba color, float alpha) {
   Instance out;
@@ -186,11 +194,32 @@ struct QuinticTiles {
 Hologram overtureHologram(const OvertureScene& scene, const view::Theme& theme,
                           const HologramPlacement& at) {
   Bounds bounds;
-  for (const auto& q : scene.quads)
-    for (const auto& p : q.p) bounds.add(vec(p));
-  for (const auto& t : scene.tokens) bounds.add(vec(t.at));
-  const Mapping map{bounds.centre(), std::max(scene.cam.reach, .001f),
-                    at.yaw + scene.cam.yaw, at};
+  const auto visiblePoints = [&](auto add) {
+    for (const auto& q : scene.quads)
+      if (!at.wallSubject || q.fade > 0)
+        for (const auto& p : q.p) add(vec(p));
+    for (const auto& t : scene.tokens)
+      if (!at.wallSubject || t.fade > 0) add(vec(t.at));
+    if (at.wallSubject)
+      for (const auto& trail : scene.trails)
+        if (trail.fade > 0)
+          for (const auto& p : trail.pts) add(vec(p));
+  };
+  visiblePoints([&](Vec3 p) { bounds.add(p); });
+  float reach = std::max(scene.cam.reach, .001f), tilt = 0;
+  if (at.wallSubject && bounds.any) {
+    // OvCamera::reach includes pane-camera padding (particularly for hyper4).
+    // A wall projection fits the actual subject, independently of that old zoom.
+    reach = .001f;
+    visiblePoints(
+        [&](Vec3 p) { reach = std::max(reach, view::length(p - bounds.centre())); });
+    const auto extent = bounds.hi - bounds.lo;
+    const float flatness =
+        1 -
+        std::clamp(extent.y / (.35f * std::max({extent.x, extent.z, .001f})), 0.f, 1.f);
+    tilt = kWallSubjectTiltDegrees * kPi / 180 * flatness * flatness * (3 - 2 * flatness);
+  }
+  const Mapping map{bounds.centre(), reach, at.yaw + scene.cam.yaw, at, tilt};
   Hologram out;
   out.quads.reserve(scene.quads.size());
   for (const auto& q : scene.quads)
@@ -281,14 +310,16 @@ Instance projectorBeam(view::Vec3 lens, const HologramPlacement& at,
   return line(lens, base, .10f * kCellsPerMetre, theme.ember, .12f * at.alpha);
 }
 
-std::optional<Instance> projectorFlare(view::Vec3 lens, view::Vec3 toward, float lensRadius,
-                                       float roomUp, const view::Theme& theme) {
+std::optional<Instance> projectorFlare(view::Vec3 lens, view::Vec3 toward,
+                                       float lensRadius, float roomUp,
+                                       const view::Theme& theme) {
   constexpr float kFrom = .05f, kTo = .25f;
   if (!(roomUp >= kFrom && roomUp < kTo)) return std::nullopt;
   const float f = (roomUp - kFrom) / (kTo - kFrom);
   const float scale = f < .5f ? 1.6f * (f / .5f) : 1.6f - .6f * ((f - .5f) / .5f);
-  auto out = instance(lens, {2 * scale * lensRadius, 2 * scale * lensRadius, .004f * kCellsPerMetre},
-                      theme.ember, .5f * (1.f - f));
+  auto out = instance(
+      lens, {2 * scale * lensRadius, 2 * scale * lensRadius, .004f * kCellsPerMetre},
+      theme.ember, .5f * (1.f - f));
   out.material = shaderMaterial(view::Material::Glow, Cut::Plank, 0);
   alongZ(out, toward - lens);
   return out;

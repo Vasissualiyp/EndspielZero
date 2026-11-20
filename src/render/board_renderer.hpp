@@ -94,6 +94,13 @@ struct BoardRect {
   [[nodiscard]] bool valid() const noexcept { return width > 0 && height > 0; }
 };
 
+/// A slice's slab (its plinth) reaches this far beyond its outermost cell centres, and
+/// is this deep under the cells (its half height; the box is twice that). The bezel
+/// margin beyond the cell's own half width is what the rig measures slabs with (M24.5).
+inline constexpr float kPlinthOutset = 0.78f;
+inline constexpr float kPlinthDepth = 0.13f;
+inline constexpr float kBezelMargin = 0.28f;  ///< kPlinthOutset - the cell's half pitch
+
 inline constexpr float kSeamHoverGain = 1.8f;  ///< hovered axis: colour multiplier
 inline constexpr float kSeamHoverDim = 0.55f;  ///< other glued axes
 
@@ -176,6 +183,18 @@ struct BoardOptions {
   /// reads this; 0 is the calm presentation (static emitters and footprints stay, no
   /// glitches, no trail). A later calm setting is just this scalar.
   float presentationIntensity{1.0f};
+  /// The lab's slab skin (M24.5b): on a lab game's parametrised 2-D shape the tiles keep
+  /// their flat size, the membrane shows behind them and a Klein bottle's pass-through
+  /// band is drawn as light. Set by the front end only on the lab game path.
+  bool slabSkin{false};
+  /// A seam latch flash (M24.5b): the wrap axis whose rail is boosted (-1 none) and the
+  /// boost (`latchBoost`). Only read with `slabSkin`.
+  int latchAxis{-1};
+  float latchBoost{1.0f};
+  /// A stacked D >= 3 shape view in the lab (M24.6): no slab can hold it, so every tile
+  /// is drawn as projected light (hologram material, the projector opacity path) at this
+  /// opacity. 0 = off, the LED tiles as before. Set by the front end only in a lab game.
+  float stackedLight{0.0f};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -223,6 +242,17 @@ struct InstanceSet {
   /// Which instance carries the transform for that mesh - an identity one, because the
   /// vertices are already in world space. The pipeline needs *an* instance bound.
   std::uint32_t surfaceInstance{0};
+  /// The slab skin splits the surface mesh by material (M24.5b): the LED tiles, the light
+  /// band (hologram), the membrane (matte with a sub-flag) and, during a seam latch, a
+  /// blended glow strip each draw their own index range with their own identity instance.
+  /// Empty everywhere else, where the whole mesh is one draw with `surfaceInstance`.
+  struct SurfaceDraw {
+    std::uint32_t firstIndex{0};
+    std::uint32_t indexCount{0};
+    std::uint32_t instance{0};
+    bool blend{false};  ///< the latch strip: blended, drawn last
+  };
+  std::vector<SurfaceDraw> surfaceDraws;
 
   /// The capture flourish (M18.1): the captured piece shrinking out and the blood flash
   /// at the square it stood on. Kept apart from `instances` because these must be drawn
@@ -307,24 +337,26 @@ class BoardRenderer {
   [[nodiscard]] float blur() const noexcept { return blur_; }
 
   /// Depth of field for the lab room (M24.4c 4.4): the eye is focused at `focus` world
-  /// units and everything at another depth blurs by up to `maxPx`. On a device that cannot
-  /// read the depth buffer, `fallback` (0..1) drives the uniform defocus instead. The
-  /// pause defocus, when running, wins.
+  /// units and everything at another depth blurs by up to `maxPx`. On a device that
+  /// cannot read the depth buffer, `fallback` (0..1) drives the uniform defocus instead.
+  /// The pause defocus, when running, wins.
   struct DepthOfField {
     float focus{1};
     float cocScale{0};
     float maxPx{0};
     float fallback{0};
     /// Daydream (M24.4d): a uniform floor on the circle of confusion, in pixels, and the
-    /// soft-edged focus spot (centre in target pixels, radius and feather in pixels) inside
-    /// which that floor falls to `spotFraction` of itself.
+    /// soft-edged focus spot (centre in target pixels, radius and feather in pixels)
+    /// inside which that floor falls to `spotFraction` of itself.
     float floorPx{0};
     float spot[2]{0, 0};
     float spotRadius{0}, spotFeather{1}, spotFraction{1};
   };
   void setDepthOfField(std::optional<DepthOfField> dof) noexcept { dof_ = dof; }
   /// True when depth of field would run the depth-aware pass on this device.
-  [[nodiscard]] bool depthOfFieldAvailable() const noexcept { return ctx_->depthSampleable(); }
+  [[nodiscard]] bool depthOfFieldAvailable() const noexcept {
+    return ctx_->depthSampleable();
+  }
 
   /// Post-processing (ADR-0025): render the scene into float colour, bloom its emitters,
   /// tone-map and grain it into the target. Off by default at this level so a bare
