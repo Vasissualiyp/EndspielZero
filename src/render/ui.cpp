@@ -838,8 +838,10 @@ void Ui::applyStyle() {
     s.GrabRounding = 8.0f;
     s.GrabMinSize = 8.0f;
     c[ImGuiCol_Border] = col(t.implantFaint, 0.6f);
-    c[ImGuiCol_SliderGrab] = col(t.implantDim, 0.9f);
-    c[ImGuiCol_SliderGrabActive] = col(t.implant);
+    // An integer slider's grab is a fifth of the track and sits under its value text, so
+    // it is a faint wash (M24.8): the text stays the brightest thing in the field.
+    c[ImGuiCol_SliderGrab] = col(t.implantDim, 0.30f);
+    c[ImGuiCol_SliderGrabActive] = col(t.implant, 0.45f);
     c[ImGuiCol_Header] = col(t.implantDeep, 0.0f);
     c[ImGuiCol_HeaderHovered] = col(t.implantDeep, 0.30f);
     c[ImGuiCol_HeaderActive] = col(t.implantDeep, 0.30f);
@@ -918,7 +920,8 @@ void Ui::tick(float dt) {
   lastDt_ = dt;
   clock_ += dt;
   rackAge_ += dt;
-  field_.advance(dt);
+  // The flat menu field is the lab-off path's backdrop; the lab path never draws it (M24.8).
+  if (!labBackdrop_) field_.advance(dt);
   boardField_.advance(dt);
   // Ease the arrival rather than run it linearly: a screen that stops dead has not
   // travelled anywhere.
@@ -1904,7 +1907,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
                         goesDeeper(static_cast<app::Screen>(lastScreen_), shell.screen());
     // Going in, the field rushes towards and past the viewer; coming back it recedes.
     // The impulse is negative for "towards the viewer" - see DepthField::push.
-    field_.push(deeper ? -3.1f : 2.6f);
+    if (!labBackdrop_) field_.push(deeper ? -3.1f : 2.6f);
     // Remember what is leaving, and from which screen, so its pane and its decoration can
     // be drawn once more on the way out. The ghost's input is disabled and its request
     // discarded, so re-running its build cannot navigate.

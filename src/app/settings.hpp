@@ -29,7 +29,7 @@ struct Settings {
   bool guiScaleAuto{true};
   /// Frame within HUD clearance; debug A/B for material and camera captures.
   bool hudFraming{true};
-  bool labScene{false};
+  bool labScene{true};
   bool projector{true};
   bool implantFx{true};
   bool heartbeat{true};

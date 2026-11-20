@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #ifdef CB_HAVE_VULKAN
@@ -79,8 +80,22 @@ TEST_CASE("lab coordinates cameras and batches use metres", "[unit][render][lab]
   CHECK(count == set.lab.size());
   for (const auto& i : set.lab) {
     CHECK(i.fxCell == 0);
-    for (auto signal : i.panelSignal) CHECK(signal == 0);
+    // [1] carries the part's ambient-occlusion term (M24.8); the rest stay neutral.
+    CHECK(i.panelSignal[0] == 0);
+    CHECK(i.panelSignal[2] == 0);
+    CHECK(i.panelSignal[3] == 0);
+    CHECK(i.panelSignal[1] >= 0);
+    CHECK(i.panelSignal[1] <= 1);
   }
+  // Every authored `ao` reaches an instance: the sorted instances hold the same multiset.
+  std::vector<float> authored, carried;
+  for (const auto& p : doc->parts)
+    if (p.group != "template") authored.push_back(p.ao);
+  for (const auto& i : set.lab) carried.push_back(i.panelSignal[1]);
+  std::sort(authored.begin(), authored.end());
+  std::sort(carried.begin(), carried.end());
+  CHECK(authored == carried);
+  CHECK(carried.back() > 0);
 }
 TEST_CASE("lab file meshes upload and survive a piece-body rebuild", "[render][lab]") {
   const auto path = std::filesystem::path(CB_BINARY_DIR) / "lab-test.obj";
@@ -601,5 +616,37 @@ TEST_CASE("the slab-underside constant matches the renderer's plinth",
   CHECK(view::kSlabBelowFace ==
         Catch::Approx(BoardRenderer::cellHalfExtent().z + 2 * kPlinthDepth));
   CHECK(kBezelMargin == Catch::Approx(kPlinthOutset - .5f));
+}
+TEST_CASE("the lab path leaves the flat menu depth field alone (M24.8)", "[render][lab]") {
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct SdlGuard {
+    ~SdlGuard() { SDL_Quit(); }
+  } sdl;
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx.has_value());
+  auto renderer = BoardRenderer::create(*ctx);
+  REQUIRE(renderer.has_value());
+  auto* window = SDL_CreateWindow("lab-field", 640, 360, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct WindowGuard {
+    SDL_Window* window;
+    ~WindowGuard() { SDL_DestroyWindow(window); }
+  } guard{window};
+  const auto spread = [&](bool lab) {
+    auto ui = Ui::create(*ctx, window, renderer->theme());
+    REQUIRE(ui.has_value());
+    (*ui)->setLabBackdrop(lab);
+    const auto before = (*ui)->menuFieldBodies();
+    for (int i = 0; i < 5; ++i) (*ui)->tick(.5f);
+    const auto after = (*ui)->menuFieldBodies();
+    REQUIRE(before.size() == after.size());
+    float moved = 0;
+    for (std::size_t i = 0; i < before.size(); ++i)
+      moved += std::abs(before[i].yaw - after[i].yaw);
+    return moved;
+  };
+  CHECK(spread(false) > 0);  // the flat path still animates it
+  CHECK(spread(true) == 0);
 }
 #endif

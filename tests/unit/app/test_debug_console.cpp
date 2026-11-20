@@ -287,7 +287,10 @@ TEST_CASE("transition console previews a screen move from another screen",
 TEST_CASE("lab setting and command work without a game", "[unit][app][lab]") {
   auto shell = makeShell();
   DebugConsole console;
-  CHECK_FALSE(shell->settings().labScene);
+  // On by default for interactive play (M24.8); captures turn it off in the front end.
+  // (The shell loads the machine's saved settings, so the default is read off a fresh one.)
+  CHECK(app::Settings{}.labScene);
+  shell->settings().labScene = false;
   CHECK(console.run(*shell, "lab") == "lab on");
   CHECK(console.run(*shell, "get labScene") == "lab_scene = true");
   CHECK(console.run(*shell, "lab off") == "lab off");

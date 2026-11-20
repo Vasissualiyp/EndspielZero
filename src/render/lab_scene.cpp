@@ -160,8 +160,9 @@ Instance LabScene::instanceOf(const io::LabPart& p,
       view::Material::Sky};
   i.material =
       shaderMaterial(materials[static_cast<std::size_t>(p.material)], Cut::Plank, 0);
-  // AO remains authored metadata: the LCD response contract requires this payload
-  // to be inert on non-panel materials (M24.1 Step 3's permitted fallback).
+  // The ambient-occlusion term rides panelSignal[1] (M24.8). Only matte, metal and glass
+  // read it in board.frag, and the board's own non-LED instances leave it at zero.
+  i.panelSignal[1] = p.ao;
   return i;
 }
 void LabScene::appendTo(InstanceSet& set, const view::Theme& theme,

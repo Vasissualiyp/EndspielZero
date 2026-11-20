@@ -241,6 +241,10 @@ void main() {
     shade *= mix(0.80, 1.06, clamp(fragHeight, 0.0, 1.0));
 
     vec3 rgb = fragColor.rgb * shade;
+    // A lab part's authored ambient occlusion (M24.8): darker toward its foot. The board's
+    // own instances carry 0 here, which makes the factor exactly 1.
+    if (matId == 0 || matId == 1 || matId == 3)
+        rgb *= mix(1.0 - 0.5 * fragPanelSignal.y, 1.0, smoothstep(0.0, 0.6, clamp(fragHeight, 0.0, 1.0)));
     int lightCount = min(int(lightBuf.header.x + 0.5), 12);
     if (lightCount > 0 && (matId == 0 || matId == 1 || matId == 2 || matId == 3 || matId == 6)) {
         vec3 sum = vec3(0.0);

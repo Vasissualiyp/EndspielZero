@@ -141,6 +141,29 @@ the same argmax (an unoccluded candidate always outscores an occluded one), a co
 builds instead of 144. A non-orientable shape keeps the exact per-candidate build, because a
 lone raw normal is not the field its continuity walk draws with.
 
+## Stations, rig moves and the room clamp (M24)
+
+With the lab on, the camera is not only the board's orbit camera: the menus look from
+**stations** and the games from the board, and the two are joined by moves.
+
+- **Stations.** Every `[[station]]` in `assets/lab/lab.toml` is a standing eye (1.45 to
+  1.75 m, at least 0.25 m clear of the furniture); `LabScene::station` returns its
+  `OrbitCamera`. `stationFor` in `src/gui/main.cpp` maps each screen to one; Paused maps to
+  `menu`. Console `station <name>|off` pins one.
+- **Station flights.** Menu to menu is `view::blendCamera` on the pure `rigEase` curve
+  over `rigMoveSeconds` (0.6 to 1.1 s, capped angular speed); it is a pure function of the
+  move's age, so a capture can pin any instant (`--from`, `--transition-t`).
+- **Deploy and stow.** A game opens as `ScreenMove::Deploy`: the eye rides the slab fetched
+  from the rack (`rigFlightCamera` in `main.cpp`), the aim re-derived from the eye, and
+  lands exactly on the game camera at the last lock; `Stow` mirrors it. The board stays in
+  board space throughout (`view::RigXform` moves the lab, not the board).
+- **The room clamp.** In a lab game the free orbit stays inside the room:
+  `view::clampOrbitDistance` caps the eye's distance by the room box (inset), applied by
+  `render::constrainGameCamera` to the session's stored orbit, and `view::wallFade`
+  screen-door fades the room parts between the eye and the board (`wallfade on|off`).
+- **Calm.** At calm intensity every station flight, deploy and stow is a 0.3 s cross-fade
+  with the camera cut.
+
 ## Extending it
 
 A new camera *choice* is a field on `CameraPolicy` (data); a new *geometry* is a new

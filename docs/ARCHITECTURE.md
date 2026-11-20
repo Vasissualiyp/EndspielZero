@@ -353,6 +353,39 @@ Cross-board check is ordinary attack generation over the full lattice.
 - Renderer reads an immutable `PositionView` snapshot; the engine never blocks
   on the GPU and the renderer never mutates game state. **[INVARIANT]**
 
+## 10a. The lab (M24)
+
+The menus and the games share one lit 3-D room, a home lab, built from data and drawn
+through the same board pipeline (ADR-0026). `labScene` is on by default for interactive
+play; captures and `--lab 0` give the flat presentation, byte for byte.
+
+- **Lab file to pixels.** `assets/lab/lab.toml` (parts, `[[station]]`, `[[light]]`,
+  `[[gaze]]`, `[deploy]`) is parsed by `io::parseLabDoc`; `render::LabScene` turns each
+  part into an `Instance` (`appendTo`, a unit box/bevel/cylinder or an OBJ file mesh) in
+  `InstanceSet::lab`, which `BoardRenderer::buildInstances`/`record` draw after the
+  board's own batches with the same materials. Practical lights are one uniform block
+  (`lab_light.*`); a part's authored `ao` rides `panelSignal[1]` and darkens its foot in
+  `board.frag`. Nothing in the lab is a separate renderer.
+- **The implant is a composite, not a scene.** Menus, the HUD and panels are the player's
+  neural implant: ImGui draws into a transparent attachment and `render::ImplantLayer`
+  composites it (`implant.frag`: form, dissolve, afterimage, veil, the launch handshake)
+  over the 3-D frame, with depth of field (`dof.frag`) and the wake lids in the post
+  composite. The renderer keeps the hardware palette; only the implant has its own hue.
+- **The board is the frame of reference.** A game's board stays in board space (picking,
+  layout and the session never know about the room). `view::RigXform` (`labOrigin`,
+  `labScale`) places the lab around the board instead: `placeLayout` anchors the gantry
+  at the layout, `LabScene::appendTo(..., LabDraw)` maps parts through it, and slabs,
+  masts, cables and light bridges are derived from `view::layout` placements
+  (`src/view/rig_deploy.*`, `src/render/lab_rig.*`). The board rides its slab in
+  `carryBoard`/`carryRelayout`, render-only.
+- **Light versus hardware (ADR-0026).** Everything in 3-D is a physical object under real
+  lights; everything flat is implant. Holograms always have a visible projector
+  (`projector_hologram.*`); the slab skin of a shape (`slab_skin.*`) is rigid tiles, a
+  membrane and ribs, with light where a surface passes through itself.
+- **Moves.** Screens are camera stations (`view::rig_move`); a screen change is a flight
+  (`ScreenMove::Station`), a game opens as a deploy and closes as a stow; at calm intensity
+  every move is a short cross-fade. See [`docs/camera.md`](camera.md).
+
 ## 11. Determinism, hashing, persistence
 
 - Zobrist over cells, state, and hashed field columns; keys derived from a fixed

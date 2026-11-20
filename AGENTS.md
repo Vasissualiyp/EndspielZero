@@ -158,7 +158,7 @@ tools/steam_upload.sh            # SteamPipe upload of that prefix (needs AppID 
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --screen body   # the designer tabs
 ./build/dev/src/gui/endspielzero_gui standard --shot o.ppm --theme manifold # dark glass alternative
 ./build/dev/src/gui/endspielzero_gui --theme manifold --lab 1 --screen menu --station menu --shot lab.ppm
-                                 # M24.1 static lab; captures default off, console lab [on|off]
+                                 # M24.1 the lab; on by default interactively (M24.8), captures default off, console lab [on|off]
 ./build/dev/src/gui/endspielzero_gui torus --theme manifold --lab 1 --screen newgame --overture-t 0.5 --projector 1 --shot holo.ppm
                                  # M24.3 bench hologram; console projector [on|off], left-drag yaw
 ./build/dev/src/gui/endspielzero_gui standard --theme manifold --lab 1 --screen newgame --from menu --transition-t 0.3 --shot flight.ppm

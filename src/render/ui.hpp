@@ -164,6 +164,8 @@ class Ui {
   /// turns, the field drifts - so the interface needs time, which only the main loop
   /// knows about.
   void tick(float dt);
+  /// The menu depth field's bodies, for the tests: the lab path never advances it.
+  [[nodiscard]] std::vector<BodyState> menuFieldBodies() const { return field_.bodies(); }
 
   void newFrame();
 
