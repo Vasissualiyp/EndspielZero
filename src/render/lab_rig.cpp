@@ -7,6 +7,7 @@
 #include <numbers>
 
 #include "app/session.hpp"
+#include "render/play_surface.hpp"
 #include "render/slab_skin.hpp"
 #include "view/board_boot.hpp"
 #include "view/rig_move.hpp"
@@ -867,6 +868,219 @@ std::vector<bool> slabsShown(const RigLayout& layout,
   for (std::size_t i = 0; i < out.size() && i < poses.size(); ++i)
     out[i] = poses[i].clamped;
   return out;
+}
+
+std::vector<view::Placement> shapeRigPlacements(const VariantSpec& v,
+                                                const std::vector<view::Placement>& p) {
+  if (p.empty() || v.dims.dims() != 2 || !hasPlaySurface(v)) return p;
+  SurfacePose pose;
+  pose.formed = 0.0f;
+  const PlaySurface flat = PlaySurface::build(v, pose);
+  if (flat.empty() || flat.stacked()) return p;
+  const auto shape = flat.bounds();
+  const auto board = view::boundsOf(p);
+  const float dx = shape.centerX() - board.centerX(),
+              dy = shape.centerY() - board.centerY();
+  auto out = p;
+  for (auto& c : out) {
+    c.x += dx;
+    c.y += dy;
+  }
+  return out;
+}
+
+view::Vec3 yokeBoss(const RigLayout& layout, const std::vector<view::SlabPose>& poses,
+                    std::size_t slab) noexcept {
+  const auto& c = poses[slab].centre;
+  return {c.x, c.y, c.z - layout.paths[slab].yokeBelow};
+}
+
+std::array<float, 2> labStageArea(float width, float height) noexcept {
+  return {std::min(1.0f, width * kLabStageGrow), std::min(1.0f, height * kLabStageGrow)};
+}
+
+namespace {
+/// The distance from `eye` to slab `s`'s keep-out at `pose` - its body and board swept
+/// `sweep` straight up - and the keep-out's nearest point. The distance to a box along a
+/// vertical line is convex, so the sweep's nearest point is found by a ternary search
+/// over the lift.
+float keepOutDistance(const RigLayout& layout, std::size_t s, const view::SlabPose& pose,
+                      float sweep, const view::Vec3& eye, view::Vec3& nearest) {
+  const auto& slab = layout.slabs[s];
+  const float hw = (slab.maxX - slab.minX) * .5f, hd = (slab.maxY - slab.minY) * .5f;
+  const std::array<float, 4> inv{-pose.quat[0], -pose.quat[1], -pose.quat[2],
+                                 pose.quat[3]};
+  const auto at = [&](float lift, view::Vec3& onBox) {
+    const auto local = rotate(inv, eye - view::Vec3{0, 0, lift} - pose.centre);
+    const view::Vec3 n{std::clamp(local.x, -hw, hw), std::clamp(local.y, -hd, hd),
+                       std::clamp(local.z, -kCarriedBelowCells, kCarriedAboveCells)};
+    onBox = pose.centre + rotate(pose.quat, n) + view::Vec3{0, 0, lift};
+    return view::length(local - n);
+  };
+  float lo = 0, hi = std::max(0.0f, sweep);
+  for (int i = 0; i < 40 && hi - lo > 1e-4f; ++i) {
+    view::Vec3 unused{};
+    const float a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3;
+    if (at(a, unused) <= at(b, unused))
+      hi = b;
+    else
+      lo = a;
+  }
+  return at((lo + hi) * .5f, nearest);
+}
+}  // namespace
+
+namespace {
+/// The camera at `eye` aimed at `aim`.
+view::OrbitCamera lookFrom(view::OrbitCamera c, const view::Vec3& eye,
+                           const view::Vec3& aim) {
+  const auto back = eye - aim;
+  c.target = aim;
+  c.distance = std::max(1e-3f, view::length(back));
+  c.pitch = std::asin(std::clamp(back.z / c.distance, -1.f, 1.f));
+  c.yaw = std::atan2(back.x, -back.y);
+  return c;
+}
+/// The camera re-aimed at `aim` from where it stands.
+view::OrbitCamera lookAt(const view::OrbitCamera& c, const view::Vec3& aim) {
+  return lookFrom(c, c.eye(), aim);
+}
+/// The flight before it keeps clear of the carried slabs (M24.5).
+view::OrbitCamera flightOf(const RigLayout& layout,
+                           const std::vector<view::SlabPose>& poses, const RigFlight& m,
+                           const view::OrbitCamera& game, const view::OrbitCamera& lab) {
+  if (m.deploy) {
+    constexpr float kFlyStart = 0.4f;  // the menu has dissolved; the slab is out
+    // The flight lands clear of the slabs' lift columns, then settles onto the game
+    // camera once every slab is clamped (M24.9).
+    const auto clearGame = clearOfLifts(layout, game);
+    if (m.age >= m.lock)
+      return view::blendCamera(clearGame, game,
+                               view::rigEase((m.age - m.lock) / kFlightSettleSeconds));
+    if (m.age <= kFlyStart) return lab;
+    const auto slab = layout.groups.front().slabs.front();
+    // On the slab until it has run along the rail, then onto the game's target.
+    const float overhead = layout.paths[slab].departure + view::kSlabTravelEnd;
+    const auto follow =
+        poses[slab].centre +
+        (game.target - poses[slab].centre) *
+            smooth((m.age - overhead) / std::max(.01f, m.lock - overhead));
+    const auto aim =
+        lab.target + (follow - lab.target) * smooth((m.age - kFlyStart) / 0.3f);
+    return lookAt(
+        view::blendCamera(lab, clearGame,
+                          view::rigEase((m.age - kFlyStart) / (m.lock - kFlyStart))),
+        aim);
+  }
+  if (m.age >= m.lock) return lab;
+  // First back off the game camera, clear of the slabs' lift columns, over the shutdown
+  // and the slabs' unclamp (M24.9).
+  const auto start =
+      view::blendCamera(game, clearOfLifts(layout, game),
+                        view::rigEase(m.age / (m.shutdown + kFlightSettleSeconds * .5f)));
+  if (m.age <= m.shutdown) return start;
+  const float u = m.age - m.shutdown, span = m.lock - m.shutdown;
+  const auto slab = layout.groups.back().slabs.front();
+  // Onto the slab as it leaves its mast, off it once it is tilting into its bay.
+  const float inBay = view::stowTravelSeconds(layout.slots) -
+                      (view::kSlabLockSeconds - view::kSlabTiltEnd);
+  const float off = smooth((u - inBay) / std::max(.01f, span - inBay));
+  const auto follow = poses[slab].centre + (lab.target - poses[slab].centre) * off;
+  const auto aim = game.target + (follow - game.target) * smooth(u / 0.3f);
+  return lookAt(view::blendCamera(start, lab, view::rigEase(u / span)), aim);
+}
+}  // namespace
+
+view::OrbitCamera rigFlightCamera(const RigLayout& layout,
+                                  const std::vector<view::SlabPose>& poses,
+                                  const RigFlight& flight, const view::OrbitCamera& game,
+                                  const view::OrbitCamera& lab) {
+  const auto c = flightOf(layout, poses, flight, game, lab);
+  const auto eye = c.eye();
+  const auto clear = clearOfSlabs(layout, poses, eye);
+  // Untouched unless a carried slab is near: every endpoint is still held exactly.
+  if (view::length(clear - eye) <= 0.0f) return c;
+  return lookFrom(c, clear, c.target);
+}
+
+view::Vec3 clearOfSlabs(const RigLayout& layout, const std::vector<view::SlabPose>& poses,
+                        view::Vec3 eye) noexcept {
+  const float metre = kCellsPerMetre * layout.xform.labScale;
+  const float clear = kFlightClearMetres * metre;
+  // A few rounds, so a push out of one slab's keep-out cannot leave the eye in another's.
+  for (int round = 0; round < 4; ++round) {
+    bool moved = false;
+    for (std::size_t s = 0; s < poses.size() && s < layout.slabs.size(); ++s) {
+      const auto& pose = poses[s];
+      if (pose.clamped || pose.inBay) continue;
+      // The keep-out is the slab swept straight up to its rail: the eye leaves it
+      // sideways or underneath, never up between the slab and the rail. The sweep grows
+      // over the slab's first 0.3 m off its hang (and shrinks over its last), so clamping
+      // or releasing a slab moves nothing.
+      const float off =
+          view::length(pose.centre - layout.paths[s].hangCentre) / (0.3f * metre);
+      const float sweep = (layout.paths[s].railZ - pose.centre.z) * smooth(off);
+      view::Vec3 onBox{};
+      const float d = keepOutDistance(layout, s, pose, sweep, eye, onBox);
+      if (d >= clear) continue;
+      if (d > 1e-4f) {
+        eye = onBox + (eye - onBox) * (clear / d);
+      } else {
+        // Inside it: straight down, under the slab's lowest corner.
+        const auto& slab = layout.slabs[s];
+        const float hw = (slab.maxX - slab.minX) * .5f,
+                    hd = (slab.maxY - slab.minY) * .5f;
+        float bottom = 1e30f;
+        for (int k = 0; k < 8; ++k)
+          bottom = std::min(
+              bottom,
+              (pose.centre +
+               rotate(pose.quat, {k & 1 ? hw : -hw, k & 2 ? hd : -hd,
+                                  k & 4 ? kCarriedAboveCells : -kCarriedBelowCells}))
+                  .z);
+        eye.z = bottom - clear;
+      }
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return eye;
+}
+
+view::OrbitCamera clearOfLifts(const RigLayout& layout, const view::OrbitCamera& game) {
+  // A little wider than the flight's own margin, so a slab running off along its rail
+  // past the backed-off eye barely has to push it.
+  const float clear =
+      (kFlightClearMetres + kLiftMarginMetres) * kCellsPerMetre * layout.xform.labScale;
+  // Every slab at its hang, swept up to its rail: the column it is lifted through.
+  const auto rest = rigPoses(layout, RigPhase::Rest, 0, 1);
+  const auto clearAt = [&](float distance) {
+    auto c = game;
+    c.distance = distance;
+    const auto eye = c.eye();
+    for (std::size_t s = 0; s < rest.size() && s < layout.slabs.size(); ++s) {
+      view::Vec3 unused{};
+      if (keepOutDistance(layout, s, rest[s], layout.paths[s].railZ - rest[s].centre.z,
+                          eye, unused) < clear)
+        return false;
+    }
+    return true;
+  };
+  if (clearAt(game.distance)) return game;
+  // Back along the view ray, at most to the room's wall (constrainGameCamera's limit).
+  const float inset = kRoomInsetMetres * kCellsPerMetre * layout.xform.labScale;
+  const float far =
+      std::max(game.distance,
+               view::clampOrbitDistance(game, game.distance * 3, layout.room, inset));
+  if (!clearAt(far)) return game;
+  float lo = game.distance, hi = far;
+  for (int i = 0; i < 30; ++i) {
+    const float mid = (lo + hi) * .5f;
+    (clearAt(mid) ? hi : lo) = mid;
+  }
+  auto c = game;
+  c.distance = hi;
+  return c;
 }
 
 float deployFocus(float age, float lock, float total, float intensity) noexcept {

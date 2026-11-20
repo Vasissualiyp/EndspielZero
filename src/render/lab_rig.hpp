@@ -187,6 +187,63 @@ void parkHigh(const RigLayout& layout, std::vector<view::SlabPose>& poses, float
 std::size_t appendStandby(InstanceSet& set, const RigLayout& layout,
                           const std::vector<view::SlabPose>& poses);
 
+/// M24.9: a glued 2-D board shown as its shape (`render::PlaySurface`) is drawn round the
+/// surface's own centre, not the flat layout's, so the rig is built from the placements
+/// moved in x and y onto the shape's centre (at `formed` 0; the shapes keep it as they
+/// form). Anything else - a flat-only board, a stacked D >= 3 shape - is returned as is.
+[[nodiscard]] std::vector<view::Placement> shapeRigPlacements(
+    const VariantSpec& v, const std::vector<view::Placement>& p);
+/// Where slab `slab`'s yoke meets its back: the carrier's centre at the yoke's height.
+/// The skin's spokes start here (M24.9).
+[[nodiscard]] view::Vec3 yokeBoss(const RigLayout& layout,
+                                  const std::vector<view::SlabPose>& poses,
+                                  std::size_t slab) noexcept;
+
+/// M24.9: the lab game frames its board on more of the screen than the HUD's safe stage.
+/// The lab's HUD is a few small panels at the edges, so the board may run behind their
+/// corners; `width`/`height` are the safe stage's fractions (`applyStage`), and the
+/// result is what the session frames on.
+inline constexpr float kLabStageGrow = 1.35f;
+[[nodiscard]] std::array<float, 2> labStageArea(float width, float height) noexcept;
+
+/// A deploy's or stow's camera flight (M24.5), at `age` seconds into the move. `lock` is
+/// the last slab's lock (deploy) or the stow's arrival; `shutdown` the stow's shutdown.
+struct RigFlight {
+  bool deploy{true};
+  float age{0}, lock{0}, shutdown{0};
+};
+/// The flight from the lab's station camera `lab` to `game` (deploy) or back (stow), in
+/// board space. The eye rides `view::blendCamera` with `rigEase`; the aim watches the
+/// travelling slab - the first group's out of the rack, the last group's back in -
+/// turning onto it and off it smoothly, so every endpoint is held exactly.
+[[nodiscard]] view::OrbitCamera rigFlightCamera(const RigLayout& layout,
+                                                const std::vector<view::SlabPose>& poses,
+                                                const RigFlight& flight,
+                                                const view::OrbitCamera& game,
+                                                const view::OrbitCamera& lab);
+
+/// M24.9: a flight keeps the eye at least `kFlightClearMetres` from every carried slab -
+/// its body and the board riding it (`kCarriedBelowCells` under the hang centre to
+/// `kCarriedAboveCells` over it, a piece's crown) - pushing it straight out of that
+/// margin, and out underneath when it is over the slab, never up between the slab and
+/// its rail. Clamped and parked slabs are not carried.
+inline constexpr float kFlightClearMetres = 0.32f;
+inline constexpr float kCarriedBelowCells = 0.4f;
+inline constexpr float kCarriedAboveCells = 1.5f;
+[[nodiscard]] view::Vec3 clearOfSlabs(const RigLayout& layout,
+                                      const std::vector<view::SlabPose>& poses,
+                                      view::Vec3 eye) noexcept;
+
+/// The game camera backed off along its view ray until its eye is `kFlightClearMetres`
+/// clear of every slab's lift column (each slab at its hang, swept up to its rail), no
+/// further than the room allows. A deploy's flight lands there and settles onto `game`
+/// over `kFlightSettleSeconds` once every slab is clamped; a stow backs off to it over
+/// the shutdown first (M24.9).
+inline constexpr float kFlightSettleSeconds = 0.6f;
+inline constexpr float kLiftMarginMetres = 0.08f;
+[[nodiscard]] view::OrbitCamera clearOfLifts(const RigLayout& layout,
+                                             const view::OrbitCamera& game);
+
 /// Room-light focus: 1 in the menus, kFocusLevel while a game runs.
 [[nodiscard]] float deployFocus(float age, float lock, float total,
                                 float intensity) noexcept;
