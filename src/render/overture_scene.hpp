@@ -198,6 +198,12 @@ struct SurfacePose {
   /// existing caller is unchanged; only the lab game path turns it on. Ignored by the
   /// overtures and by the stacked D >= 3 shapes.
   bool skin{false};
+  /// The lab's flexible skin (M25.4): above 0, `PlaySurface::build` also cuts every
+  /// square as a finely tessellated tile of the sheet (`PlaySurface::flexTiles`), its
+  /// coverage eased from the slab's tiles (`kCoverage`, at 0) to the whole cell (at 1),
+  /// so the gaps close into seam lines as the tiles lift off the slab. 0 by default;
+  /// ignored by the overtures and the stacked shapes.
+  float flex{0.0f};
 };
 
 /// A sequential sub-window of a morph's own 0..1 progress (M18 revision, items 2 and 3).

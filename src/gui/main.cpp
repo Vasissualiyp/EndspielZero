@@ -961,19 +961,29 @@ render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight);
 /// The ribs for the board's current shape (M24.5b), joined by two spokes to the yoke
 /// under its slab - the M24.5 yoke of the board's (single) slab, at its boss under the
 /// slab's centre, where M24.9 centres the shape. M24.9: no rib shows outside a Klein
-/// bottle's skin from `eye`, and the closed torus adds thin hoops on the outside.
+/// bottle's skin from `eye`, and the closed torus adds thin hoops on the outside. M25.4:
+/// while the shape is formed at all, the flexible skin replaces them with one stem.
 void appendSkinFrame(render::InstanceSet& instances, const app::Shell& shell,
                      const RigFrame& rig, const std::vector<render::RigPiece>& pieces,
                      const view::Vec3& eye) {
   const auto& v = shell.session()->variant();
   render::SurfacePose pose = render::surfacePose(shell.settings(), v);
-  pose.skin = true;
+  // M25.4: once the shape forms, the skin is the squares themselves - no ribs, no hoops,
+  // held by the yoke at one point.
+  pose.flex = render::flexBlend(pose.formed);
+  pose.skin = pose.flex <= 0.0f;
   const render::PlaySurface surf = render::PlaySurface::build(v, pose);
   if (surf.empty() || surf.stacked() || rig.poses.empty()) return;
   const bool yoke = std::any_of(pieces.begin(), pieces.end(), [](const auto& p) {
     return p.kind == render::RigPiece::Kind::Yoke && p.slab == 0;
   });
   if (!yoke) return;
+  if (pose.flex > 0.0f) {
+    (void)render::appendRibs(
+        instances, {render::skinHold(surf, render::yokeBoss(*rig.layout, rig.poses, 0))},
+        render::kHoldDiameter);
+    return;
+  }
   const bool klein = surf.kind() == app::SurfaceKind::Klein;
   (void)render::appendRibs(
       instances, render::slabRibs(
@@ -1023,7 +1033,15 @@ render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
     };
   const auto glows = render::slabGlowLights(layout, instances);
   gLabScene->appendTo(instances, renderer.theme(), {}, {}, draw);
-  const auto rigPieces = render::appendRig(instances, *gLabScene, layout, rig.poses);
+  // M25.4: on a shape the slab body dims away as the tiles lift off it into the skin.
+  const float backFade =
+      renderer.options().slabSkin && renderer.options().surface &&
+              !stackedShapeView(shell)
+          ? render::slabBackFade(
+                render::surfacePose(shell.settings(), shell.session()->variant()).formed)
+          : 1.0f;
+  const auto rigPieces =
+      render::appendRig(instances, *gLabScene, layout, rig.poses, backFade);
   const app::Session& session = *shell.session();
   // The board's light, for what its slab edges emit (bridges, cable pulses).
   float power = 1;
@@ -1133,12 +1151,14 @@ std::string skinReport(const app::Shell& shell) {
     lv = std::min(lv, c.v);
     hv = std::max(hv, c.v);
   }
-  char buf[160];
+  char buf[200];
   std::snprintf(buf, sizeof(buf),
-                "formed %.3f: u %.3f..%.3f, v %.3f..%.3f, %zu pass-through cell(s)",
+                "formed %.3f: u %.3f..%.3f, v %.3f..%.3f, %zu pass-through cell(s), "
+                "flexible skin %.2f",
                 static_cast<double>(pose.formed), static_cast<double>(lu),
                 static_cast<double>(hu), static_cast<double>(lv), static_cast<double>(hv),
-                surf.passThrough().size());
+                surf.passThrough().size(),
+                static_cast<double>(render::flexBlend(pose.formed)));
   return buf;
 }
 

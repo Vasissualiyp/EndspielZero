@@ -598,6 +598,52 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
     return std::binary_search(s.passThrough_.begin(), s.passThrough_.end(), cell);
   };
 
+  // The flexible skin (M25.4): every square as a fine tile of the one sheet, its corners
+  // the surface's own points and its normals the surface's own normals - turned to the
+  // walked field's side, so a tile shades smoothly into its neighbour and the pieces
+  // stand on the side the normals face. A Klein bottle keeps its light band.
+  if (pose.flex > 0.0f) {
+    const float flex = std::min(pose.flex, 1.0f);
+    const float coverage = kCoverage + (1.0f - kCoverage) * flex;
+    const auto& fractions = flexFractions();
+    s.flex_.reserve(static_cast<std::size_t>(nx * nz));
+    for (int f = 0; f < nx; ++f) {
+      for (int r = 0; r < nz; ++r) {
+        FlexTile tile;
+        tile.cell = v.dims.toCell(Coord::of({f, r}));
+        tile.file = f;
+        tile.rank = r;
+        const float u = (static_cast<float>(f) + 0.5f) / fnx;
+        const float vv = (static_cast<float>(r) + 0.5f) / fnz;
+        for (int i = 0; i < kFlexSide; ++i) {
+          const float ou =
+              coverage * (fractions[static_cast<std::size_t>(i)] - 0.5f) / fnx;
+          for (int j = 0; j < kFlexSide; ++j) {
+            const float ov =
+                coverage * (fractions[static_cast<std::size_t>(j)] - 0.5f) / fnz;
+            const std::size_t k = static_cast<std::size_t>(i * kFlexSide + j);
+            tile.pos[k] = at(u + ou, vv + ov);
+            const view::Vec3 side = nrm(u + ou, vv + ov);
+            view::Vec3 n = normalAt(kind, pose, u + ou + su, vv + ov + sv, nx, nz);
+            if (view::dot(n, side) < 0.0f) n = n * -1.0f;
+            tile.normal[k] = n;
+          }
+        }
+        s.flex_.push_back(tile);
+      }
+    }
+    if (kind == app::SurfaceKind::Klein && s.passThrough_.empty()) {
+      std::vector<SurfacePatch> sheetFlex;
+      sheetFlex.reserve(static_cast<std::size_t>(nx * nz));
+      for (int f = 0; f < nx; ++f)
+        for (int r = 0; r < nz; ++r)
+          sheetFlex.push_back(cutPatch(v.dims.toCell(Coord::of({f, r})),
+                                       (static_cast<float>(f) + 0.5f) / fnx,
+                                       (static_cast<float>(r) + 0.5f) / fnz, 1.0f, 1.0f));
+      s.passThrough_ = passThroughOf(sheetFlex, s, kPassThroughGap);
+    }
+  }
+
   for (int f = 0; f < nx; ++f) {
     for (int r = 0; r < nz; ++r) {
       const CellId cell = v.dims.toCell(Coord::of({f, r}));
@@ -673,6 +719,21 @@ PlaySurface PlaySurface::build(const VariantSpec& v, SurfacePose pose) {
   b.maxZ += pad;
   s.bounds_ = b;
   return s;
+}
+
+const std::array<float, kFlexSide>& flexFractions() noexcept {
+  static const std::array<float, kFlexSide> fractions = [] {
+    std::array<float, kFlexSide> f{};
+    f[0] = 0.0f;
+    f[1] = kFlexSeam;
+    for (int k = 1; k < kFlexSubdiv; ++k)
+      f[static_cast<std::size_t>(k + 1)] =
+          static_cast<float>(k) / static_cast<float>(kFlexSubdiv);
+    f[kFlexSide - 2] = 1.0f - kFlexSeam;
+    f[kFlexSide - 1] = 1.0f;
+    return f;
+  }();
+  return fractions;
 }
 
 std::vector<CellStretch> cellStretch(const PlaySurface& shaped, const PlaySurface& flat) {

@@ -44,9 +44,10 @@ class LabScene {
                   const std::array<float, 3>& sizeMul, float alpha = 1) const;
   /// The same, centred at `centre` in the drawn space (board space during a game). The
   /// size stays the part's own: rig hardware is built at the board's scale.
+  /// `fade` below 1 dims it through the screen door (`setLabFade`; M25.4).
   void appendCopyAt(InstanceSet& set, std::string_view partName, const view::Vec3& centre,
                     const std::array<float, 4>& quat, const std::array<float, 3>& sizeMul,
-                    float alpha = 1) const;
+                    float alpha = 1, float fade = 1) const;
   [[nodiscard]] const io::LabPart* part(std::string_view name) const noexcept;
   /// Lab-world bounds of a part as authored, after its rotation.
   [[nodiscard]] view::Bounds partBounds(std::string_view name) const;

@@ -14,6 +14,7 @@
 #include "shaders.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"  // the board as its shape (M17)
+#include "render/slab_skin.hpp"     // the flexible skin (M25.4)
 #include "view/piece_tint.hpp"
 #endif
 
@@ -1303,7 +1304,10 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     pose.collapsePhase = nx > 0.0f ? options_.surfaceCollapseSquares / nx : 0.0f;
     pose.formed = options_.surfaceFormed;
     pose.shellSpread = options_.surfaceShellSpread;
-    pose.skin = options_.slabSkin;
+    // M25.4: the slab skin is the flat state; once the shape starts to form, the tiles
+    // lift off the slab into the flexible skin.
+    pose.flex = options_.slabSkin ? flexBlend(options_.surfaceFormed) : 0.0f;
+    pose.skin = options_.slabSkin && pose.flex <= 0.0f;
     const PlaySurface surf = PlaySurface::build(v, pose);
     out.panelCells = ledCells ? static_cast<std::uint32_t>(surf.patches().size()) : 0;
 
@@ -1612,12 +1616,209 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
              static_cast<std::uint32_t>(out.surfaceVertices.size()) - base});
       }
     };
-    for (const SurfacePatch& patch : surf.patches())
-      if (!isLit(patch.cell)) emitPatch(patch);
+    // The flexible skin (M25.4): the same square, cut finely from the one sheet. Its
+    // border is a seam line in the material - the rim colour on the border, dark to the
+    // LED emitters, the fill from `kFlexSeam` in - and its normals are the sheet's own,
+    // so two tiles meet with neither a gap nor a crease. The rails fade over a quarter
+    // cell from their edge, as on the coarse patch.
+    const auto& fracs = flexFractions();
+    const auto frac = [&](int k) { return fracs[static_cast<std::size_t>(k)]; };
+    const auto railAt = [&](CellId cell, int axis, float s) {
+      SurfaceRail r;
+      if (s <= 0.25f) {
+        r = surfaceRail(*seams, cell, axis, 0, 0);
+        r.weight *= 1.0f - 4.0f * s;
+      } else if (s >= 0.75f) {
+        r = surfaceRail(*seams, cell, axis, PlaySurface::kSubdiv, PlaySurface::kSubdiv);
+        r.weight *= 1.0f - 4.0f * (1.0f - s);
+      }
+      r.color = hoveredSeam(r.color, static_cast<std::uint8_t>(axis),
+                            view::SeamKind::Glued, options_.seamHighlightAxis);
+      return r;
+    };
+    const auto emitFlex = [&](const FlexTile& tile) {
+      constexpr int kLast = kFlexSide - 1;
+      fxCellPlus = tile.cell + 1;
+      view::Rgba fill = fillFor(tile.cell);
+      if (lightPass) fill.a = 0.7f;
+      view::Rgba shown = fill;
+      prevNow = {0.0f, 0.0f, 0.0f, -1.0f};
+      bool pulseCell = false;
+      if (!lightPass && ledCells && moving && anim->captures() &&
+          tile.cell == anim->captureCell()) {
+        const view::CapturePulse pulse =
+            view::capturePulse(anim->progress(), anim->duration());
+        if (pulse.active) {
+          pulseCell = true;
+          const view::Rgba from = pulse.held ? fill : theme_.blood;
+          if (pulse.held) shown = theme_.blood;
+          prevNow = {from.r, from.g, from.b, pulse.age};
+        }
+      }
+      const float seed = !lightPass && theme_.materials.cells == view::Material::Led
+                             ? panelSeed(tile.cell)
+                             : 0;
+      const bool cue = ledCells && isCue(tile.cell);
+      const float heat = heatFor(tile.cell);
+      const bool rails = seams != nullptr && options_.showSeams;
+      const float ghostAlpha = surfaceOpacity(theme_, options_);
+      const app::SurfaceKind railKind = app::overtureSignature(v).surface;
+      const float railW0 = seamRailWeight(railKind, 0, options_.surfaceFormed);
+      const float railW1 = seamRailWeight(railKind, 1, options_.surfaceFormed);
+      const auto onBorder = [](int i, int j) {
+        return i == 0 || j == 0 || i == kLast || j == kLast;
+      };
+      view::Rgba grooveBase = mix(fill, theme_.boardRim, 0.62f);
+      grooveBase.a = fill.a;
+      const auto tinted = [&](view::Rgba colour, int i, int j,
+                              float* effectWeight = nullptr) {
+        if (effectWeight)
+          *effectWeight = seed > 0 && !onBorder(i, j) ? (cue ? -1.0f : 1.0f) : 0.0f;
+        if (rails) {
+          SurfaceRail ru = railAt(tile.cell, 0, frac(i));
+          SurfaceRail rv = railAt(tile.cell, 1, frac(j));
+          ru.weight *= railW0;
+          rv.weight *= railW1;
+          if (effectWeight)
+            *effectWeight *= 1 - std::clamp(std::max(ru.weight, rv.weight), 0.0f, 1.0f);
+          if (ru.weight > 0.0f && rv.weight > 0.0f) {
+            const float sum = ru.weight + rv.weight;
+            colour = mix(colour, mix(ru.color, rv.color, rv.weight / sum),
+                         std::max(ru.weight, rv.weight));
+          } else if (ru.weight > 0.0f) {
+            colour = mix(colour, ru.color, ru.weight);
+          } else if (rv.weight > 0.0f) {
+            colour = mix(colour, rv.color, rv.weight);
+          }
+        }
+        colour.a *= ghostAlpha;
+        return colour;
+      };
+      const auto k = [](int i, int j) {
+        return static_cast<std::size_t>(i * kFlexSide + j);
+      };
+      const std::uint32_t base = static_cast<std::uint32_t>(out.surfaceVertices.size());
+      for (const float side : {1.0f, -1.0f}) {
+        for (int i = 0; i < kFlexSide; ++i) {
+          for (int j = 0; j < kFlexSide; ++j) {
+            float rgba[4]{};
+            float effectWeight{};
+            toFloat4(tinted(onBorder(i, j) ? grooveBase : shown, i, j, &effectWeight),
+                     rgba);
+            const view::Vec3& n = tile.normal[k(i, j)];
+            push(tile.pos[k(i, j)] + n * (kHalf * side), n * side,
+                 side > 0.0f ? 1.0f : 0.80f, rgba, frac(j), frac(i), 1, seed,
+                 effectWeight, heat);
+          }
+        }
+      }
+      const std::uint32_t backBase = base + kFlexCorners;
+      const auto top = [&](int i, int j) {
+        return base + static_cast<std::uint32_t>(k(i, j));
+      };
+      const auto bot = [&](int i, int j) {
+        return backBase + static_cast<std::uint32_t>(k(i, j));
+      };
+      for (int i = 0; i < kLast; ++i) {
+        for (int j = 0; j < kLast; ++j) {
+          quad(top(i, j), top(i + 1, j), top(i + 1, j + 1), top(i, j + 1));
+          quad(bot(i, j), bot(i, j + 1), bot(i + 1, j + 1), bot(i + 1, j));
+        }
+      }
+      // A seam latch (M24.5b), as on the coarse patch: a blended glow strip just over
+      // the face along the closing rail.
+      if (latching && rails && !lightPass) {
+        const int axis = options_.latchAxis;
+        const float stage = axis == 0 ? railW0 : railW1;
+        for (int i = 0; i < kLast; ++i) {
+          for (int j = 0; j < kLast; ++j) {
+            const int ci[4]{i, i + 1, i + 1, i};
+            const int cj[4]{j, j, j + 1, j + 1};
+            SurfaceRail r[4];
+            float any = 0.0f;
+            for (int c = 0; c < 4; ++c) {
+              r[c] = railAt(tile.cell, axis, frac(axis == 0 ? ci[c] : cj[c]));
+              r[c].weight *= stage;
+              any = std::max(any, r[c].weight);
+            }
+            if (any <= 0.0f) continue;
+            std::uint32_t ids[4]{};
+            for (int c = 0; c < 4; ++c) {
+              view::Rgba glow = r[c].color;
+              if (r[c].weight <= 0.0f)
+                for (const SurfaceRail& o : r)
+                  if (o.weight > 0.0f) glow = o.color;
+              glow.r *= options_.latchBoost;
+              glow.g *= options_.latchBoost;
+              glow.b *= options_.latchBoost;
+              glow.a = std::clamp(r[c].weight, 0.0f, 1.0f);
+              float rgba[4]{};
+              toFloat4(glow, rgba);
+              const view::Vec3& n = tile.normal[k(ci[c], cj[c])];
+              ids[c] = push(tile.pos[k(ci[c], cj[c])] + n * (kHalf + 0.004f), n, 1.0f,
+                            rgba, 0, 0, 0);
+            }
+            for (const std::uint32_t id :
+                 {ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]})
+              latchIndices.push_back(id);
+          }
+        }
+      }
+      // The rim: the sheet's edge where it is open, and - hidden inside the sheet once
+      // the gaps have closed - between the tiles while they are still lifting into it.
+      const auto rim = [&](int i0, int j0, int i1, int j1) {
+        const view::Vec3& p0 = tile.pos[k(i0, j0)];
+        const view::Vec3& p1 = tile.pos[k(i1, j1)];
+        const view::Vec3& n0 = tile.normal[k(i0, j0)];
+        const view::Vec3& n1 = tile.normal[k(i1, j1)];
+        const view::Vec3 sideways = view::cross(p1 - p0, n0);
+        const view::Vec3 n =
+            view::length(sideways) > 1e-6f ? view::normalize(sideways) : n0;
+        float c0[4]{};
+        float c1[4]{};
+        toFloat4(tinted(grooveBase, i0, j0), c0);
+        toFloat4(tinted(grooveBase, i1, j1), c1);
+        const std::uint32_t a =
+            push(p0 + n0 * kHalf, n, 1.0f, c0, frac(j0), frac(i0), -1);
+        const std::uint32_t b =
+            push(p1 + n1 * kHalf, n, 1.0f, c1, frac(j1), frac(i1), -1);
+        const std::uint32_t c =
+            push(p1 - n1 * kHalf, n, 0.80f, c1, frac(j1), frac(i1), -1);
+        const std::uint32_t d =
+            push(p0 - n0 * kHalf, n, 0.80f, c0, frac(j0), frac(i0), -1);
+        quad(a, b, c, d);
+      };
+      for (int i = 0; i < kLast; ++i) {
+        rim(i, 0, i + 1, 0);
+        rim(i + 1, kLast, i, kLast);
+      }
+      for (int j = 0; j < kLast; ++j) {
+        rim(0, j + 1, 0, j);
+        rim(kLast, j, kLast, j + 1);
+      }
+      if (collectPanels && !pulseCell && !lightPass) {
+        panelTargets->push_back(
+            {tile.cell, fill, PanelDestination::Surface, base,
+             static_cast<std::uint32_t>(out.surfaceVertices.size()) - base});
+      }
+    };
+    const bool flexing = !surf.flexTiles().empty();
+    if (flexing) {
+      for (const FlexTile& tile : surf.flexTiles())
+        if (!isLit(tile.cell)) emitFlex(tile);
+    } else {
+      for (const SurfacePatch& patch : surf.patches())
+        if (!isLit(patch.cell)) emitPatch(patch);
+    }
     const auto ledIndices = static_cast<std::uint32_t>(out.surfaceIndices.size());
     lightPass = true;
-    for (const SurfacePatch& patch : surf.patches())
-      if (isLit(patch.cell)) emitPatch(patch);
+    if (flexing) {
+      for (const FlexTile& tile : surf.flexTiles())
+        if (isLit(tile.cell)) emitFlex(tile);
+    } else {
+      for (const SurfacePatch& patch : surf.patches())
+        if (isLit(patch.cell)) emitPatch(patch);
+    }
     lightPass = false;
     const auto lightIndices = static_cast<std::uint32_t>(out.surfaceIndices.size());
     // The membrane (M24.5b): the unshrunk sheet behind the tiles, matte #0B0F14, with

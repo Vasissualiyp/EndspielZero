@@ -372,25 +372,28 @@ std::vector<view::SlabPose> rigPoses(const RigLayout& layout, RigPhase phase, fl
 
 std::vector<RigPiece> appendRig(InstanceSet& set, const LabScene& lab,
                                 const RigLayout& layout,
-                                const std::vector<view::SlabPose>& poses) {
+                                const std::vector<view::SlabPose>& poses,
+                                float backFade) {
   std::vector<RigPiece> pieces;
   const auto add = [&](RigPiece::Kind kind, int group, int slab, std::string_view name,
                        const view::Vec3& centre, const std::array<float, 4>& q,
-                       const std::array<float, 3>& mul, float alpha = 1) {
+                       const std::array<float, 3>& mul, float alpha = 1, float fade = 1) {
     if (!lab.part(name)) return;
-    lab.appendCopyAt(set, name, centre, q, mul, alpha);
+    lab.appendCopyAt(set, name, centre, q, mul, alpha, fade);
     const auto [lo, hi] = localBox(lab, name, mul);
     pieces.push_back({kind, group, slab, turnedBox(centre, lo, hi, q)});
   };
-  // A horizontal bevel bar (the yoke template) from `a` to `b`, `section` x its own.
+  // A horizontal round bar (the yoke template, a cylinder along its local z) from `a`
+  // to `b`, `section` x its own: rolled so its axis lies along local y, then yawed onto
+  // the bar (M25.4; it was a square bevel bar).
   const auto bar = [&](RigPiece::Kind kind, int group, int slab, const view::Vec3& a,
                        const view::Vec3& b, float section) {
     const float dx = b.x - a.x, dy = b.y - a.y;
     const float len = std::hypot(dx, dy);
     if (len < 1e-4f) return;
     add(kind, group, slab, "rig.yoke", (a + b) * .5f,
-        quatFromYawPitchRoll(std::atan2(-dx, dy), 0, 0),
-        {section, len / (0.03f * kCellsPerMetre), section});
+        quatFromYawPitchRoll(std::atan2(-dx, dy), 0, -std::numbers::pi_v<float> / 2),
+        {section, section, len / (0.03f * kCellsPerMetre)});
   };
   const auto& x = layout.xform;
   const auto carriageTemplate = partCentre(lab, x, "gantry.carriage.0");
@@ -438,10 +441,12 @@ std::vector<RigPiece> appendRig(InstanceSet& set, const LabScene& lab,
       const float backSize = 0.44f * kCellsPerMetre;
       const float bayW = layout.bayWidth > 0 ? layout.bayWidth : width;
       const float bayD = layout.bayDepth > 0 ? layout.bayDepth : depth;
-      add(RigPiece::Kind::Back, gi, si, "rig.slab.back",
-          pose.centre + rotate(pose.quat, {0, 0, -kBodyHalf}), pose.quat,
-          {std::lerp(bayW, width, f) / backSize, std::lerp(bayD, depth, f) / backSize,
-           1});
+      if (backFade > 0)
+        add(RigPiece::Kind::Back, gi, si, "rig.slab.back",
+            pose.centre + rotate(pose.quat, {0, 0, -kBodyHalf}), pose.quat,
+            {std::lerp(bayW, width, f) / backSize, std::lerp(bayD, depth, f) / backSize,
+             1},
+            1, backFade);
       // Face-up, give or take the few degrees it rocks on its yoke (M25.3).
       if (pose.quat[3] > .999f) {
         // The yoke runs under the slab from its mast axis (a rack's arm) to the back's

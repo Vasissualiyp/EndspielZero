@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # M25 — The neural handoff: one interface, weight, flexible skin, and VR where the room runs out
 
-Status: **M25.1–M25.3 built 2026-11-21; M25.4–M25.5 planned** from play-testing after M24. Implementers: Codex
+Status: **M25.1–M25.4 built 2026-11-21; M25.5 planned** from play-testing after M24. Implementers: Codex
 **gpt-6.1-sol** (M25.1, M25.2) and **gpt-6-astra** (M25.3, M25.4, M25.5). All on `main`,
 one slice after another, in the order below. Each slice adds its own dated Status entry
 at the end of this file.
@@ -400,3 +400,95 @@ serial GUI captures:
 - Gates (through `g.sh`): `tools/precommit.sh` printed **`precommit: OK`**;
   `[render],[app],[view]` **739 cases, 18,399,777 assertions** passed; `ctest -L gui`
   **58/58 passed**, serially, in 494.64 s (`out/m25.3/gui.log`). `clang-format --dry-run --Werror` clean on every changed C++ file.
+
+### M25.4 — built and verified (2026-11-21)
+
+Continued the interrupted working tree after reviewing `git status`, the complete diff,
+the saved red run and all seven inherited contact sheets. The earlier stretching-square
+implementation is the `PlaySurface::build` patch loop at `38a51fa^` (before M24.5b):
+it samples each cell's lattice footprint directly, without inverse-stretch shrinking.
+The flexible skin extends that same sampler and the existing piece seats/picking.
+
+- `SurfacePose::flex`, `FlexTile` and `PlaySurface::flexTiles` produce a finely sampled
+  sheet for the 2-D glued shapes. Ten subdivisions per cell plus two seam grid lines
+  give 13 × 13 samples per tile. Analytic finite-difference normals follow the existing
+  walked normal field's side. Adjacent tiles share positions and tangent planes;
+  the non-orientable gluing can exchange the two drawn faces. A thin tinted material
+  border replaces the geometric gaps, retaining the LED cell coordinates, capture
+  pulse, colour response, gameplay cues, ghosting and seam-latch draw ranges.
+- `flexBlend` closes the tile gaps smoothly over formed 0–0.15; `slabBackFade` removes
+  the backing over the same interval using the existing screen-door fade. At formed 0
+  the M24.5b slab remains. On the formed sheet, `appendSkinFrame` draws one short round
+  support from the yoke boss to a seat's back face (`skinHold`), with a normal-aligned
+  foot; no ribs, hoops or inter-square wires are drawn. M25.3's existing form gates
+  keep deployment, stow and relayout flat whenever the slab is travelling.
+- Procedural rig rails, bridges and cable tray now use bevelled bars; the yoke and rack
+  T-bars use the existing smooth 32-segment cylinder, turned along their length.
+  Reviewed the authored carriage/mast OBJs and their generators: the carriage already
+  has bevelled plates, 24-segment wheels and a 40-segment socket; the masts/clamp use
+  48-segment round sections with bevelled rims. Their recorded original procedural
+  provenance remains in `assets/lab/models/README.md`; no imported asset or model file
+  was added or changed in this slice.
+- Existing debug access (`skin`, `stretch`, `latch`, `--geometry`, `--formed`,
+  `--skin`, `--latch-t`) reaches the feature. Console help, the console reference and
+  AGENTS.md navigation now describe flexible skin; `stretch` includes its blend.
+
+Test-first and review:
+- The inherited `out/m25.4/red.log` records missing skin API compile failures before
+  implementation. Its initial nine tests passed on resumption (107,682 assertions).
+- Extended the chord-error check to the actual triangles' diagonals. This reproduced
+  a Klein error of **0.02351361 cells**, exceeding the unchanged 0.02-cell bound:
+  grid-edge-only sampling had missed the diagonal's combined curvature. Increasing
+  the subdivision count from eight to ten fixes it. Reversed Möbius/Klein seam checks
+  also pass. The console-help assertion failed before its wording was updated.
+  `review-red.log` and `review-green.log` retain both runs; the latter passes **11
+  cases / 219,516 assertions**. No existing golden or tolerance was loosened.
+
+Decisions and deviations:
+- The Klein intersection band still uses the existing hologram material: a physical
+  sheet cannot occupy its own crossing. All other skin tiles are physical; no old
+  membrane or ribs remain behind a formed shape.
+- Hardware OBJs already meeting the smoothing target were retained, not regenerated;
+  this slice changes only procedural hardware selections/orientation. No new module
+  or header-only-to-`.cpp` deviation was needed. Whole-file formatting also rewrapped
+  one pre-existing comment in `test_debug_console.cpp`.
+- The backing disappears through the existing screen-door mechanism, rather than a
+  new deformation of its authored mesh. The sheet follows the original continuous
+  shape morph. Lab-off and `--skin 0` use their existing geometry paths.
+
+Review finding (2026-11-21), before the correction: `drawLabGame` applied the new
+backing fade whenever `BoardOptions::slabSkin && surface`, which also includes the
+M24.6 stacked/projected shapes. The new `gui-slab-skin` comparison reproduces this:
+`torus3d --geometry --formed 1 --skin 1` loses its parked slab backs, while `--skin 0`
+keeps them (`out/m25.4/stacked-red.log`, `stacked-red.png`, viewed). The unit test
+checked that stacked surfaces had no flexible tiles, but did not exercise the GUI's
+hardware fade. Restrict that fade with the existing `!stackedShapeView(shell)` guard;
+leave the projected shape and its parked hardware on the M24.6 path. Acceptance:
+the two stacked captures must be byte-identical, and the existing 2-D morph/latch
+checks must still pass.
+Fixed as stated: `drawLabGame` now fades the backing only for `!stackedShapeView(shell)`;
+`gui-slab-skin` compares the two `torus3d` captures byte for byte and passes
+(`stacked-green.log`, `stacked-fix.png`, viewed).
+
+Performance (M24.8 bench method, `--bench-frame 30`, torus formed in the lab,
+1280x720, lavapipe, three runs each): before **153.97–156.29 ms** per frame (repeated:
+154.12–155.86 ms), after **132.93–136.13 ms**: the flexible skin costs about 13% less
+than the M24.5b membrane, tiles and ribs it replaces (`perf-before.log`,
+`perf-after.log`). Lab-off frames: ten sampled captures byte-identical before and after
+(`laboff.txt`).
+
+Sheets in `out/m25.4/`, all viewed: `before-sheet.png` (M24.5b) and `final-sheet.png`
+(this slice, the final binary): cylinder, torus, Möbius and Klein at formed 0, 0.5, 1;
+`final-crops.png` and `crops-tk.png` / `crops-cm.png`, 2x crops of silhouettes and
+tile seams (no facet or kink visible; seams are material lines, normals continuous);
+`hw-sheet.png` / `hw-crops.png`, the structure before and after (round yoke and stem,
+bevelled rails); `transition.png`, the tiles lifting off the slab (formed 0 → 0.15);
+`stacked-red.png` / `stacked-fix.png`. The early `crops-cm.png` Möbius frame still shows
+the stem's foot poking through the sheet before the normal-aligned foot; the refreshed
+`final-crops.png` and a 2560x1440 check (`check/`) show it gone.
+
+Gates (through `g.sh`, after the last source change): `tools/precommit.sh` printed
+**`precommit: OK`**; `[render],[app],[view]` **749 cases, 18,619,276 assertions** passed
+(`render-app-view-final.log`; the 10 new `[render][skin][flex]` cases are in it);
+`ctest -L gui` **58/58 passed**, serially, in 842.32 s (`gui-final.log`). No staging or
+commit was performed in this sandbox.

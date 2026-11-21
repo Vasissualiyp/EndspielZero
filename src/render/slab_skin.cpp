@@ -218,6 +218,42 @@ std::vector<Rib> outsideHoops(const PlaySurface& shaped, int count, float formed
   return hoops;
 }
 
+float flexBlend(float formed) noexcept {
+  if (formed <= 0.0f) return 0.0f;
+  return smooth(0.0f, kFlexFormEnd, formed);
+}
+
+float slabBackFade(float formed) noexcept {
+  return 1.0f - flexBlend(formed);
+}
+
+Rib skinHold(const PlaySurface& shaped, const view::Vec3& yoke) {
+  Rib hold;
+  // The nearest square whose playing side faces away from the yoke, met on its back
+  // face; with none (a yoke on every square's playing side), the nearest square.
+  const SurfaceSeat* best = nullptr;
+  float bestD = std::numeric_limits<float>::max();
+  for (const bool behind : {true, false}) {
+    for (const SurfaceSeat& seat : shaped.seats()) {
+      if (behind && view::dot(yoke - seat.centre, seat.normal) >= 0.0f) continue;
+      const float d = view::length(yoke - seat.centre);
+      if (d < bestD) {
+        bestD = d;
+        best = &seat;
+      }
+    }
+    if (best) break;
+  }
+  if (!best) return hold;
+  // The last piece is a short foot along the square's normal, so its flat end cap -
+  // which `cylinderBetween` runs a quarter diameter past its point - meets the back face
+  // squarely instead of a slanted rim poking through to the playing side.
+  const view::Vec3 end = best->centre - best->normal * (PlaySurface::kThickness * 0.5f +
+                                                        kHoldDiameter * 0.25f);
+  hold.points = {yoke, end - best->normal * (kHoldDiameter * 1.5f), end};
+  return hold;
+}
+
 std::array<float, 2> wrapCloseAt(app::SurfaceKind kind) {
   constexpr float none = std::numeric_limits<float>::quiet_NaN();
   // The seam rails' own stage table (`seamRailWeight`): an axis closes where its rail

@@ -63,6 +63,23 @@ inline constexpr float kHoopLiftCells =
 [[nodiscard]] std::vector<Rib> outsideHoops(const PlaySurface& shaped, int count,
                                             float formed);
 
+/// The flexible skin (M25.4). In shape view the squares themselves bend into the shape
+/// and the slab, its ribs and the membrane are not drawn; the flat board stays the
+/// M24.5b slab. `flexBlend` is how far the tiles have lifted off the slab into the skin:
+/// 0 at `formed` 0 (the slab), 1 from `kFlexFormEnd` on, smoothstep between. It sets
+/// `SurfacePose::flex`, and the slab body dims away over the same window
+/// (`slabBackFade`, through the lab's screen door).
+inline constexpr float kFlexFormEnd = 0.15f;
+[[nodiscard]] float flexBlend(float formed) noexcept;
+[[nodiscard]] float slabBackFade(float formed) noexcept;
+
+/// The one point at which the yoke holds the flexible skin (M25.4): a short round stem
+/// from `yoke` (the yoke's boss) to the back face of the nearest square that faces away
+/// from it, ending in a foot along that square's normal. Three points, yoke first;
+/// empty when the shape has no seats.
+inline constexpr float kHoldDiameter = 0.02f * kCellsPerMetre;
+[[nodiscard]] Rib skinHold(const PlaySurface& shaped, const view::Vec3& yoke);
+
 /// The `formed` value at which each lattice axis (0 files, 1 ranks) closes, read off the
 /// same stage table the seam rails use; NaN for an axis that never closes.
 [[nodiscard]] std::array<float, 2> wrapCloseAt(const VariantSpec& v);

@@ -243,6 +243,30 @@ struct CellStretch {
   float v{1};
 };
 
+/// The flexible skin (M25.4): each square as a finely tessellated tile of one continuous
+/// sheet. `kFlexSubdiv` even steps per cell, plus one grid line `kFlexSeam` inside each
+/// border, where the material's seam line ends - so the line between two squares is
+/// drawn in the material, not cut as a gap. The sheet is fine enough that its chord error
+/// stays under `kFlexChordCells` (tested), and every corner's normal is the surface's own
+/// there, so shading runs smoothly from one tile into the next.
+inline constexpr int kFlexSubdiv = 10;
+inline constexpr int kFlexSide = kFlexSubdiv + 3;
+inline constexpr int kFlexCorners = kFlexSide * kFlexSide;
+inline constexpr float kFlexSeam = 0.03f;
+inline constexpr float kFlexChordCells = 0.02f;
+/// The grid lines across one tile, 0..1: 0, kFlexSeam, the even steps, 1 - kFlexSeam, 1.
+[[nodiscard]] const std::array<float, kFlexSide>& flexFractions() noexcept;
+
+/// One square of the flexible skin. `pos[i * kFlexSide + j]` is grid line `i` along the
+/// files and `j` along the ranks (`flexFractions`), across the square's coverage.
+struct FlexTile {
+  CellId cell{kInvalidCell};
+  int file{0};
+  int rank{0};
+  std::array<view::Vec3, kFlexCorners> pos{};
+  std::array<view::Vec3, kFlexCorners> normal{};
+};
+
 /// One square, as the piece of surface it actually is.
 ///
 /// Not a rectangle turned to face the right way - a grid of corners lying *on* the
@@ -448,6 +472,10 @@ class PlaySurface {
   [[nodiscard]] const std::vector<CellId>& passThrough() const noexcept {
     return passThrough_;
   }
+  /// The flexible skin (M25.4), built only when the pose asks for `flex` on a
+  /// parametrised 2-D shape, in the order of `seats()`; empty otherwise. A Klein bottle
+  /// still fills `passThrough` (its band stays light); there is no membrane.
+  [[nodiscard]] const std::vector<FlexTile>& flexTiles() const noexcept { return flex_; }
   /// The warp this surface samples, and its lattice extents.
   [[nodiscard]] app::SurfaceKind kind() const noexcept { return kind_; }
   [[nodiscard]] int files() const noexcept { return nx_; }
@@ -496,6 +524,7 @@ class PlaySurface {
   std::vector<SurfacePatch> membrane_;
   std::vector<CellStretch> stretch_;
   std::vector<CellId> passThrough_;
+  std::vector<FlexTile> flex_;
 };
 
 /// The per-cell stretch of `shaped` against `flat` (the same variant at `formed = 0`):

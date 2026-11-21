@@ -289,7 +289,8 @@ TEST_CASE("lab setting and command work without a game", "[unit][app][lab]") {
   auto shell = makeShell();
   DebugConsole console;
   // On by default for interactive play (M24.8); captures turn it off in the front end.
-  // (The shell loads the machine's saved settings, so the default is read off a fresh one.)
+  // (The shell loads the machine's saved settings, so the default is read off a fresh
+  // one.)
   CHECK(app::Settings{}.labScene);
   shell->settings().labScene = false;
   CHECK(console.run(*shell, "lab") == "lab on");
@@ -496,6 +497,7 @@ TEST_CASE("the console switches the slab skin, forces a latch and reports the st
   CHECK(c.run(*shell, "stretch") == "u 0.99..0.99");
   for (const char* word : {"skin", "stretch", "latch"})
     CHECK(has(DebugConsole::help(), word));
+  CHECK(has(DebugConsole::help(), "flexible skin"));
 }
 
 TEST_CASE("the console switches light bridges and replays a relayout (M24.6)",

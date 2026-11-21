@@ -268,7 +268,8 @@ void LabScene::appendCopy(InstanceSet& set, std::string_view partName,
 }
 void LabScene::appendCopyAt(InstanceSet& set, std::string_view partName,
                             const view::Vec3& centre, const std::array<float, 4>& quat,
-                            const std::array<float, 3>& sizeMul, float alpha) const {
+                            const std::array<float, 3>& sizeMul, float alpha,
+                            float fade) const {
   for (std::size_t index = 0; index < doc_.parts.size(); ++index) {
     const auto& p = doc_.parts[index];
     if (p.name != partName) continue;
@@ -282,6 +283,7 @@ void LabScene::appendCopyAt(InstanceSet& set, std::string_view partName,
     if (p.material == io::LabMaterial::Glow)
       for (int c = 0; c < 3; ++c) i.color[c] *= alpha;
     i.color[3] *= alpha;
+    setLabFade(i, fade);
     insert(set, index, i);
     return;
   }

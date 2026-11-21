@@ -79,10 +79,14 @@ struct RigPiece {
   view::Bounds bounds;
 };
 /// Carriages, bridges, masts, clamps, yokes and slab backs, appended to the
-/// lab batches as copies of their templates.
+/// lab batches as copies of their templates. The yoke and a rack's T-bars are round
+/// tubes (the `rig.yoke` cylinder, its axis turned onto the bar; M25.4). `backFade` dims
+/// the slab backs through the screen door as a shape's skin lifts off them
+/// (`slabBackFade`, M25.4); at 0 they are not drawn.
 std::vector<RigPiece> appendRig(InstanceSet& set, const LabScene& lab,
                                 const RigLayout& layout,
-                                const std::vector<view::SlabPose>& poses);
+                                const std::vector<view::SlabPose>& poses,
+                                float backFade = 1.0f);
 /// The board rides its travelling slabs (M24.5): each board instance (cells, pieces,
 /// shadows, flourishes, the standby LED) of a slab that is not clamped moves rigidly with
 /// the slab's pose, shrunk to the bay's size while it is edge-on; parked in the bay it is

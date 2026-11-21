@@ -48,3 +48,12 @@ endif()
 if(NOT hash_latch-0.3 STREQUAL hash_formed-1)
   message(FATAL_ERROR "the latch flash is still showing at 0.3 s")
 endif()
+
+# M25.4 only changes physical 2-D skins. A stacked shape is projected light;
+# switching skin must not remove the physical slabs parked above it (M24.6).
+set(common torus3d --theme manifold --width 640 --height 360 --lab 1 --geometry)
+shot(stacked-skin-on --formed 1 --skin 1)
+shot(stacked-skin-off --formed 1 --skin 0)
+if(NOT hash_stacked-skin-on STREQUAL hash_stacked-skin-off)
+  message(FATAL_ERROR "the 2-D skin toggle changes the stacked shape's parked hardware")
+endif()
