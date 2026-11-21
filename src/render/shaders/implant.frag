@@ -131,14 +131,19 @@ vec4 shade() {
     vec2 fringe=radial*peripheral*p.periphery.w*scale/size;
     c.r=mix(c.r,safeSample(ui,uv+fringe).r*local,.25*peripheral);
     c.b=mix(c.b,safeSample(ui,uv-fringe).b*local,.25*peripheral);
+  }
+  if(living || (!calm && p.timing.w>1)) {
+    float focus=living ? clamp(p.living.z,0,1) : 1;
     vec2 glowUv=uv+(calm ? vec2(0) : p.gazeTremor.zw)/size;
     vec4 tight=safeSample(uiSoft,glowUv), broad=safeSample(uiHalo,glowUv);
     float glowFocus=mix(.35,1,focus);
     // Stable opaque glyph cores: tremor and heartbeat only breathe around them.
     float outsideCore=1-smoothstep(.8,.9,sharp.a);
-    vec3 glow=tight.rgb*.35+broad.a*p.deep.rgb*.12*(calm ? 1 : 1+3*(p.timing.w-1));
+    float haloGain=living ? (calm ? 1 : p.timing.w) : max(0,p.timing.w-1);
+    float tightGain=living ? .35 : 0;
+    vec3 glow=tight.rgb*tightGain+broad.a*p.deep.rgb*.12*haloGain;
     c.rgb+=glow*local*glowFocus*outsideCore;
-    c.a=max(c.a,(tight.a*.35+broad.a*.12)*local*glowFocus*outsideCore);
+    c.a=max(c.a,(tight.a*tightGain+broad.a*.12*haloGain)*local*glowFocus*outsideCore);
   }
   if(handshake) {
     // The launch handshake (brief 3.6): the main menu locks in behind the front, slowly,
@@ -197,6 +202,17 @@ void main() {
     // One broad front out of the centre: a faint lift of the room in implantDeep.
     float front=exp(-.5*pow((handUnit(px)-(p.hand.x-.5)/.7)/.05,2.0))*smoothstep(0,.05,p.hand.x-.5);
     c.rgb+=p.deep.rgb/max(p.deep.b,1e-4)*.04*front*(1-smoothstep(1.2,1.4,p.hand.x));
+  }
+  // M25.1: an additive, soft peripheral lub-dub, independent of living-vision optics.
+  // Keep glyph cores and exempt tools exactly stable.
+  if(!tool && p.timing.y>=.5 && p.timing.w>1) {
+    vec2 delta=px-size*.5;
+    float r2=dot(delta,delta)/(.25*dot(size,size));
+    vec2 source=p.living.x>.5 ? size*.5+delta*(1+p.living.y*r2) : px;
+    vec4 core=texture(ui,source/size);
+    float edge=1-min(min(px.x,size.x-px.x),min(px.y,size.y-px.y))/(.14*size.y);
+    float band=smoothstep(0,1,clamp(edge,0,1));
+    c.rgb+=p.deep.rgb/max(p.deep.b,1e-4)*.04*((p.timing.w-1)/.20)*band*(1-smoothstep(.8,.9,core.a));
   }
   outColor=clamp(c,0,1);
 }

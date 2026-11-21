@@ -32,9 +32,9 @@ walk the command history. `help` (or `?`) prints the command list from
 | `lights` | List the loaded lab lights with kind, position in metres, radius, authored intensity and group; prints `lab is off` when disabled; needs no game |
 | `get`/`set roomLight` | Practical room-light gain (`room_light`, persisted, finite 0..2, default 1); machine lights keep their authored intensity |
 | `projector [on\|off]` | Toggle the bench hologram; works without a game. Also `get`/`set projector` (persisted, default on) |
-| `implant [on\|off]` | Toggle organic menu formation, dissolve, afterimage and saccadic dimming on the lab path. Also `get`/`set implantFx` (`implant_fx`, persisted, default on). Violet-white text stays when effects are off |
-| `heartbeat [on\|off]` | Toggle the implant's faint double pulse (`heartbeat`, persisted, default on interactively). Calm intensity always suppresses it |
-| `living [on\|off]` | Living vision on the lab menu (M24.4c): lens warp, gaze, focus shift, depth of field (`livingVision`, persisted, default on) |
+| `implant [on\|off]` | Toggle neural formation, dissolve, persistence and saccadic dimming on every lab screen, including the HUD, pause and Editor. Also `get`/`set implantFx` (`implant_fx`, persisted, default on). Violet-white text stays when effects are off |
+| `heartbeat [on\|off]` | Toggle the implant's visible halo and peripheral double pulse (60–110 BPM, rising with player check, capture and game end) (`heartbeat`, persisted, default on interactively). Calm intensity always suppresses it |
+| `living [on\|off]` | Living vision on the neural lab interface (M24.4c, M25.1): lens warp, gaze, focus shift, depth of field (`livingVision`, persisted, default on) |
 | `tremor [on\|off]`, `wander [on\|off]` | Run-only: the 0.8 px glow tremor and the idle daydream: after 10 s without input the viewport defocuses and a sharper spot drifts between fixations (M24.4d; captures default both off) |
 | `wake` | Replay the launch waking-up sequence (M24.7): eyelids, two blinks, projector power-on, the implant handshake. Needs the lab, post and implant on; any key or click skips it. `get`/`set wakeOnLaunch` (`wake_on_launch`, persisted, default on) turns the launch sequence off |
 | `handshake` | Replay only the implant handshake (phosphene mapping, one front, the menu locking in); run-only |
@@ -127,7 +127,7 @@ groups:
     - `--lab 0|1` overrides the static menu room for this run. Captures default off,
       including with saved settings; use `--lab 1` to opt in.
     - `--station <name>` requires `--lab 1` and shows the room from a named station
-      regardless of screen: menu, tutorial, library, watch, settings, quit or sky (looks up through the skylight).
+      regardless of screen: menu, tutorial, library, watch, settings, editor, quit or sky (looks up through the skylight).
     - Console `station <name>|off` pins a station; `salience <focus>|off` pins its object glow.
       Menu screen changes fly between stations. `--from <screen> --transition-t <seconds>`
       previews the flight; with `--clip`, `--t0`/`--t1` sweep transition age per frame.
@@ -136,9 +136,9 @@ groups:
       the selected overture. Drag on the left to turn it about vertical; lab drag
       elevation is ignored. `projector on|off` updates the projector setting.
     - `--implant 0|1` overrides the implant effects for this run. `--panel-t <seconds>`
-      pins panel record ages during a station preview, including after the camera settles.
-      `--living 0|1`, `--tremor 0|1`, `--gaze-wander 0|1`, `--gaze X,Y`, `--gaze-ui 0|1`, `--gaze-target KEY` and `--warp K` drive living vision (M24.4c); `--daydream-t <s>` pins the eye `s` idle seconds into its daydream and `--daydream-wake <s>` then moves the mouse and steps `s` more seconds (M24.4d); `--heartbeat 0|1` overrides the double pulse; captures default it off. `--wake 0|1` overrides the launch sequence; `--wake-t <seconds>` pins its age for a capture (captures default to no wake); `--handshake-t <seconds>` pins only the handshake's age (M24.7). The renderer
-      keeps the hardware palette; only the lab menu UI uses the synaptic hue.
+      pins panel ages on every neural screen, including HUDs and modal popups and after a station camera settles.
+      `--living 0|1`, `--tremor 0|1`, `--gaze-wander 0|1`, `--gaze X,Y`, `--gaze-ui 0|1`, `--gaze-target KEY` and `--warp K` drive living vision (M24.4c); `--daydream-t <s>` pins the eye `s` idle seconds into its daydream and `--daydream-wake <s>` then moves the mouse and steps `s` more seconds (M24.4d); `--heartbeat 0|1` overrides the glow-only double pulse; `--visual-time <s>` samples its integrated phase, and a scripted check raises its rate. Calm intensity suppresses the pulse; captures default it off. `--wake 0|1` overrides the launch sequence; `--wake-t <seconds>` pins its age for a capture (captures default to no wake); `--handshake-t <seconds>` pins only the handshake's age (M24.7). The renderer
+      keeps the hardware palette; every lab UI screen uses the synaptic hue. The debug console remains a plain tool. Editor stands at the bench; its movement-board preview uses the projector material. `--from editor --screen menu --transition-t <s>` previews its return flight.
       With `--lab 1`, `--screen settings` enters Settings from the menu.
     - `--overture-t <0..1>` pins Library progress for captures (alias for `--t`).
     - `--room-light <0..2>` overrides the room practicals for this run only; machine

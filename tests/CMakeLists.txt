@@ -112,6 +112,13 @@ if(TARGET endspielzero_gui)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_lab_multislab.cmake)
   set_tests_properties(gui-lab-multislab PROPERTIES LABELS "render;gui" TIMEOUT 900
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-neural-interface
+    COMMAND ${CMAKE_COMMAND}
+            -DGUI=$<TARGET_FILE:endspielzero_gui> -DWORKDIR=${PROJECT_SOURCE_DIR}
+            -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_neural_interface.cmake)
+  set_tests_properties(gui-neural-interface PROPERTIES LABELS "render;gui" TIMEOUT 300
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   add_test(NAME gui-implant
     COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
             -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures

@@ -27,6 +27,7 @@
 
 #include "app/fx_timeline.hpp"
 #include "app/game_runner.hpp"
+#include "app/neural_heartbeat.hpp"
 #include "app/shell.hpp"
 #include "audio/audio.hpp"
 #include "io/game_file.hpp"
@@ -96,9 +97,7 @@ bool labEnabled(const app::Shell& shell) {
          (gLab >= 0 ? gLab == 1 : !gLabCapture && shell.settings().labScene);
 }
 bool labBackdrop(const app::Shell& shell, bool hold) {
-  return labEnabled(shell) &&
-         (!gStation.empty() ||
-          (!shell.showsBoard() && !hold && shell.screen() != app::Screen::Editor));
+  return labEnabled(shell) && (!gStation.empty() || (!shell.showsBoard() && !hold));
 }
 std::string_view stationFor(app::Screen screen) {
   switch (screen) {
@@ -110,6 +109,8 @@ std::string_view stationFor(app::Screen screen) {
       return "library";
     case app::Screen::Watch:
       return "watch";
+    case app::Screen::Editor:
+      return "editor";
     case app::Screen::Settings:
     case app::Screen::GameInfo:
     case app::Screen::PieceMoves:
@@ -127,6 +128,7 @@ std::string_view focusFor(app::Screen screen) {
     case app::Screen::MainMenu:
     case app::Screen::Welcome:
     case app::Screen::Watch:
+    case app::Screen::Editor:
       return "projector";
     case app::Screen::NewGame:
       return "magazine";
@@ -145,10 +147,8 @@ std::string_view focusFor(app::Screen screen) {
 // retains the hardware palette, including the cyan board LEDs and room salience.
 bool configureImplantUi(render::Ui& ui, const app::Shell& shell, const view::Theme& theme,
                         bool& lastLabTheme, bool hold) {
-  const bool labPath = labBackdrop(shell, hold) && !shell.showsBoard() &&
-                       shell.screen() != app::Screen::Editor &&
-                       shell.screen() != app::Screen::Paused &&
-                       shell.screen() != app::Screen::PauseQuitConfirm;
+  (void)hold;
+  const bool labPath = labEnabled(shell);
   if (lastLabTheme != labPath) {
     ui.setTheme(labPath ? view::implantTheme(theme) : theme);
     lastLabTheme = labPath;
@@ -266,9 +266,10 @@ void applyWake(render::BoardRenderer& renderer, const WakeFrame& wake,
 }
 
 void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
-                     const app::Settings& settings, bool active, double seconds,
+                     const app::Shell& shell, bool active, double seconds,
                      std::uint32_t height, bool capture, const LivingFrame& living = {},
                      const WakeFrame& wake = {}) {
+  const auto& settings = shell.settings();
   renderer.setDepthOfField(std::nullopt);
   if (!active) {
     renderer.setImplant(std::nullopt);
@@ -278,7 +279,27 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
   p.time = static_cast<float>(seconds);
   p.intensity = renderer.options().presentationIntensity;
   const bool pulse = gHeartbeat >= 0 ? gHeartbeat == 1 : !capture && settings.heartbeat;
-  p.heartbeat = pulse ? view::heartbeat(seconds, p.intensity) : 1.f;
+  static app::NeuralHeartbeat heartbeat;
+  // Single captures integrate from zero through explicit time. Clips and live frames
+  // keep one phase while screens and rates change.
+  if (capture) {
+    static app::NeuralHeartbeat sampled;
+    static std::optional<double> sampledAt;
+    const auto* session = shell.screen() == app::Screen::Game ? shell.session() : nullptr;
+    if (!sampledAt || seconds < *sampledAt) {
+      sampled = {};
+      sampled.observe(session, 0);
+    }
+    sampled.observe(session, seconds);
+    sampledAt = seconds;
+    p.heartbeat = pulse ? view::heartbeat(sampled.phase().cycles, p.intensity) : 1.f;
+  } else {
+    heartbeat.observe(shell.screen() == app::Screen::Game && !shell.attracting()
+                          ? shell.session()
+                          : nullptr,
+                      seconds);
+    p.heartbeat = pulse ? view::heartbeat(heartbeat.phase().cycles, p.intensity) : 1.f;
+  }
   p.dip = std::max(ui.saccadicDip(), living.dip);
   p.pixelScale = static_cast<float>(height) / 1080.f;
   p.handshake = wake.handshake;
@@ -340,7 +361,7 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
   renderer.setImplant(p);
 }
 
-std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& settings,
+std::array<float, 2> appendProjector(render::Ui& ui, const app::Settings& settings,
                                      render::InstanceSet& instances,
                                      const view::Theme& theme) {
   gHoloMetres.reset();
@@ -376,6 +397,35 @@ std::array<float, 2> appendProjector(const render::Ui& ui, const app::Settings& 
       if (const auto* scene = ui.overtureScene())
         h = render::overtureHologram(*scene, theme, at);
       break;
+    case render::HologramRequest::Editor: {
+      h = render::overtureHologram(ui.editorPreviewScene(), theme, at);
+      const auto camera = ui.labCamera().value_or(*gLabScene->station("editor"));
+      const auto& io = ImGui::GetIO();
+      std::vector<render::EditorPickQuad> picks;
+      const auto eye = camera.eye(), forward = view::normalize(camera.target - eye);
+      for (const auto& q : h.quads) {
+        std::array<ImVec2, 4> corners;
+        const view::Vec3 v{q.quat[0], q.quat[1], q.quat[2]};
+        const auto rotate = [&](view::Vec3 p) {
+          return p + view::cross(v, p) * (2 * q.quat[3]) +
+                 view::cross(v, view::cross(v, p)) * 2;
+        };
+        for (int j = 0; j < 4; ++j) {
+          const auto p = view::Vec3{q.center[0], q.center[1], q.center[2]} +
+                         rotate({(j == 0 || j == 3 ? -.5f : .5f) * q.scale[0],
+                                 (j < 2 ? -.5f : .5f) * q.scale[1], 0});
+          const auto pixel = camera.project(p, io.DisplaySize.x / io.DisplaySize.y,
+                                            io.DisplaySize.x, io.DisplaySize.y);
+          corners[static_cast<std::size_t>(j)] = {pixel.x, pixel.y};
+        }
+        const float depth =
+            view::dot(view::Vec3{q.center[0], q.center[1], q.center[2]} - eye, forward);
+        picks.push_back(
+            {corners, static_cast<CellId>(picks.size()), depth, depth > camera.nearZ});
+      }
+      ui.setEditorPickQuads(std::move(picks));
+      break;
+    }
     case render::HologramRequest::None:
       break;
   }
@@ -883,8 +933,7 @@ void appendSkinFrame(render::InstanceSet& instances, const app::Shell& shell,
 /// the game camera during a move, walls between the eye and the board fade, the rig
 /// hardware carries the slabs, and the room dims to focus. Returns the light block.
 render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
-                                  const render::Ui& ui,
-                                  const render::BoardRenderer& renderer,
+                                  render::Ui& ui, const render::BoardRenderer& renderer,
                                   render::InstanceSet& instances,
                                   view::OrbitCamera& camera, float intensity) {
   const auto& layout = *rig.layout;
@@ -1947,7 +1996,8 @@ int captureFrame(const std::string& variantName, const std::string& path,
         {"pause", app::Screen::Paused},     {"newgame", app::Screen::NewGame},
         {"watch", app::Screen::Watch},      {"welcome", app::Screen::Welcome},
         {"quit", app::Screen::QuitConfirm}, {"settings", app::Screen::Settings},
-        {"info", app::Screen::GameInfo},    {"pieces", app::Screen::PieceMoves}};
+        {"info", app::Screen::GameInfo},    {"pieces", app::Screen::PieceMoves},
+        {"editor", app::Screen::Editor}};
     bool known = false;
     for (const auto& [name, from] : kFrom) {
       if (gFrom == name) {
@@ -2269,7 +2319,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
       const auto living = stepLiving(
           **ui, *shell, camera, true, visualOrigin + sample.seconds, dt, target->width(),
           target->height(), renderer->options().presentationIntensity);
-      setImplantFrame(*renderer, **ui, shell->settings(), implantActive,
+      setImplantFrame(*renderer, **ui, *shell, implantActive,
                       visualOrigin + sample.seconds, target->height(), true, living,
                       wake);
     }
@@ -2758,7 +2808,8 @@ int main(int argc, char** argv) {
           "saved).\n"
           "--from SCREEN --transition-t SECONDS pins the screen move from SCREEN (menu, "
           "game, "
-          "pause, newgame, watch, welcome, settings, quit, info, pieces) to --screen at "
+          "pause, newgame, watch, welcome, settings, quit, info, pieces, editor) to "
+          "--screen at "
           "that age.\n"
           "--room-light 0..2 scales the room practicals for this run only.\n"
           "--projector 0|1 toggles the bench hologram; --overture-t 0..1 pins Library "
@@ -2771,7 +2822,8 @@ int main(int argc, char** argv) {
           "stow (live game to menu), with --lab 1; --focus 0..1 pins the room focus.\n"
           "--relayout-t SECONDS pins the layout change a --script makes (axes ...) in a\n"
           "lab game: the gantry carrying the slabs (M24.6), with --lab 1.\n"
-          "--implant 0|1 toggles the organic lab menus; --wake 0|1 and --wake-t SECONDS "
+          "--implant 0|1 toggles the neural lab interface; --wake 0|1 and --wake-t "
+          "SECONDS "
           "(--handshake-t SECONDS) play or pin the launch waking-up sequence; --panel-t "
           "SECONDS pins panel "
           "age.\n"
@@ -4221,7 +4273,7 @@ int main(int argc, char** argv) {
       const auto living =
           stepLiving(**ui, *shell, camera, false, visualSeconds, dt, window->width(),
                      window->height(), renderer->options().presentationIntensity);
-      setImplantFrame(*renderer, **ui, shell->settings(), implantActive, visualSeconds,
+      setImplantFrame(*renderer, **ui, *shell, implantActive, visualSeconds,
                       window->height(), false, living, wake);
     }
 #endif

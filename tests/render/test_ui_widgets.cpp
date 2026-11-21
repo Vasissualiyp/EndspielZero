@@ -72,6 +72,32 @@ TEST_CASE("manifold panels leave their centres transparent", "[render]") {
     }
   }
 }
+TEST_CASE("neural panes have no hardware corner brackets (M25.1)",
+          "[render][implant][neural]") {
+  WidgetFrame frame(1);
+  auto* dl = ImGui::GetBackgroundDrawList();
+  const int before = dl->VtxBuffer.Size;
+  render::widgets::panelCorners(dl, {20, 20}, {300, 200},
+                                view::implantTheme(view::Theme::manifold()), 1);
+  CHECK(dl->VtxBuffer.Size == before);
+  render::widgets::panelCorners(dl, {20, 20}, {300, 200}, view::Theme::manifold(), 1);
+  CHECK(dl->VtxBuffer.Size > before);
+}
+
+TEST_CASE("neural headings carry text without hardware rules (M25.1)",
+          "[render][implant][neural]") {
+  WidgetFrame frame(1);
+  ImGui::Begin("neural-headings");
+  const auto theme = view::implantTheme(view::Theme::manifold());
+  auto* dl = ImGui::GetWindowDrawList();
+  const int before = dl->VtxBuffer.Size;
+  render::widgets::eyebrow("", theme, nullptr, 1);
+  render::widgets::sectionHead("", theme, nullptr, 1);
+  render::widgets::heading("", theme, nullptr);
+  CHECK(dl->VtxBuffer.Size == before);
+  ImGui::End();
+}
+
 namespace {
 struct ControlVertex {
   float x, y, u, v;

@@ -353,8 +353,10 @@ TEST_CASE("menu station flights keep their eyes within the room", "[unit][render
   auto lab = LabScene::create(*doc);
   REQUIRE(lab);
   const auto centre = *doc->anchor("gantry.centre");
-  for (const auto from : {"menu", "library", "watch", "tutorial", "settings", "quit"})
-    for (const auto to : {"menu", "library", "watch", "tutorial", "settings", "quit"}) {
+  for (const auto from :
+       {"menu", "library", "watch", "tutorial", "settings", "quit", "editor"})
+    for (const auto to :
+         {"menu", "library", "watch", "tutorial", "settings", "quit", "editor"}) {
       CAPTURE(from, to);
       const auto a = *lab->station(from), b = *lab->station(to);
       for (int i = 0; i <= 100; ++i) {
@@ -617,7 +619,8 @@ TEST_CASE("the slab-underside constant matches the renderer's plinth",
         Catch::Approx(BoardRenderer::cellHalfExtent().z + 2 * kPlinthDepth));
   CHECK(kBezelMargin == Catch::Approx(kPlinthOutset - .5f));
 }
-TEST_CASE("the lab path leaves the flat menu depth field alone (M24.8)", "[render][lab]") {
+TEST_CASE("the lab path leaves the flat menu depth field alone (M24.8)",
+          "[render][lab]") {
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   REQUIRE(SDL_Init(SDL_INIT_VIDEO));
   struct SdlGuard {
@@ -650,3 +653,30 @@ TEST_CASE("the lab path leaves the flat menu depth field alone (M24.8)", "[rende
   CHECK(spread(true) == 0);
 }
 #endif
+
+TEST_CASE("the Editor has a standing station and a clear menu flight (M25.1)",
+          "[unit][render][lab][neural]") {
+  auto doc = io::loadLabDoc(std::filesystem::path(CB_SOURCE_DIR) / "assets/lab/lab.toml");
+  REQUIRE(doc);
+  auto lab = LabScene::create(*doc);
+  REQUIRE(lab);
+  REQUIRE(lab->station("editor"));
+  const auto centre = *doc->anchor("gantry.centre");
+  const auto a = *lab->station("menu"), b = *lab->station("editor");
+  for (int i = 0; i <= 100; ++i) {
+    const auto eye =
+        view::blendCamera(a, b, view::rigEase(static_cast<float>(i) / 100)).eye();
+    const auto p =
+        eye * (1 / kCellsPerMetre) + view::Vec3{centre[0], centre[1], centre[2]};
+    CHECK(p.z >= 1.45f);
+    CHECK(p.z <= 1.75f);
+    for (const auto& part : doc->parts) {
+      if (part.group == "room" || part.group == "template") continue;
+      const auto r = lab->partBounds(part.name);
+      if (r.minZ / kCellsPerMetre + centre[2] >= 1.8f) continue;
+      const float gap =
+          std::max({r.minX - eye.x, eye.x - r.maxX, r.minY - eye.y, eye.y - r.maxY});
+      CHECK(gap / kCellsPerMetre >= .25f);
+    }
+  }
+}

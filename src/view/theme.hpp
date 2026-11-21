@@ -236,7 +236,8 @@ struct Theme {
 }
 
 /// The implant changes perception's accents, preserving hardware and game semantics.
-[[nodiscard]] inline Theme implantTheme(const Theme& base, [[maybe_unused]] bool living = false) {
+[[nodiscard]] inline Theme implantTheme(const Theme& base,
+                                        [[maybe_unused]] bool living = false) {
   Theme t = base;
   t.implantFrameless = true;
   t.panel.a = t.panelHi.a = 0;
@@ -245,6 +246,7 @@ struct Theme {
   t.boneFaint = t.implantFaint;
   t.ember = t.implant;
   t.emberDeep = t.implantDeep;
+  t.rift = t.implantDim;
   t.rule = t.implantFaint.withAlpha(base.rule.a * .5f);
   t.interfaceRule = t.implantFaint.withAlpha(base.interfaceRule.a * .5f);
   return t;

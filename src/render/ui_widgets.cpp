@@ -105,7 +105,7 @@ void panelCorners(ImDrawList* dl, ImVec2 min, ImVec2 max, const view::Theme& the
                   float scale) {
   const float width = max.x - min.x;
   const float height = max.y - min.y;
-  if (width <= 0.0f || height <= 0.0f) return;
+  if (theme.implantFrameless || width <= 0.0f || height <= 0.0f) return;
   const float length = std::min({14.0f * scale, width * 0.2f, height * 0.2f});
   const ImU32 colour = u32(theme.ember, 0.40f);
   for (const float x : {min.x, max.x}) {
@@ -198,7 +198,7 @@ void heading(const char* text, const view::Theme& theme, ImFont* font) {
   const ImVec2 min = ImGui::GetItemRectMin();
   const float y = (min.y + max.y) * 0.5f;
   const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-  if (right > max.x + 8.0f) {
+  if (!theme.implantFrameless && right > max.x + 8.0f) {
     ImGui::GetWindowDrawList()->AddLine(ImVec2(max.x + 8.0f, y), ImVec2(right, y),
                                         u32(theme.emberDeep, 0.5f), 1.5f);
   }
@@ -345,14 +345,17 @@ void drawLiveControl(ImDrawList* dl, ImVec2 min, ImVec2 max, const ControlLayout
   const auto edge = hot ? theme.boneDim : theme.interfaceRule;
   if (theme.implantFrameless) {
     // Selection is brightness plus a soft wash: nested translucent rounded rects stand in
-    // for a 10 px feather, so no edge is visible. The core is full `implant`, the rest dim.
+    // for a 10 px feather, so no edge is visible. The core is full `implant`, the rest
+    // dim.
     const float level = held ? 1.0f : hot ? 0.9f : 0.0f;
     if (level > 0.0f) {
       constexpr int layers = 5;
       for (int i = 0; i < layers; ++i) {
         const float grow = static_cast<float>(layers - 1 - i) * 2.5f * s;
-        dl->AddRectFilled(ImVec2(min.x - grow, min.y - grow), ImVec2(max.x + grow, max.y + grow),
-                          u32(theme.implantDeep, .30f * level / static_cast<float>(layers)), 12 * s + grow);
+        dl->AddRectFilled(
+            ImVec2(min.x - grow, min.y - grow), ImVec2(max.x + grow, max.y + grow),
+            u32(theme.implantDeep, .30f * level / static_cast<float>(layers)),
+            12 * s + grow);
       }
     }
     const ImVec2 text(min.x + l.label.x, min.y + l.label.y);
@@ -362,15 +365,16 @@ void drawLiveControl(ImDrawList* dl, ImVec2 min, ImVec2 max, const ControlLayout
       dl->AddText(l.font, l.tailSize, ImVec2(min.x + l.number.x, min.y + l.number.y),
                   u32(theme.implantFaint), number);
     }
-    const auto labelColour = !usable ? theme.implantFaint
-                             : cold  ? theme.rift
+    const auto labelColour = !usable                    ? theme.implantFaint
+                             : cold                     ? theme.rift
                              : (hot || primary || held) ? theme.implant
-                                                         : theme.implantDim;
-    dl->AddText(l.font, l.fontSize, text, u32(labelColour), l.caption.c_str(), nullptr, l.wrap);
+                                                        : theme.implantDim;
+    dl->AddText(l.font, l.fontSize, text, u32(labelColour), l.caption.c_str(), nullptr,
+                l.wrap);
     if (l.showTail)
       dl->AddText(l.font, l.tailSize, ImVec2(min.x + l.value.x, min.y + l.value.y),
-                  u32(usable ? theme.implantDim : theme.implantFaint), l.tail.c_str(), nullptr,
-                  l.tailWrap);
+                  u32(usable ? theme.implantDim : theme.implantFaint), l.tail.c_str(),
+                  nullptr, l.tailWrap);
     return;
   }
   dl->PushClipRect(min, max, true);
@@ -637,9 +641,10 @@ void sectionHead(const char* label, const view::Theme& theme, void* displayFont,
   const float avail = ImGui::GetContentRegionAvail().x;
   // Drawn from the item's own rectangle, never from a cursor position captured before
   // it - those are not always the same, and the rule ends up floating.
-  ImGui::GetWindowDrawList()->AddLine(ImVec2(hi.x + 8.0f * scale, (lo.y + hi.y) * 0.5f),
-                                      ImVec2(lo.x + avail, (lo.y + hi.y) * 0.5f),
-                                      u32(theme.rule, 0.8f), 1.0f);
+  if (!theme.implantFrameless)
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(hi.x + 8.0f * scale, (lo.y + hi.y) * 0.5f),
+                                        ImVec2(lo.x + avail, (lo.y + hi.y) * 0.5f),
+                                        u32(theme.rule, 0.8f), 1.0f);
   ImGui::Dummy(ImVec2(0, 3.0f * scale));
 }
 
@@ -820,7 +825,7 @@ void eyebrow(const char* text, const view::Theme& theme, ImFont* monoFont, float
   }
   const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
   const float y = at.y + size * 0.5f;
-  if (right > at.x + textW + 10.0f * scale) {
+  if (!theme.implantFrameless && right > at.x + textW + 10.0f * scale) {
     dl->AddLine(ImVec2(at.x + textW + 10.0f * scale, y), ImVec2(right, y),
                 u32(theme.rule), 1.0f);
   }

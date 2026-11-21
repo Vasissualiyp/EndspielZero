@@ -751,6 +751,16 @@ yaw = 12
 pitch = 11.7746
 fov = 50
 
+# The Editor stands near the menu eye, facing the bench projector. Its wider
+# neural pane leaves the projector on the left; the menu flight uses the same rig.
+[[station]]
+name = "editor"
+target = [-0.25, 2.4, 1.3]
+distance = 1.3
+yaw = 5
+pitch = 15
+fov = 50
+
 [[station]]
 name = "tutorial"
 target = [-0.45, 2.6, 1.15]

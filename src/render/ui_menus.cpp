@@ -165,7 +165,6 @@ void Ui::beginScreenPane(const view::Theme& theme, float scale, const char* id,
   implantPane_.reset();
   if (!implantActive_) return;
   const bool settled = !ghosting_ && enter_ >= 1.f && !pinnedPanelAge_;
-  if (settled && !living_) return;
   const float age = settled ? view::kImplantFormSeconds : implantPanelAge(ghosting_);
   if (!ghosting_ && age < 0) return;
   if (ghosting_ && !view::implantLeaving(age, intensity_).visible()) return;
@@ -186,7 +185,8 @@ void Ui::endScreenPane() {
                                   (rect[3] - origin.y) * io.DisplayFramebufferScale.y},
                                  implantPane_->age,
                                  implantPane_->leaving,
-                                 implantPane_->seed, implantPane_->settled});
+                                 implantPane_->seed,
+                                 implantPane_->settled});
     implantPane_.reset();
   }
   endPane();
@@ -298,10 +298,9 @@ UiRequest Ui::buildWatch(app::Shell& shell) {
       if (active || hovered)
         for (int i = 0; i < 5; ++i) {
           const float grow = static_cast<float>(4 - i) * px(2.5f);
-          dl->AddRectFilled(ImVec2(min.x - grow, min.y - grow),
-                            ImVec2(max.x + grow, max.y + grow),
-                            u32(t.implantDeep, (active ? 0.30f : 0.15f) / 5.0f),
-                            px(8) + grow);
+          dl->AddRectFilled(
+              ImVec2(min.x - grow, min.y - grow), ImVec2(max.x + grow, max.y + grow),
+              u32(t.implantDeep, (active ? 0.30f : 0.15f) / 5.0f), px(8) + grow);
         }
     } else if (active) {
       dl->AddRectFilled(min, max, u32(t.emberDeep, 0.88f), px(4));
@@ -617,10 +616,9 @@ UiRequest Ui::buildNewGame(app::Shell& shell) {
       if (active || hovered)
         for (int i = 0; i < 5; ++i) {
           const float grow = static_cast<float>(4 - i) * px(2.5f);
-          dl->AddRectFilled(ImVec2(min.x - grow, min.y - grow),
-                            ImVec2(max.x + grow, max.y + grow),
-                            u32(t.implantDeep, (active ? 0.30f : 0.15f) / 5.0f),
-                            px(8) + grow);
+          dl->AddRectFilled(
+              ImVec2(min.x - grow, min.y - grow), ImVec2(max.x + grow, max.y + grow),
+              u32(t.implantDeep, (active ? 0.30f : 0.15f) / 5.0f), px(8) + grow);
         }
     } else if (active) {
       dl->AddRectFilled(min, max, u32(diff, 0.88f), px(4));
@@ -821,9 +819,13 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   drawShellFrame(shell, menuMin, menuMax);
 
   const PaneMove move = paneMove();
-  beginPane("##editor", menuMin, menuMax, move.scale, move.alpha,
-            editorPage_ == 0 ? menuPanePadding(t, menuMin, menuMax, scale_) : px(46.0f),
-            !ghosting_);
+  const float pad =
+      editorPage_ == 0 ? menuPanePadding(t, menuMin, menuMax, scale_) : px(46.0f);
+  if (t.implantFrameless)
+    beginScreenPane(t, scale_, "##editor", menuMin, menuMax, move.scale, move.alpha,
+                    move.trace, pad, !ghosting_);
+  else
+    beginPane("##editor", menuMin, menuMax, move.scale, move.alpha, pad, !ghosting_);
   eyebrow("editor", t, mono, scale_);
 
   // Leaving with unsaved changes is asked about, never assumed: `Shell::back` (a BACK or
@@ -867,7 +869,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       finish();
     }
     if (button("STAY", t, px(120), false, false, true, actionFont())) leaveTarget_ = 0;
-    endPane();
+    endScreenPane();
     return request;
   }
 
@@ -892,7 +894,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     }
     ImGui::Dummy(ImVec2(0, px(10)));
     if (button("BACK", t, px(120), false, false, true, actionFont())) shell.back();
-    endPane();
+    endScreenPane();
     return request;
   }
 
@@ -931,7 +933,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(12)));
     if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 1;
-    endPane();
+    endScreenPane();
     return request;
   }
 
@@ -948,15 +950,24 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       ImGui::PopFont();
       ImGui::Dummy(ImVec2(0, px(10)));
       if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 0;
-      endPane();
+      endScreenPane();
       return request;
     }
 
     const auto chip = [&](const char* label, const view::Rgba& c, float w) {
-      ImGui::PushStyleColor(ImGuiCol_Button, col(c, 0.85f));
-      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(c));
-      ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(c));
+      const float plate = t.implantFrameless ? 0.f : 1.f;
+      ImGui::PushStyleColor(ImGuiCol_Button, col(c, .85f * plate));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col(c, plate));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, col(c, plate));
+      ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize,
+                          t.implantFrameless ? 0.f : ImGui::GetStyle().FrameBorderSize);
       const bool pressed = ImGui::Button(label, ImVec2(w, 0.0f));
+      if (t.implantFrameless) {
+        const auto min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddCircleFilled(
+            {min.x + px(1.5f), (min.y + max.y) * .5f}, px(1.5f), u32(c, .85f), 8);
+      }
+      ImGui::PopStyleVar();
       ImGui::PopStyleColor(3);
       return pressed;
     };
@@ -1033,7 +1044,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::SameLine();
     if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 0;
     ImGui::PopFont();
-    endPane();
+    endScreenPane();
     return request;
   }
 
@@ -1048,7 +1059,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(10)));
     if (button("BACK", t, px(120), false, false, true, actionFont())) editorPage_ = 0;
-    endPane();
+    endScreenPane();
     return request;
   }
 
@@ -1105,14 +1116,18 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(4.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(6.0f), px(3.0f)));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(px(5.0f), px(5.0f)));
-  ImGui::PushStyleColor(ImGuiCol_FrameBg, col(t.panelHi, 0.55f));
-  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, col(t.panelHi));
-  ImGui::PushStyleColor(ImGuiCol_FrameBgActive, col(t.emberDeep, 0.75f));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg,
+                        col(t.panelHi, t.implantFrameless ? 0.f : .55f));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
+                        col(t.panelHi, t.implantFrameless ? 0.f : 1.f));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgActive,
+                        col(t.emberDeep, t.implantFrameless ? 0.f : .75f));
   ImGui::PushStyleColor(ImGuiCol_CheckMark, col(t.ember));
   ImGui::PushStyleColor(ImGuiCol_Text, col(t.bone));
-  ImGui::PushStyleColor(ImGuiCol_PopupBg, col(t.panel));
-  ImGui::PushStyleColor(ImGuiCol_Header, col(t.panelHi));
-  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, col(t.panelHi));
+  ImGui::PushStyleColor(ImGuiCol_PopupBg, col(t.panel, t.implantFrameless ? 0.f : 1.f));
+  ImGui::PushStyleColor(ImGuiCol_Header, col(t.panelHi, t.implantFrameless ? 0.f : 1.f));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                        col(t.panelHi, t.implantFrameless ? 0.f : 1.f));
   ImGui::PushStyleColor(ImGuiCol_HeaderActive, col(t.emberDeep));
 
   const std::vector<std::string> names = editor->pieceNames();
@@ -1199,7 +1214,7 @@ UiRequest Ui::buildEditor(app::Shell& shell) {
       editorPage_ = 0;
     }
   }
-  endPane();
+  endScreenPane();
   return request;
 }
 

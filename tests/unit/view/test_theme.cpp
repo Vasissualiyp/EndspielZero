@@ -168,6 +168,7 @@ TEST_CASE("implant palette changes perception and preserves hardware and semanti
     const auto t = implantTheme(base);
     CHECK(t.ember.array() == base.implant.array());
     CHECK(t.emberDeep.array() == base.implantDeep.array());
+    CHECK(t.rift.array() == base.implantDim.array());
     CHECK(t.bone.array() == base.implant.array());
     CHECK(t.boneDim.array() == base.implantDim.array());
     CHECK(t.boneFaint.array() == base.implantFaint.array());
@@ -188,11 +189,13 @@ TEST_CASE("implant palette changes perception and preserves hardware and semanti
 }
 
 TEST_CASE("BCI implant is frameless with either living switch", "[unit][view][living]") {
-  const auto base=cb::view::Theme::manifold();
-  const auto t=cb::view::implantTheme(base,true);
-  CHECK(t.panel.a==0);
-  CHECK(t.panelHi.a==0);
+  const auto base = cb::view::Theme::manifold();
+  const auto t = cb::view::implantTheme(base, true);
+  CHECK(t.panel.a == 0);
+  CHECK(t.panelHi.a == 0);
   CHECK(t.implantFrameless);
-  CHECK(cb::view::implantTheme(base,false).panel.a==cb::view::implantTheme(base).panel.a);
-  CHECK(cb::view::implantTheme(base,false).ember.array()==cb::view::implantTheme(base).ember.array());
+  CHECK(cb::view::implantTheme(base, false).panel.a ==
+        cb::view::implantTheme(base).panel.a);
+  CHECK(cb::view::implantTheme(base, false).ember.array() ==
+        cb::view::implantTheme(base).ember.array());
 }

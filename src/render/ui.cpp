@@ -71,6 +71,35 @@ ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
           flatView || !(settings.geometryView && surfaceAvailable), false};
 }
 
+std::optional<CellId> pickEditorPreview(std::span<const EditorPickQuad> quads,
+                                        ImVec2 point) {
+  std::optional<CellId> cell;
+  float nearest = 0;
+  for (const auto& q : quads) {
+    if (!q.visible || q.cell == kInvalidCell || !std::isfinite(q.depth) || q.depth <= 0 ||
+        (cell && q.depth >= nearest))
+      continue;
+    float sign = 0;
+    bool inside = true;
+    for (std::size_t i = 0; i < 4; ++i) {
+      const auto a = q.points[i], b = q.points[(i + 1) % 4];
+      const float cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+      if (cross != 0) {
+        if (sign != 0 && (cross > 0) != (sign > 0)) {
+          inside = false;
+          break;
+        }
+        sign = cross;
+      }
+    }
+    if (inside && sign != 0) {
+      cell = q.cell;
+      nearest = q.depth;
+    }
+  }
+  return cell;
+}
+
 namespace {
 
 // Trailer and hot-seat keys must not also navigate the HUD. Menus and pending
@@ -837,6 +866,10 @@ void Ui::applyStyle() {
     s.ChildBorderSize = 0.0f;
     s.GrabRounding = 8.0f;
     s.GrabMinSize = 8.0f;
+    s.WindowBorderSize = 0.f;
+    s.PopupBorderSize = 0.f;
+    c[ImGuiCol_PopupBg] = col(t.panel, 0.f);
+    c[ImGuiCol_ModalWindowDimBg] = col(t.ink, 0.f);
     c[ImGuiCol_Border] = col(t.implantFaint, 0.6f);
     // An integer slider's grab is a fifth of the track and sits under its value text, so
     // it is a faint wash (M24.8): the text stays the brightest thing in the field.
@@ -920,7 +953,8 @@ void Ui::tick(float dt) {
   lastDt_ = dt;
   clock_ += dt;
   rackAge_ += dt;
-  // The flat menu field is the lab-off path's backdrop; the lab path never draws it (M24.8).
+  // The flat menu field is the lab-off path's backdrop; the lab path never draws it
+  // (M24.8).
   if (!labBackdrop_) field_.advance(dt);
   boardField_.advance(dt);
   // Ease the arrival rather than run it linearly: a screen that stops dead has not
@@ -1011,6 +1045,52 @@ void Ui::recordToolRect() {
   toolRects_.push_back({(pos.x - origin.x) * scale.x, (pos.y - origin.y) * scale.y,
                         (pos.x + size.x - origin.x) * scale.x,
                         (pos.y + size.y - origin.y) * scale.y});
+}
+
+// Complete top-level window inventory, including HUD windows and modal/combo popups.
+// Children inherit their parent's record. The console's rectangle remains a shader
+// bypass.
+void Ui::recordImplantWindows(bool leaving) {
+  const auto& ctx = *ImGui::GetCurrentContext();
+  const auto origin = ImGui::GetMainViewport()->Pos;
+  const auto scale = ImGui::GetIO().DisplayFramebufferScale;
+  for (const auto* window : ctx.Windows) {
+    if (window->LastFrameActive != ctx.FrameCount || window->Hidden ||
+        window->IsFallbackWindow || window->DrawList->VtxBuffer.empty() ||
+        ((window->Flags & ImGuiWindowFlags_ChildWindow) &&
+         !(window->Flags & ImGuiWindowFlags_Popup)))
+      continue;
+    const std::array<float, 4> rect{
+        (window->Pos.x - origin.x) * scale.x, (window->Pos.y - origin.y) * scale.y,
+        (window->Pos.x + window->Size.x - origin.x) * scale.x,
+        (window->Pos.y + window->Size.y - origin.y) * scale.y};
+    const bool tool = std::any_of(toolRects_.begin(), toolRects_.end(),
+                                  [&](const auto& r) { return r == rect; });
+    if (tool) continue;
+    auto [it, inserted] =
+        implantWindows_.try_emplace(window->ID, std::pair{ctx.FrameCount, clock_});
+    if (!inserted && it->second.first < ctx.FrameCount - 1) it->second.second = clock_;
+    it->second.first = ctx.FrameCount;
+    const bool recorded =
+        std::any_of(implantRecords_.begin(), implantRecords_.end(),
+                    [&](const auto& r) { return r.seed == window->ID; });
+    if (recorded) continue;
+    const bool popup = (window->Flags & ImGuiWindowFlags_Popup) != 0;
+    const float age =
+        pinnedPanelAge_.value_or(leaving ? implantPanelAge(true)
+                                 : popup ? clock_ - it->second.second
+                                         : std::max(0.f, implantPanelAge(false)));
+    implantRecords_.push_back(
+        {{rect[0], rect[1], rect[2], rect[3]},
+         age,
+         leaving,
+         window->ID,
+         !leaving && !pinnedPanelAge_ &&
+             (popup ? age >= view::kImplantFormSeconds : enter_ >= 1)});
+  }
+  // Forget closed windows, so reopening a modal forms it again without unbounded history.
+  std::erase_if(implantWindows_,
+                [&](const auto& item) { return item.second.first < ctx.FrameCount - 1; });
 }
 
 bool Ui::paneInteractive() const noexcept {
@@ -1278,6 +1358,9 @@ void Ui::drawShellFrame(app::Shell& shell, ImVec2& menuMin, ImVec2& menuMax) {
     hologramRequest_.kind = HologramRequest::Overture;
     hologramRequest_.projector = HologramRequest::Projector::Wall;
     hologramRequest_.radiusMetres = kWallHologramRadiusMetres;
+  } else if (shell.screen() == app::Screen::Editor && editorPage_ == 1) {
+    hologramRequest_.kind = HologramRequest::Editor;
+    hologramRequest_.radiusMetres = .38f;
   } else {
     switch (decoForScreen(static_cast<int>(shell.screen()), shell.showsBoard())) {
       case Deco::Manifold:
@@ -1354,7 +1437,7 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
 
   ImDrawList* dl = ImGui::GetBackgroundDrawList();
   const view::Theme& t = theme_;
-  dl->AddRectFilled(min, max, u32(t.ink));
+  if (!labBackdrop_) dl->AddRectFilled(min, max, u32(t.ink));
 
   // Where the piece stands: the middle of the board on every axis.
   Coord centre(static_cast<std::uint8_t>(dims));
@@ -1417,6 +1500,72 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
         if (a.capture != CapturePolicy::Must && mark[c] == 0) mark[c] = 1;
       }
     }
+  }
+
+  editorPreview_ = {};
+  for (const auto& pl : cells) {
+    const auto coord = ds.toCoord(pl.cell);
+    int parity = 0;
+    for (std::uint8_t a = 0; a < coord.n; ++a) parity += coord.c[a];
+    OvQuad quad{{{pl.x - .46f, pl.z, pl.y - .46f},
+                 {pl.x + .46f, pl.z, pl.y - .46f},
+                 {pl.x + .46f, pl.z, pl.y + .46f},
+                 {pl.x - .46f, pl.z, pl.y + .46f}},
+                (parity & 1) ? OvTone::Dark : OvTone::Light};
+    if (mark[pl.cell]) {
+      quad.hasColour = true;
+      quad.colour = mark[pl.cell] == 2 ? t.blood : t.moss;
+    }
+    editorPreview_.quads.push_back(quad);
+    const auto occ = pl.cell == origin ? 3 : occupied[pl.cell];
+    if (occ) {
+      PieceTypeDef def;
+      def.atoms = *atoms;
+      const auto shape = archetypeFor(def);
+      static constexpr char glyphs[]{'P', 'R', 'N', 'B', 'Q', 'K', 'U'};
+      const auto slot = static_cast<std::size_t>(shape) - 1;
+      const char glyph = occ == 3 && slot < std::size(glyphs) ? glyphs[slot] : 'P';
+      editorPreview_.tokens.push_back({{pl.x, pl.z, pl.y}, {0, 1, 0}, glyph, occ != 1});
+    }
+  }
+
+  if (labBackdrop_) {
+    // The standing eye sees a horizontal bench board edge-on. Tip the light toward
+    // the reader, with the piece and its surface normal in the same frame.
+    constexpr float angle = .61086524f;  // 35 degrees
+    const auto tip = [](OvVec3 p) {
+      return OvVec3{p.x, p.y * std::cos(angle) + p.z * std::sin(angle),
+                    p.z * std::cos(angle) - p.y * std::sin(angle)};
+    };
+    for (auto& q : editorPreview_.quads)
+      for (auto& p : q.p) p = tip(p);
+    for (auto& token : editorPreview_.tokens) {
+      token.at = tip(token.at);
+      token.normal = tip(token.normal);
+    }
+  }
+
+  if (labBackdrop_) {
+    auto& io = ImGui::GetIO();
+    ImVec2 pointer = io.MousePos;
+    // The projector is in the unwarped world, while ImGui receives the lens-remapped
+    // pointer. Headless injection has no mouse focus and already supplies world pixels.
+    if (living_ && SDL_GetMouseFocus()) SDL_GetMouseState(&pointer.x, &pointer.y);
+    previewHover_ = -1;
+    if (!io.WantCaptureMouse && pointer.x >= min.x && pointer.x < max.x &&
+        pointer.y >= min.y && pointer.y < max.y) {
+      if (const auto picked = pickEditorPreview(editorPickQuads_, pointer)) {
+        previewHover_ = *picked;
+        if (*picked != origin && *picked < occupied.size() &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+          auto& slot = occupied[*picked];
+          slot = slot == static_cast<std::uint8_t>(previewTool_)
+                     ? 0
+                     : static_cast<std::uint8_t>(previewTool_);
+        }
+      }
+    }
+    return;
   }
 
   // The camera. A flat board is looked at from almost straight down, as a diagram; a
@@ -1482,23 +1631,24 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
             [](const Tile& a, const Tile& b) { return a.depth > b.depth; });
 
   const bool solid = dims == 2;
-  for (const Tile& tile : tiles) {
-    const view::Rgba base = tile.light ? t.boardLight : t.boardDark;
-    // Above two dimensions the board is mostly cells the piece cannot reach - a knight
-    // on a 5^4 lattice lights 48 of 625 - so the ones it can have to win. The board
-    // steps back and the marks stay at full strength.
-    const bool lit = mark[tile.cell] != 0;
-    const float ground = solid ? 1.0f : (lit ? 0.9f : 0.34f);
-    dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(base, ground));
-    if (mark[tile.cell] == 2) {
-      dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.blood, 0.7f));
-    } else if (mark[tile.cell] == 1) {
-      dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.moss, 0.65f));
+  if (!labBackdrop_)
+    for (const Tile& tile : tiles) {
+      const view::Rgba base = tile.light ? t.boardLight : t.boardDark;
+      // Above two dimensions the board is mostly cells the piece cannot reach - a knight
+      // on a 5^4 lattice lights 48 of 625 - so the ones it can have to win. The board
+      // steps back and the marks stay at full strength.
+      const bool lit = mark[tile.cell] != 0;
+      const float ground = solid ? 1.0f : (lit ? 0.9f : 0.34f);
+      dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(base, ground));
+      if (mark[tile.cell] == 2) {
+        dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.blood, 0.7f));
+      } else if (mark[tile.cell] == 1) {
+        dl->AddQuadFilled(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.moss, 0.65f));
+      }
+      if (tile.cell == origin) {
+        dl->AddQuad(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.ember), 2.0f);
+      }
     }
-    if (tile.cell == origin) {
-      dl->AddQuad(tile.p[0], tile.p[1], tile.p[2], tile.p[3], u32(t.ember), 2.0f);
-    }
-  }
 
   // The pieces: the selected one at the centre, and whatever has been placed, far to near
   // like the tiles so a stack of boards overlaps the right way round.
@@ -1507,21 +1657,22 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   const Archetype shape = archetypeFor(shapeDef);
   const float cell =
       std::hypot(at(1, 0, 0).x - at(0, 0, 0).x, at(1, 0, 0).y - at(0, 0, 0).y);
-  for (auto it = tiles.begin(); it != tiles.end(); ++it) {
-    const std::uint8_t occ = it->cell == origin ? 3 : occupied[it->cell];
-    if (occ == 0) continue;
-    const ImVec2 c((it->p[0].x + it->p[1].x + it->p[2].x + it->p[3].x) * 0.25f,
-                   (it->p[0].y + it->p[1].y + it->p[2].y + it->p[3].y) * 0.25f);
-    const float r = cell * (dims == 2 ? 0.36f : 0.30f);
-    dl->AddCircleFilled(c, r, u32(t.pieceToken), 18);
-    if (occ == 3) {
-      drawPieceGlyph(dl, c, r * 0.84f, u32(t.whitePiece), u32(t.pieceToken), shape,
-                     iconStyle_);
-    } else {
-      drawPieceGlyph(dl, c, r * 0.84f, u32(occ == 1 ? t.blackPiece : t.whitePiece),
-                     u32(t.pieceToken), Archetype::Dome, iconStyle_);
+  if (!labBackdrop_)
+    for (auto it = tiles.begin(); it != tiles.end(); ++it) {
+      const std::uint8_t occ = it->cell == origin ? 3 : occupied[it->cell];
+      if (occ == 0) continue;
+      const ImVec2 c((it->p[0].x + it->p[1].x + it->p[2].x + it->p[3].x) * 0.25f,
+                     (it->p[0].y + it->p[1].y + it->p[2].y + it->p[3].y) * 0.25f);
+      const float r = cell * (dims == 2 ? 0.36f : 0.30f);
+      dl->AddCircleFilled(c, r, u32(t.pieceToken), 18);
+      if (occ == 3) {
+        drawPieceGlyph(dl, c, r * 0.84f, u32(t.whitePiece), u32(t.pieceToken), shape,
+                       iconStyle_);
+      } else {
+        drawPieceGlyph(dl, c, r * 0.84f, u32(occ == 1 ? t.blackPiece : t.whitePiece),
+                       u32(t.pieceToken), Archetype::Dome, iconStyle_);
+      }
     }
-  }
 
   // The pointer. Left click places the chosen piece on the cell under it - in any
   // dimension, by hit-testing the drawn quads nearest first - and right or middle drag
@@ -1529,9 +1680,11 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
   // gesture can be eaten by one.
   ImGuiIO& io = ImGui::GetIO();
   previewHover_ = -1;
-  const bool over = !io.WantCaptureMouse && io.MousePos.x >= min.x &&
-                    io.MousePos.x < max.x && io.MousePos.y >= min.y &&
-                    io.MousePos.y < max.y;
+  ImVec2 pointer = io.MousePos;
+  if (labBackdrop_ && living_ && SDL_GetMouseFocus())
+    SDL_GetMouseState(&pointer.x, &pointer.y);
+  const bool over = !io.WantCaptureMouse && pointer.x >= min.x && pointer.x < max.x &&
+                    pointer.y >= min.y && pointer.y < max.y;
   if (over) {
     const auto inside = [&](const Tile& q) {
       float sign = 0.0f;
@@ -1539,7 +1692,7 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
         const ImVec2& a = q.p[i];
         const ImVec2& b = q.p[(i + 1) % 4];
         const float cr =
-            (b.x - a.x) * (io.MousePos.y - a.y) - (b.y - a.y) * (io.MousePos.x - a.x);
+            (b.x - a.x) * (pointer.y - a.y) - (b.y - a.y) * (pointer.x - a.x);
         if (cr != 0.0f) {
           if (sign != 0.0f && (cr > 0.0f) != (sign > 0.0f)) return false;
           sign = cr;
@@ -1550,7 +1703,8 @@ void Ui::drawEditorPreview(app::Shell& shell, const ImVec2& min, const ImVec2& m
     for (auto it = tiles.rbegin(); it != tiles.rend(); ++it) {
       if (!inside(*it)) continue;
       previewHover_ = static_cast<std::int64_t>(it->cell);
-      dl->AddQuad(it->p[0], it->p[1], it->p[2], it->p[3], u32(t.bone, 0.9f), 2.0f);
+      if (!labBackdrop_)
+        dl->AddQuad(it->p[0], it->p[1], it->p[2], it->p[3], u32(t.bone, 0.9f), 2.0f);
       if (it->cell != origin && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         std::uint8_t& slot = occupied[it->cell];
         // Pressing the same piece again takes it off: one gesture to place, one to undo.
@@ -1576,7 +1730,8 @@ void Ui::pauseFrame(UiRequest& request, ImVec2& menuMin, ImVec2& menuMax) {
   decoMax_ = ImVec2(split, vmax.y);
   // A departing ghost must not lay the scrim a second time.
   if (ghosting_) return;
-  ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(theme_.ink, 0.42f));
+  if (!implantActive_)
+    ImGui::GetBackgroundDrawList()->AddRectFilled(vmin, vmax, u32(theme_.ink, 0.42f));
   request.boardRect[0] = vmin.x;
   request.boardRect[1] = vmin.y;
   request.boardRect[2] = split - vmin.x;
@@ -1647,7 +1802,7 @@ float Ui::inEase() const noexcept {
 }
 
 Ui::PaneMove Ui::paneMove() const noexcept {
-  if (implantActive_ && move_ == app::ScreenMove::Station) {
+  if (implantActive_) {
     if (ghosting_) return {1, 1, 1};
     return {1,
             (enter_ >= 1 && !pinnedPanelAge_) || implantPanelAge(false) >= 0 ? 1.f : 0.f,
@@ -1682,7 +1837,11 @@ Ui::PaneMove Ui::paneMove() const noexcept {
 void Ui::drawGhost(app::Shell& shell) {
   if (leavingScreen_ < 0) return;
   const auto leaving = static_cast<app::Screen>(leavingScreen_);
-  if (move_ == app::ScreenMove::Cut) {
+  if (implantActive_) {
+    if (implantMoveAge_ >= implantLeavingUntil_ ||
+        !view::implantLeaving(implantPanelAge(true), intensity_).visible())
+      return;
+  } else if (move_ == app::ScreenMove::Cut) {
     if (outEase() >= 1.0f) return;
     if (!isMenuScreen(leaving) || !isMenuScreen(static_cast<app::Screen>(currentScreen_)))
       return;
@@ -1709,6 +1868,9 @@ void Ui::drawGhost(app::Shell& shell) {
   ghosting_ = true;
   ImGui::BeginDisabled();
   switch (leaving) {
+    case app::Screen::Game:
+      if (implantActive_ && shell.session()) (void)buildGameHud(shell, 0);
+      break;
     case app::Screen::Welcome:
       (void)buildWelcome(shell);
       break;
@@ -1746,6 +1908,7 @@ void Ui::drawGhost(app::Shell& shell) {
       break;
   }
   ImGui::EndDisabled();
+  if (implantActive_) recordImplantWindows(true);
   ghosting_ = false;
 }
 
@@ -1884,13 +2047,11 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     labLeaving_ = labLast_;
     if (previewed && stationCamera_ && lastScreen_ >= 0) {
       const auto from = static_cast<app::Screen>(lastScreen_);
-      labLeaving_ = labBackdrop_ && from != app::Screen::Editor &&
-                    from != app::Screen::Game && from != app::Screen::Paused &&
-                    from != app::Screen::PauseQuitConfirm &&
-                    stationCamera_(from).has_value();
+      labLeaving_ =
+          labBackdrop_ && from != app::Screen::Game && from != app::Screen::Paused &&
+          from != app::Screen::PauseQuitConfirm && stationCamera_(from).has_value();
     }
-    const bool arrivingLab =
-        labBackdrop_ && !shell.showsBoard() && shell.screen() != app::Screen::Editor;
+    const bool arrivingLab = labBackdrop_ && !shell.showsBoard();
     toCam_ =
         arrivingLab && stationCamera_ ? stationCamera_(shell.screen()) : std::nullopt;
     if (move_ == app::ScreenMove::Cut && labLeaving_ && arrivingLab && stationCamera_ &&
@@ -1919,9 +2080,8 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
                  : 0.f;
     implantMoveAge_ = pinnedMoveAge_.value_or(0.f);
     implantLeavingUntil_ =
-        implantActive_ && move_ == app::ScreenMove::Station
-            ? view::kImplantDissolveSeconds + view::kImplantAfterimageSeconds
-            : 0.f;
+        implantActive_ ? view::kImplantDissolveSeconds + view::kImplantAfterimageSeconds
+                       : 0.f;
     lastScreen_ = screen;
     // The library always opens on standard. It is the board every overture departs from,
     // so it is the one that makes the next choice legible - and reopening on whatever
@@ -1938,7 +2098,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     }
   }
 
-  labLast_ = labBackdrop_ && !shell.showsBoard() && shell.screen() != app::Screen::Editor;
+  labLast_ = labBackdrop_ && !shell.showsBoard();
   hologramRequest_ = {};
   // The departing menu first, so the arriving one is drawn over it.
   drawGhost(shell);
@@ -2019,6 +2179,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     rackScreenChange_ = enter_ < 1;
   }
   if (waiting) ImGui::EndDisabled();
+  if (implantActive_) recordImplantWindows();
   drawCheckEdges(shell);
   // An action may have closed a modal or changed screens. Prepare navigation before
   // the next NewFrame processes queued Tab/Space events with the new ownership.

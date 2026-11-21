@@ -134,3 +134,19 @@ TEST_CASE("the 2D/3D button is re-purposed on the shape view", "[render]") {
 }
 
 #endif  // CB_HAVE_IMGUI
+
+#ifdef CB_HAVE_IMGUI
+TEST_CASE("editor projector picking follows visible depth and rejects collapsed quads",
+          "[render][implant][neural]") {
+  const std::array<ImVec2, 4> square{{{10, 10}, {30, 10}, {30, 30}, {10, 30}}};
+  std::vector<EditorPickQuad> quads{{square, 0, 10, true},
+                                    {square, 1, 5, true},
+                                    {square, 2, 1, false},
+                                    {{}, 3, .1f, true}};
+  CHECK(pickEditorPreview(quads, {20, 20}) == 1);
+  quads[1].visible = false;
+  CHECK(pickEditorPreview(quads, {20, 20}) == 0);
+  CHECK_FALSE(pickEditorPreview(quads, {31, 20}));
+  CHECK_FALSE(pickEditorPreview({}, {20, 20}));
+}
+#endif

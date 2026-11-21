@@ -11,6 +11,17 @@ float smooth(float t) {
   return t * t * (3.f - 2.f * t);
 }
 }  // namespace
+float heartbeatRate(float tension) noexcept {
+  return std::isfinite(tension) ? std::clamp(kHeartbeatBpm + tension, 60.f, 110.f) : 60.f;
+}
+void HeartbeatPhase::advance(float tension, double dt) noexcept {
+  if (!std::isfinite(dt) || dt <= 0) return;
+  const double target = heartbeatRate(tension);
+  const double difference = static_cast<double>(bpm) - target;
+  const double decay = std::exp(-dt / 3.0);
+  cycles += (target * dt + difference * 3.0 * (1.0 - decay)) / 60.0;
+  bpm = static_cast<float>(target + difference * decay);
+}
 float heartbeat(double seconds, float intensity) noexcept {
   if (intensity < .5f) return 1;
   const auto gaussian = [](double phase) {

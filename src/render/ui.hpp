@@ -44,7 +44,7 @@ inline constexpr float kWallHologramDropMetres = .27029f;
 }
 
 struct HologramRequest {
-  enum Kind { None, Manifold, Overture, Tesseract } kind{None};
+  enum Kind { None, Manifold, Overture, Tesseract, Editor } kind{None};
   float seconds{0};
   float yaw{0};
   float alpha{1};
@@ -53,6 +53,17 @@ struct HologramRequest {
   enum class Projector { Bench, Wall } projector{Projector::Bench};
   float radiusMetres{kHologramRadiusMetres};
 };
+
+/// The projector's actual screen quads, with positive camera depth. Used for movement
+/// preview placement; the software diagram camera is not the lab camera.
+struct EditorPickQuad {
+  std::array<ImVec2, 4> points{};
+  CellId cell{kInvalidCell};
+  float depth{0};
+  bool visible{false};
+};
+[[nodiscard]] std::optional<CellId> pickEditorPreview(
+    std::span<const EditorPickQuad> quads, ImVec2 point);
 
 /// The window of the authoring plane an outline editor shows, in permille. The body's
 /// profile uses the whole box; an element is drawn about its own origin, so its window
@@ -229,6 +240,10 @@ class Ui {
     std::uint32_t seed;
     bool settled{false};
   };
+  [[nodiscard]] const OvertureScene& editorPreviewScene() const { return editorPreview_; }
+  void setEditorPickQuads(std::vector<EditorPickQuad> quads) {
+    editorPickQuads_ = std::move(quads);
+  }
   void setLivingVision(bool enabled) noexcept { living_ = enabled; }
   [[nodiscard]] bool livingVision() const noexcept { return living_; }
   [[nodiscard]] bool mouseOverImplantPanel() const;
@@ -649,6 +664,10 @@ class Ui {
   /// True only while drawGhost is building the departing pane, so drawShellFrame skips
   /// the background it already drew and beginPane uses the departing move.
   bool ghosting_{false};
+  void recordImplantWindows(bool leaving = false);
+  OvertureScene editorPreview_;
+  std::vector<EditorPickQuad> editorPickQuads_;
+  std::map<std::uint32_t, std::pair<int, float>> implantWindows_;
   bool implantActive_{false};
   bool living_{false};
   float implantMoveAge_{0};
