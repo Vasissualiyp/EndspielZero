@@ -137,6 +137,7 @@ TEST_CASE("post processing settings and aliases work before a game starts",
   CHECK(c.run(*shell, "set bloomScale nan") == "bloomScale is now nan");
   CHECK(std::isfinite(shell->settings().bloomScale));
   CHECK(has(DebugConsole::help(), "post [on|off]"));
+  CHECK(has(DebugConsole::help(), "script axes <a,b>|default|initial"));
 }
 
 TEST_CASE("presentation intensity is a setting the console reaches and clamps",

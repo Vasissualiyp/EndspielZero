@@ -615,6 +615,8 @@ std::string DebugConsole::help() {
          "undo | reset | script <t>  take back, restart, or run click scripts\n"
          "script orbit <dx> <dy>   orbit in radians (also --script for floor-glow "
          "captures)\n"
+         "script axes <a,b>|default|initial  re-aim the view; initial is the start view "
+         "(INITIAL button)\n"
          "perft <n> | divide <n>   count nodes\n"
          "hash                     position hash and its recomputation\n"
          "marks | unmoved          marks on the board; which pieces have moved\n"

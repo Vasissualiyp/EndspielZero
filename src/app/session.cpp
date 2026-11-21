@@ -266,12 +266,27 @@ Result<std::unique_ptr<Session>> Session::create(VariantSpec variant) {
   s->variant_ = std::make_unique<VariantSpec>(std::move(variant));
   s->game_ = std::make_unique<Game>(*s->variant_);
   s->chosenCfg_ = view::ViewConfig::forBoard(s->variant_->dims);
+  s->initialCfg_ = s->chosenCfg_;
   if (auto ok = s->chosenCfg_.validate(s->variant_->dims); !ok.has_value()) {
     return fail(ok.error().code, ok.error().message);
   }
   s->refreshView();
   s->refreshSnapshot();
   return s;
+}
+
+bool Session::atInitialView() const noexcept {
+  const auto same = [](const auto& a, const auto& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i)
+      if (a[i] != b[i]) return false;
+    return true;
+  };
+  return same(chosenCfg_.screenAxes, initialCfg_.screenAxes) &&
+         same(chosenCfg_.gridAxes, initialCfg_.gridAxes) &&
+         chosenCfg_.gridVertical == initialCfg_.gridVertical &&
+         chosenCfg_.gridGap == initialCfg_.gridGap &&
+         chosenCfg_.depthSpacing == initialCfg_.depthSpacing;
 }
 
 view::ViewConfig Session::effectiveViewConfig() const {
@@ -1145,7 +1160,10 @@ Result<void> Session::apply(const Action& a) {
 
     case ActionKind::SetScreenAxes: {
       view::ViewConfig cfg;
-      if (a.text == "default") {
+      if (a.text == "initial") {
+        // The arrangement the session started in, whatever it was (M25.2).
+        cfg = initialCfg_;
+      } else if (a.text == "default") {
         // The board's own view: every axis it can draw, with the rest as a grid.
         cfg = view::ViewConfig::forBoard(variant_->dims);
       } else {
@@ -1170,7 +1188,7 @@ Result<void> Session::apply(const Action& a) {
       }
       chosenCfg_ = cfg;
       refreshView();
-      message_ = a.text == "default" ? "view: default" : "view: " + a.text;
+      message_ = "view: " + a.text;
       return {};
     }
 

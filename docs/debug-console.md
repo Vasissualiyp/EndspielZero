@@ -63,6 +63,7 @@ walk the command history. `help` (or `?`) prints the command list from
 | `side w\|b` | Set the side to move |
 | `moves` | List the legal moves |
 | `play <move>` | Play one move (`e2e4`) |
+| `script axes initial` | Return to the view the session started in (M25.2): the exact `ViewConfig` and framing, including the 3-D depth arrangement. `script axes default` is the board's own default; `script axes <a>,<b> [vertical]` picks a pair. The dock's INITIAL button (boards with more than two axes, only while the view differs) runs the same action |
 | `undo` / `reset` | Take back one move / restart the game |
 | `script <text>` | Run click-script lines, the same language as `--script`. `script orbit 1.2 -0.35` orbits by yaw/pitch in radians; use with `post on` / `post off` to inspect the floor glow at different angles |
 | `perft <n>` / `divide <n>` | Count nodes / split the count by first move |

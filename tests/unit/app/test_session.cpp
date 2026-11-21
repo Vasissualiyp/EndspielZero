@@ -6,10 +6,14 @@
 // ordinary assertions rather than by someone clicking around (M4.6).
 #include "app/session.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -290,6 +294,66 @@ TEST_CASE("the view can be re-aimed at other axes", "[unit][app]") {
   REQUIRE(s->placements().size() == s->variant().dims.cellCount());
 
   REQUIRE_FALSE(s->applyScript("axes file,nosuchaxis").has_value());
+}
+
+TEST_CASE("\"axes initial\" returns to the view the session started in (M25.2)",
+          "[unit][app]") {
+  std::vector<std::string> names;
+  for (const auto& e : std::filesystem::directory_iterator(
+           std::filesystem::path(CB_SOURCE_DIR) / "variants"))
+    if (e.is_regular_file() && e.path().extension() == ".toml")
+      names.push_back(e.path().stem().string());
+  std::sort(names.begin(), names.end());
+  int checked = 0;
+  for (const auto& name : names) {
+    CAPTURE(name);
+    auto s = open(name.c_str());
+    const DimSpec& d = s->variant().dims;
+    if (d.dims() <= 2) continue;
+    ++checked;
+    REQUIRE(s->atInitialView());
+    const view::ViewConfig start = s->viewConfig();
+    const view::OrbitCamera cam = s->camera();
+    const auto sameAsStart = [&] {
+      const view::ViewConfig& c = s->viewConfig();
+      REQUIRE(c.screenAxes.size() == start.screenAxes.size());
+      for (std::size_t i = 0; i < c.screenAxes.size(); ++i)
+        REQUIRE(c.screenAxes[i] == start.screenAxes[i]);
+      REQUIRE(c.gridAxes.size() == start.gridAxes.size());
+      for (std::size_t i = 0; i < c.gridAxes.size(); ++i)
+        REQUIRE(c.gridAxes[i] == start.gridAxes[i]);
+      REQUIRE(c.gridVertical == start.gridVertical);
+      REQUIRE(c.gridGap == start.gridGap);
+      REQUIRE(c.depthSpacing == start.depthSpacing);
+      const view::OrbitCamera now = s->camera();
+      REQUIRE(now.distance == cam.distance);
+      REQUIRE(now.target.x == cam.target.x);
+      REQUIRE(now.target.y == cam.target.y);
+      REQUIRE(now.target.z == cam.target.z);
+    };
+    for (std::size_t r = 0; r < d.dims(); ++r) {
+      for (int vertical = 0; vertical < 2; ++vertical) {
+        Action a;
+        a.kind = ActionKind::SetScreenAxes;
+        a.text = d.name(r) + "," + d.name((r + 1) % d.dims());
+        a.gridVertical = vertical != 0;
+        if (!s->apply(a).has_value()) continue;  // a temporal board refuses some pairs
+        REQUIRE(s->applyScript("axes initial").has_value());
+        REQUIRE(s->atInitialView());
+        sameAsStart();
+      }
+    }
+    // Flat mode on and off does not disturb it either.
+    s->setFlatView(true);
+    REQUIRE(s->applyScript("axes initial").has_value());
+    s->setFlatView(false);
+    sameAsStart();
+  }
+  REQUIRE(checked > 0);
+  auto s = open("cube5");
+  REQUIRE(s->atInitialView());
+  REQUIRE(s->applyScript("axes file,level").has_value());
+  REQUIRE_FALSE(s->atInitialView());
 }
 
 TEST_CASE("a vertical grid can be chosen, and flat mode refuses it", "[unit][app]") {

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # M25 — The neural handoff: one interface, weight, flexible skin, and VR where the room runs out
 
-Status: **M25.1 built 2026-11-21; M25.2–M25.5 planned** from play-testing after M24. Implementers: Codex
+Status: **M25.1 and M25.2 built 2026-11-21; M25.3–M25.5 planned** from play-testing after M24. Implementers: Codex
 **gpt-6.1-sol** (M25.1, M25.2) and **gpt-6-astra** (M25.3, M25.4, M25.5). All on `main`,
 one slice after another, in the order below. Each slice adds its own dated Status entry
 at the end of this file.
@@ -308,3 +308,31 @@ serial GUI captures:
 - Explicit whole-file `clang-format --dry-run --Werror` checks passed for all changed
   C++ files, including the new unstaged files; the final heading/test pair was checked
   again. `git diff --check` passed. No golden was updated.
+
+### M25.2 — built and verified (2026-11-21)
+
+- Choice: the dock **fallback**, not the picker. The AXES cycle is unchanged; a new
+  **INITIAL** dock button (cold, beside AXES) appears on boards with more than two axes
+  only while the chosen arrangement differs from the starting one, and restores it in one
+  click. The dock is a measured layout, so the button count is sampled once per frame
+  (`offInitialView`) before the AXES click can change it. A popup was not attempted: it
+  would need its own implant window record and focus handling inside a dock that is
+  already full on T6.
+- `Session` keeps `initialCfg_` (the `ViewConfig::forBoard` result at creation) and
+  exposes `atInitialView()`. Session action `axes initial` restores exactly that
+  `ViewConfig` (axes, grid, vertical flag, gap, depth spacing) and re-frames the camera;
+  `axes default` still means the board's own default. The button resets the cycle counter
+  so the next AXES click starts from the first arrangement.
+- Lab: the lab already follows any view change through the M24.6 relayout, so choosing an
+  arrangement and returning both move the hardware; no lab code changed.
+- Test: `"axes initial" returns to the view the session started in (M25.2)` runs every
+  shipped variant with D > 2, applies every pair of axes both across and down (skipping
+  pairs a temporal board refuses), then `axes initial`, and checks the `ViewConfig` and
+  camera distance/target equal the start; also through flat mode. Debug help gains a
+  `script axes` line (checked in `test_debug_console.cpp`) and `docs/debug-console.md` a
+  row. The test was written alongside the implementation in one build, so no separate red
+  run was recorded.
+- Captures `out/m25.2/a.png` (T6 in a non-initial view, INITIAL shown) and `b.png` (after
+  `axes initial`, button gone, start view back) were looked at.
+- Gates: `precommit: OK`; `[render],[app],[view]` 731 cases, 18,351,479 assertions;
+  `ctest -L gui` 58/58 passed, serially (`out/m25.2/gui.log`).

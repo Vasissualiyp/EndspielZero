@@ -2827,6 +2827,9 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // The trailer's timeline strip takes the bottom edge; the controls sit above it.
   const float timelineLift = shell.attracting() ? buildTrailerTimeline(shell) : 0.0f;
   std::vector<float> dockWidths;
+  // Sampled once: the AXES click below changes the view mid-frame, and the dock layout
+  // above must keep the button count it was measured for.
+  const bool offInitialView = v.dims.dims() > 2 && !session.atInitialView();
   if (!shell.attracting() && !shell.watching()) {
     // Review replaces the game actions with the cursor controls (M23.11 3b).
     if (reviewing)
@@ -2834,6 +2837,7 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     else
       dockWidths = {px(78), px(84)};
     if (v.dims.dims() > 2) dockWidths.push_back(px(78));
+    if (offInitialView) dockWidths.push_back(px(96));
     dockWidths.push_back(px(64));
     if (hasPlaySurface(v)) {
       dockWidths.push_back(px(84));
@@ -3081,6 +3085,19 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
           }
         }
         (void)session.apply(a);
+      }
+      // One action back to the view the game started in (M25.2). The AXES cycle is
+      // 1 + 2D steps long - 13 on T6 - so the way home is its own button, shown only
+      // while the board is somewhere else.
+      if (offInitialView) {
+        ImGui::SameLine();
+        if (dockButton("INITIAL", t, px(96), false, true, true, actionFont())) {
+          app::Action a;
+          a.kind = app::ActionKind::SetScreenAxes;
+          a.text = "initial";
+          axisRotation_ = 0;
+          (void)session.apply(a);
+        }
       }
     }
     ImGui::SameLine();

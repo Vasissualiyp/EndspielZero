@@ -162,6 +162,9 @@ class Session {
   [[nodiscard]] const std::vector<int>& distancesFrom(CellId origin) const;
   [[nodiscard]] const view::PositionView& snapshot() const noexcept { return snapshot_; }
   [[nodiscard]] const view::ViewConfig& viewConfig() const noexcept { return viewCfg_; }
+  /// True while the player's chosen arrangement is the one the session started with
+  /// (`axes initial` restores it, M25.2).
+  [[nodiscard]] bool atInitialView() const noexcept;
   /// The camera to draw and to pick with.
   ///
   /// Returned by value because it is not simply the stored one: pausing steps the view
@@ -508,6 +511,9 @@ class Session {
   view::PositionView snapshot_;
   /// What the player asked for; `viewCfg_` is this with the flat-mode adjustment applied.
   view::ViewConfig chosenCfg_;
+  /// `chosenCfg_` as the session started (`ViewConfig::forBoard`); "axes initial" returns
+  /// to it exactly.
+  view::ViewConfig initialCfg_;
   view::ViewConfig viewCfg_;
   view::OrbitCamera camera_;
   std::vector<view::Placement> placements_;
