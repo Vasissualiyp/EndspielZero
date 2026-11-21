@@ -251,14 +251,23 @@ TEST_CASE("deploy and stow flights keep clear of the carried slab (M24.9)",
     const auto game = session.camera();
     const float clear = 0.30f * metres(*layout);
     const float railZ = layout->groups.front().mastTopZ;
-    for (const bool deploy : {true, false}) {
-      CAPTURE(deploy);
+    // M25.3: the heavier timings, and a stow from the shape view, which unforms the
+    // shape before anything leaves (`view::stowLead`), with or without the shutdown.
+    struct Flight {
+      bool deploy;
+      float shutdown;
+    };
+    for (const auto [deploy, shutdown] :
+         {Flight{true, 0.0f}, Flight{false, app::kStowShutdownSeconds},
+          Flight{false, view::stowLead(app::kStowShutdownSeconds, true)},
+          Flight{false, view::stowLead(0.0f, true)}}) {
+      CAPTURE(deploy, shutdown);
       const auto station = lab.station(deploy ? "library" : "menu");
       REQUIRE(station);
       const auto labCam = toBoardCamera(*station, layout->xform);
       RigFlight f;
       f.deploy = deploy;
-      f.shutdown = deploy ? 0.0f : app::kStowShutdownSeconds;
+      f.shutdown = shutdown;
       f.lock = deploy ? view::deployLastLock(layout->slots)
                       : f.shutdown + std::max(view::stowTravelSeconds(layout->slots),
                                               app::kStowFlightMinSeconds);

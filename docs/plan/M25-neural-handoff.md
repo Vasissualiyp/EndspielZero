@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # M25 — The neural handoff: one interface, weight, flexible skin, and VR where the room runs out
 
-Status: **M25.1 and M25.2 built 2026-11-21; M25.3–M25.5 planned** from play-testing after M24. Implementers: Codex
+Status: **M25.1–M25.3 built 2026-11-21; M25.4–M25.5 planned** from play-testing after M24. Implementers: Codex
 **gpt-6.1-sol** (M25.1, M25.2) and **gpt-6-astra** (M25.3, M25.4, M25.5). All on `main`,
 one slice after another, in the order below. Each slice adds its own dated Status entry
 at the end of this file.
@@ -336,3 +336,67 @@ serial GUI captures:
   `axes initial`, button gone, start view back) were looked at.
 - Gates: `precommit: OK`; `[render],[app],[view]` 731 cases, 18,351,479 assertions;
   `ctest -L gui` 58/58 passed, serially (`out/m25.2/gui.log`).
+
+### M25.3 — built and verified (2026-11-21)
+
+- **Weight** (`view::slabDeploy`, `src/view/rig_deploy.*`). The new phase table, in seconds
+  after a slab's departure: the carriage arrives over the pick-up and takes up the load
+  (`kSlabTakeUpEnd` 0.40; a smootherstep from its park); a 0.15 s hesitation in which the
+  slab drops `kSlabDrop` = 7 mm as the latch lets go (0.43–0.55); slide out (to 1.05),
+  tilt face-up while rising (to 1.60), travel (to 2.60), lower (to 3.10), lock at
+  `kSlabLockSeconds` = **3.30**. Horizontal moves use a late-peaking S-curve (velocity
+  ∝ x³(1−x)², peak at 0.6, zero velocity and acceleration at both ends); vertical
+  moves and the tilt use smootherstep, so no phase join changes velocity. The settle is
+  one 2 mm dip below the hang and back, starting 0.1 s before the lowering ends with
+  zero velocity (the old damped sine started with a velocity jump). Inertia: the slab
+  rocks on its yoke against the travel's acceleration, at most `kSlabSwingDegrees`
+  2.5° before damping, through a critically damped kernel (ω = 15 rad/s) sampled
+  in explicit time; it is causal in the stow's own time (`SlabPathSpec::reversed`), so
+  a stow lags its own motion. One slab: 3.5 s with its 0.2 s departure; 256 slabs:
+  4.7 s. `appendRig` still draws the yoke while the slab is within ~5° of level.
+  No sound hook was added (the spec marks it optional).
+- **Flat out of the rack.** `deployFormGate`, `stowFormGate`, `relayoutFormGate` and
+  `stowLead` are pure gates on `geometryFormed`: 0 whenever any slab is neither clamped
+  nor latched in its bay. The shape forms over `kRigFormSeconds` 0.8 s after the last
+  lock (inside the deploy's trailing second) and unforms over `kRigUnformSeconds`
+  0.8 s before anything leaves: a stow waits `max(shutdown, 0.8 s)` from the shape view
+  (also for a finished game, whose fx shutdown stays 0: `gStowFxShutdown`); a relayout
+  that starts formed gets `Relayout::lead` = 0.8 s, during which `relayoutFrame` holds
+  every slab clamped at its start pose (arrival boots wait for it too). `main.cpp`
+  applies the gate to `Settings::geometryFormed` for the drawing part of each frame
+  (`FormGate`, restored after; capture and interactive paths), so the surface, the
+  stacked parking, ribs and seam latches all see it, while `frameBoard` and the morph
+  framing keep the live value. A closing seam therefore latches as the shape forms on
+  the locked slab.
+- **The sheet rides its slab.** While flat in transit the shape view's surface mesh is
+  carried vertex by vertex (`carryBoard` / `carryRelayout`, normals turned). Found in the
+  torus stow sheet: the mesh's identity instance was also being carried by the instance
+  pass, which moved the sheet twice (`sheet-carry-fixed.png`); those instances are now
+  skipped. Ribs are drawn only on a still rig. Before this slice the formed shape simply
+  hung at its destination during a deploy (M24.5 decision 3).
+- Still slabs in a relayout (`slabRelayout` with an unchanged pose) now report
+  `settled`, so they count as clamped.
+- **Tests:** `[unit][view][rig][weight]` (5 cases: durations, break-free and drop, no
+  velocity jump (< 700 cells/s², a 1 cell/s jump in a millisecond would be 1000) with a
+  late peak, the swing's bound/sign/one sign change and the stow's causal lean, the
+  gates); `tests/render/test_rig_weight.cpp` (`[render][rig][weight]`, 3 cases: the
+  spec's invariant at 60 Hz through every deploy and stow (with and without shutdown)
+  for standard, torus, Klein, cube5, hyper4 and every relayout sample for hyper4, cube5
+  and standard; the sheet carry including the identity instance; plus a hidden
+  `[.weightplot]` data writer). The camera clearance test now also covers the shape-view
+  stow leads. Updated timing-pinned assertions in `test_rig_deploy.cpp`,
+  `test_lab_rig.cpp` and `tests/check_lab_deploy.cmake` (settled at 5.6 s instead of
+  3.6 s; a torus shape-view deploy is deterministic and moves). Red first: the new tests
+  failed to compile against the old API. The identity-instance regression check was
+  added together with its fix, so it has no separate red run.
+- **Sheets** in `out/m25.3/`, all viewed: `deploy-standard.png`, `deploy-cube5.png`,
+  `stow-standard.png`, `stow-cube5.png`, `deploy-torus.png`, `stow-torus.png` (0–5 s at
+  0.1 s), `weight-plot.png` (first slab's height, speed and tilt; peak speeds ≤ 4 m/s,
+  swing 1.7° accelerating / 2.1° braking), `sheet-carry-fixed.png`.
+- Deviations: the peak speed is still up to 4 m/s: the slab covers ~4 m (slide out,
+  rise, travel, lower) and the spec caps one slab at 3.5 s. The phases were rebalanced
+  once after the first plot (vertical peaks were 5 m/s). `geometryFormed` is gated by
+  a scoped override in `main.cpp` rather than a new options field.
+- Gates (through `g.sh`): `tools/precommit.sh` printed **`precommit: OK`**;
+  `[render],[app],[view]` **739 cases, 18,399,777 assertions** passed; `ctest -L gui`
+  **58/58 passed**, serially, in 494.64 s (`out/m25.3/gui.log`). `clang-format --dry-run --Werror` clean on every changed C++ file.

@@ -191,7 +191,7 @@ TEST_CASE("the slab path is continuous, carried and unit", "[unit][view][rig]") 
   const Bounds rails{-34, -24, 0, 34, 24, 0};
   auto last = slabDeploy(s, 0, 1);
   float lowest = 1e9f;
-  for (int ms = 1; ms <= 2500; ++ms) {
+  for (int ms = 1; ms <= 4000; ++ms) {
     const float t = static_cast<float>(ms) / 1000.0f;
     const auto p = slabDeploy(s, t, 1);
     CAPTURE(t);
@@ -207,9 +207,9 @@ TEST_CASE("the slab path is continuous, carried and unit", "[unit][view][rig]") 
     if (settle >= 0) lowest = std::min(lowest, p.centre.z);
     last = p;
   }
-  // The overshoot dips, but never more than 2.5 mm (0.05 cells), and ends at rest.
-  CHECK(lowest < s.hangCentre.z);
-  CHECK(lowest >= s.hangCentre.z - .05f - 1e-5f);
+  // The overshoot dips 1-3 mm (0.02-0.06 cells) once, and ends at rest (M25.3).
+  CHECK(lowest < s.hangCentre.z - .02f);
+  CHECK(lowest >= s.hangCentre.z - .06f - 1e-5f);
   CHECK(last.centre.z == Approx(s.hangCentre.z).margin(1e-6));
 }
 
@@ -378,7 +378,7 @@ TEST_CASE("departures: nearest the magazine first, a column together, within 1.4
     CHECK(deployLastLock(n) == Approx(last + kSlabLockSeconds));
   }
   // No static fallback: any number of columns travels.
-  CHECK(deployLastLock(1) == Approx(1.62f));
+  CHECK(deployLastLock(1) == Approx(kDeployFirstDeparture + kSlabLockSeconds));
   CHECK(stowTravelSeconds(1) == Approx(kSlabLockSeconds));
 }
 
@@ -472,4 +472,176 @@ TEST_CASE("a layout fits the volume where the lab stands, or it does not",
   moved.minX += 30;
   moved.maxX += 30;
   CHECK_FALSE(layoutFits(moved, x, v));
+}
+
+namespace {
+/// The slab's tilt away from face-up, in degrees (only meaningful once it is face-up).
+float tiltDegrees(const std::array<float, 4>& q) {
+  return 2 * std::acos(std::clamp(std::abs(q[3]), 0.0f, 1.0f)) * 180 /
+         std::numbers::pi_v<float>;
+}
+}  // namespace
+
+TEST_CASE("one slab deploys in 2.5-3.5 s and every departure within 5 s (M25.3)",
+          "[unit][view][rig][weight]") {
+  CHECK(deployLastLock(1) >= 2.5f);
+  CHECK(deployLastLock(1) <= 3.5f);
+  for (const int n : {1, 2, 4, 11, 40, 200, 256}) {
+    CAPTURE(n);
+    CHECK(deployLastLock(n) <= 5.0f);
+  }
+  // The phases follow one another.
+  CHECK(0 < kSlabTakeUpEnd);
+  CHECK(kSlabTakeUpEnd < kSlabBreakFreeEnd);
+  CHECK(kSlabBreakFreeEnd < kSlabSlideEnd);
+  CHECK(kSlabSlideEnd < kSlabTiltEnd);
+  CHECK(kSlabTiltEnd < kSlabTravelEnd);
+  CHECK(kSlabTravelEnd < kSlabLowerEnd);
+  CHECK(kSlabLowerEnd < kSlabLockSeconds);
+}
+
+TEST_CASE("a heavy slab hesitates, drops off its latch, then starts slowly (M25.3)",
+          "[unit][view][rig][weight]") {
+  const auto s = samplePath();
+  const float u0 = s.departure + kSlabTakeUpEnd, u1 = s.departure + kSlabBreakFreeEnd;
+  CHECK(kSlabBreakFreeEnd - kSlabTakeUpEnd >= .12f);
+  CHECK(kSlabBreakFreeEnd - kSlabTakeUpEnd <= .2f);
+  const auto before = slabDeploy(s, u0, 1);
+  CHECK(before.centre.z == Approx(s.bayCentre.z).margin(1e-5));
+  // The carriage has arrived over the pick-up before the slab moves.
+  CHECK(before.carriage.x == Approx(s.pickCentre.x + s.mastOffset.x).margin(1e-4));
+  CHECK(before.carriage.y == Approx(s.pickCentre.y + s.mastOffset.y).margin(1e-4));
+  for (float t = u0; t <= u1; t += .005f) {
+    const auto p = slabDeploy(s, t, 1);
+    CAPTURE(t);
+    // No horizontal motion while it breaks free.
+    CHECK(p.centre.x == Approx(s.bayCentre.x).margin(1e-5));
+    CHECK(p.centre.y == Approx(s.bayCentre.y).margin(1e-5));
+    CHECK(p.quat == s.bayQuat);
+  }
+  // The drop as the latch lets go: 5-10 mm (0.1-0.2 cells).
+  const float drop = s.bayCentre.z - slabDeploy(s, u1, 1).centre.z;
+  CHECK(drop >= .1f);
+  CHECK(drop <= .2f);
+  CHECK(kSlabDrop == Approx(drop).margin(1e-5));
+  // Then a slow start: 50 ms into the slide it has moved under 1 % of the way out.
+  const float out = std::abs(slabDeploy(s, u1 + .05f, 1).centre.x - s.bayCentre.x);
+  CHECK(out < .01f * std::abs(s.pickCentre.x - s.bayCentre.x));
+}
+
+TEST_CASE("the slab's speed never jumps and peaks late in its travel (M25.3)",
+          "[unit][view][rig][weight]") {
+  const auto s = samplePath();
+  constexpr float dt = 1e-3f;
+  Vec3 prev = slabDeploy(s, 0, 1).centre, prevCarriage = slabDeploy(s, 0, 1).carriage;
+  Vec3 v{}, vc{};
+  float peak = 0, peakAt = 0, worst = 0, worstCarriage = 0;
+  const float end = s.departure + kSlabLockSeconds + .3f;
+  for (int i = 1; static_cast<float>(i) * dt <= end; ++i) {
+    const float t = static_cast<float>(i) * dt;
+    const auto p = slabDeploy(s, t, 1);
+    const Vec3 nv = (p.centre - prev) * (1 / dt),
+               nvc = (p.carriage - prevCarriage) * (1 / dt);
+    if (i > 1) {
+      worst = std::max(worst, length(nv - v) / dt);
+      worstCarriage = std::max(worstCarriage, length(nvc - vc) / dt);
+    }
+    const float u = t - s.departure;
+    if (u > kSlabTiltEnd && u < kSlabTravelEnd && length(nv) > peak) {
+      peak = length(nv);
+      peakAt = u;
+    }
+    v = nv;
+    vc = nvc;
+    prev = p.centre;
+    prevCarriage = p.carriage;
+  }
+  // An instant velocity change of even 1 cell/s (5 cm/s) in one millisecond would read
+  // as 1000 cells/s^2; every smooth start and stop here stays under 700.
+  CAPTURE(worst, worstCarriage);
+  CHECK(worst < 700.0f);
+  CHECK(worstCarriage < 700.0f);
+  CHECK(peakAt > kSlabTiltEnd + .55f * (kSlabTravelEnd - kSlabTiltEnd));
+}
+
+TEST_CASE("the slab lags its carriage by a few degrees, critically damped (M25.3)",
+          "[unit][view][rig][weight]") {
+  const auto s = samplePath();
+  float most = 0;
+  int signChanges = 0, lastSign = 0;
+  for (float u = kSlabTiltEnd; u <= kSlabLockSeconds + .2f; u += .002f) {
+    const auto p = slabDeploy(s, s.departure + u, 1);
+    CAPTURE(u);
+    const float a = tiltDegrees(p.quat);
+    CHECK(a <= 3.0f);
+    most = std::max(most, a);
+    // Which way it leans along the travel: the slab's up axis tipped forward (+) or
+    // back (-).
+    const Vec3 up{2 * (p.quat[0] * p.quat[2] + p.quat[3] * p.quat[1]),
+                  2 * (p.quat[1] * p.quat[2] - p.quat[3] * p.quat[0]), 0};
+    const Vec3 travel = normalize(
+        Vec3{s.hangCentre.x - s.pickCentre.x, s.hangCentre.y - s.pickCentre.y, 0});
+    const float lean = dot(up, travel);
+    const int sign = lean > 1e-3f ? 1 : lean < -1e-3f ? -1 : 0;
+    if (sign != 0) {
+      if (lastSign != 0 && sign != lastSign) ++signChanges;
+      lastSign = sign;
+    }
+    // Accelerating away it leans back; the first lean is backwards.
+    if (signChanges == 0 && lastSign != 0) CHECK(lastSign == -1);
+  }
+  CHECK(most >= .5f);
+  // Critically damped: back while accelerating, forward while braking, and no ringing.
+  CHECK(signChanges == 1);
+  // Level again by the lock.
+  CHECK(tiltDegrees(slabDeploy(s, s.departure + kSlabLowerEnd, 1).quat) < .01f);
+  // The stow (the path reversed in time) lags its own motion, too: its first lean as it
+  // sets off back towards the rack is towards the hang, i.e. forward along the deploy.
+  auto r = s;
+  r.departure = 0;
+  r.reversed = true;
+  int first = 0;
+  for (float u = kSlabTravelEnd; u >= kSlabTiltEnd && first == 0; u -= .002f) {
+    const auto p = slabDeploy(r, u, 1);
+    const Vec3 up{2 * (p.quat[0] * p.quat[2] + p.quat[3] * p.quat[1]),
+                  2 * (p.quat[1] * p.quat[2] - p.quat[3] * p.quat[0]), 0};
+    const float lean = dot(up, normalize(Vec3{s.hangCentre.x - s.pickCentre.x,
+                                              s.hangCentre.y - s.pickCentre.y, 0}));
+    if (std::abs(lean) > 1e-3f) first = lean > 0 ? 1 : -1;
+  }
+  CHECK(first == 1);
+}
+
+TEST_CASE("the shape forms only on locked slabs (M25.3)", "[unit][view][rig][weight]") {
+  // Deploy: flat until the last lock, then formed over kRigFormSeconds.
+  const float lock = 3.4f;
+  CHECK(deployFormGate(0, lock, 1) == 0);
+  CHECK(deployFormGate(lock - 1e-3f, lock, 1) == 0);
+  CHECK(deployFormGate(lock + kRigFormSeconds, lock, 1) == 1);
+  CHECK(deployFormGate(99, lock, 1) == 1);
+  float last = 0;
+  for (float t = 0; t < lock + 2; t += .01f) {
+    const float g = deployFormGate(t, lock, 1);
+    CHECK(g >= last);
+    CHECK(g - last <= .05f);
+    last = g;
+  }
+  CHECK(deployFormGate(0, 0, .3f) == 1);  // calm: the slabs are hung at once
+  // Stow: unformed before anything leaves.
+  CHECK(stowFormGate(0, 1) == 1);
+  CHECK(stowFormGate(kRigUnformSeconds, 1) == 0);
+  CHECK(stowFormGate(99, 1) == 0);
+  CHECK(stowFormGate(0, .3f) == 0);
+  CHECK(stowLead(1.0f, false) == 1.0f);
+  CHECK(stowLead(0.0f, false) == 0.0f);
+  CHECK(stowLead(0.0f, true) == kRigUnformSeconds);
+  CHECK(stowLead(1.0f, true) == std::max(1.0f, kRigUnformSeconds));
+  // Relayout: unform over the lead, flat while the slabs move, form again after.
+  const float lead = kRigUnformSeconds, move = 2;
+  CHECK(relayoutFormGate(0, lead, move, 1) == 1);
+  CHECK(relayoutFormGate(lead, lead, move, 1) == 0);
+  CHECK(relayoutFormGate(lead + move - 1e-3f, lead, move, 1) == 0);
+  CHECK(relayoutFormGate(lead + move + kRigFormSeconds, lead, move, 1) == 1);
+  CHECK(relayoutFormGate(.5f, lead, move, .3f) == 1);
+  CHECK(relayoutFormGate(.5f, 0, move, 1) == 0);
 }

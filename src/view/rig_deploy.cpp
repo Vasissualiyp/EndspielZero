@@ -48,6 +48,78 @@ std::array<float, 4> slerp(std::array<float, 4> a, const std::array<float, 4>& b
   for (float& c : out) c /= n;
   return out;
 }
+/// Zero velocity and acceleration at both ends (smootherstep).
+float smoother(float x) noexcept {
+  x = std::clamp(x, 0.0f, 1.0f);
+  return x * x * x * (x * (x * 6 - 15) + 10);
+}
+/// M25.3: a heavy start. Velocity goes as x^3 (1 - x)^2: it creeps off, peaks late (at
+/// 0.6) and brakes, with zero velocity and acceleration at both ends.
+float heavyEase(float x) noexcept {
+  x = std::clamp(x, 0.0f, 1.0f);
+  const float x2 = x * x;
+  return x2 * x2 * (15 - 24 * x + 10 * x2);
+}
+/// Its second derivative, and that's largest magnitude (the braking, at x = 0.845).
+float heavyAccel(float x) noexcept {
+  if (x <= 0 || x >= 1) return 0;
+  return 60 * x * x * (1 - x) * (3 - 5 * x);
+}
+constexpr float kHeavyAccelPeak = 8.135f;
+constexpr float kCellsPerMetre = 20.0f;
+/// The swing's response window: the critically damped kernel w^2 t e^(-w t) is cut where
+/// less than 2.2 % of its weight is left.
+constexpr float kSwingWindow = 5.7f / kSlabSwingOmega;
+constexpr int kSwingSamples = 48;
+
+/// The lean the travel's acceleration asks for at path time `u`, in radians, positive
+/// with the slab's top tipped back against the travel.
+float leanDemand(const SlabPathSpec& s, float u) noexcept {
+  const float x = (u - kSlabTiltEnd) / (kSlabTravelEnd - kSlabTiltEnd);
+  if (x <= 0 || x >= 1) return 0;
+  const float d =
+      std::hypot(s.hangCentre.x - s.pickCentre.x, s.hangCentre.y - s.pickCentre.y);
+  return kSlabSwingDegrees * std::numbers::pi_v<float> / 180 * heavyAccel(x) /
+         kHeavyAccelPeak * std::min(1.0f, d / kCellsPerMetre);
+}
+/// The slab's lean at path time `u`: the demand through a critically damped response,
+/// causal in the move's own time (a stow plays the path backwards).
+float swingAngle(const SlabPathSpec& s, float u) noexcept {
+  const float w = kSlabSwingOmega, ds = kSwingWindow / kSwingSamples;
+  const float mass = 1 - std::exp(-w * kSwingWindow) * (1 + w * kSwingWindow);
+  float sum = 0;
+  for (int k = 0; k < kSwingSamples; ++k) {
+    const float tau = (static_cast<float>(k) + .5f) * ds;
+    sum +=
+        w * w * tau * std::exp(-w * tau) * leanDemand(s, s.reversed ? u + tau : u - tau);
+  }
+  return sum * ds / mass;
+}
+std::array<float, 4> qmul(const std::array<float, 4>& a,
+                          const std::array<float, 4>& b) noexcept {
+  return {a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+          a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+          a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+          a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]};
+}
+Vec3 qrotate(const std::array<float, 4>& q, const Vec3& v) noexcept {
+  const Vec3 axis{q[0], q[1], q[2]};
+  const auto t = cross(axis, v) * 2;
+  return v + t * q[3] + cross(axis, t);
+}
+/// The settle: one dip below the hang and back, starting and ending at rest.
+float settleDip(float u) noexcept {
+  const float start = kSlabLowerEnd - .1f;
+  if (u <= start || u >= kSlabLockSeconds) return 0;
+  const float s =
+      std::sin(std::numbers::pi_v<float> * (u - start) / (kSlabLockSeconds - start));
+  return kSlabOvershoot * s * s;
+}
+/// How far the slab has dropped as the bay's latch lets go.
+float latchDrop(float u) noexcept {
+  constexpr float start = kSlabTakeUpEnd + .03f;
+  return kSlabDrop * smoother((u - start) / (kSlabBreakFreeEnd - start));
+}
 float clampPulse(float sinceLock) noexcept {
   if (sinceLock < 0) return 0;
   if (sinceLock < kClampPulseRise) return sinceLock / kClampPulseRise;
@@ -169,45 +241,59 @@ SlabPose slabDeploy(const SlabPathSpec& s, float t, float intensity) noexcept {
   }
   const float u = t - s.departure;
   const float liftLength = mastTo(s.liftZ);
+  const float drop = latchDrop(u);
   p.inBay = u < 0;
   p.quat = s.bayQuat;
   if (u < kSlabSlideEnd) {
-    // The carriage runs from where it was parked to above the pick-up point while the
-    // slab slides out of its slot, lowering its mast to meet it.
-    const float reach = s.departure + kSlabSlideEnd;
-    const float f = reach > 0 ? rigEase(std::max(0.0f, t) / reach) : 1.0f;
+    // The carriage runs from where it was parked to above the pick-up point, lowering its
+    // mast to meet the slab, and takes up the load. The slab hesitates, drops as its
+    // latch lets go, and only then creeps out of its slot.
+    const float reach = s.departure + kSlabTakeUpEnd;
+    const float f = reach > 0 ? smoother(std::max(0.0f, t) / reach) : 1.0f;
     const Vec3 pick = carriageAt(s.pickCentre);
     p.carriage = {std::lerp(s.parkCarriage.x, pick.x, f),
                   std::lerp(s.parkCarriage.y, pick.y, f), s.railZ};
-    const float slide = u < 0 ? 0.0f : rigEase(u / kSlabSlideEnd);
+    const float slide =
+        heavyEase((u - kSlabBreakFreeEnd) / (kSlabSlideEnd - kSlabBreakFreeEnd));
     p.centre = lerp3(s.bayCentre, s.pickCentre, slide);
-    p.mastLength = std::lerp(liftLength, mastTo(s.pickCentre.z), slide);
+    p.centre.z -= drop;
+    p.mastLength = std::lerp(liftLength, mastTo(s.pickCentre.z - drop), f);
     return p;
   }
   if (u < kSlabTiltEnd) {
     // Tilt from edge-on to face-up while the mast shortens to just under the rail.
-    const float f = easeInOut((u - kSlabSlideEnd) / (kSlabTiltEnd - kSlabSlideEnd));
+    const float f = smoother((u - kSlabSlideEnd) / (kSlabTiltEnd - kSlabSlideEnd));
     p.quat = slerp(s.bayQuat, kIdentity, f);
-    p.centre = {s.pickCentre.x, s.pickCentre.y, std::lerp(s.pickCentre.z, s.liftZ, f)};
+    p.centre = {s.pickCentre.x, s.pickCentre.y,
+                std::lerp(s.pickCentre.z - drop, s.liftZ, f)};
   } else if (u < kSlabTravelEnd) {
-    const float f = rigEase((u - kSlabTiltEnd) / (kSlabTravelEnd - kSlabTiltEnd));
+    const float f = heavyEase((u - kSlabTiltEnd) / (kSlabTravelEnd - kSlabTiltEnd));
     p.quat = kIdentity;
     p.centre = {std::lerp(s.pickCentre.x, s.hangCentre.x, f),
                 std::lerp(s.pickCentre.y, s.hangCentre.y, f), s.liftZ};
-  } else if (u < kSlabLowerEnd) {
-    const float f = easeInOut((u - kSlabTravelEnd) / (kSlabLowerEnd - kSlabTravelEnd));
-    p.quat = kIdentity;
-    p.centre = {s.hangCentre.x, s.hangCentre.y, std::lerp(s.liftZ, s.hangCentre.z, f)};
   } else {
-    // A damped 2.5 mm overshoot downwards and back.
-    const float v = (u - kSlabLowerEnd) / (kSlabLockSeconds - kSlabLowerEnd);
+    // Lower, running on 2 mm past the hang and back as the load settles.
+    const float f = smoother((u - kSlabTravelEnd) / (kSlabLowerEnd - kSlabTravelEnd));
     p.quat = kIdentity;
-    p.centre = s.hangCentre;
-    p.centre.z -= kSlabOvershoot * std::exp(-kSettleDamping * v) *
-                  std::sin(std::numbers::pi_v<float> * v * 2);
+    p.centre = {s.hangCentre.x, s.hangCentre.y,
+                std::lerp(s.liftZ, s.hangCentre.z, f) - settleDip(u)};
   }
   p.carriage = carriageAt(p.centre);
   p.mastLength = mastTo(p.centre.z);
+  // Inertia: the slab rocks on its yoke against the carriage's acceleration.
+  if (const float lean = swingAngle(s, u); lean != 0) {
+    const Vec3 travel{s.hangCentre.x - s.pickCentre.x, s.hangCentre.y - s.pickCentre.y,
+                      0};
+    if (length(travel) > 1e-4f) {
+      const Vec3 axis = normalize(cross(travel, Vec3{0, 0, 1}));
+      const float h = lean * .5f;
+      const std::array<float, 4> q{axis.x * std::sin(h), axis.y * std::sin(h),
+                                   axis.z * std::sin(h), std::cos(h)};
+      const Vec3 boss{p.centre.x, p.centre.y, p.centre.z - s.yokeBelow};
+      p.centre = boss + qrotate(q, p.centre - boss);
+      p.quat = qmul(q, p.quat);
+    }
+  }
   return p;
 }
 
@@ -347,6 +433,35 @@ Departures departureOrder(const std::vector<MastGroup>& groups, const Vec3& maga
   return out;
 }
 
+namespace {
+/// 0 before `t` reaches 0, 1 from `span` on, smootherstep between (exact at both ends).
+float ramp(float t, float span) noexcept {
+  if (t <= 0) return 0;
+  if (t >= span) return 1;
+  return std::min(1.0f, smoother(t / span));
+}
+}  // namespace
+
+float deployFormGate(float age, float lastLock, float intensity) noexcept {
+  if (intensity < .5f) return 1;
+  return ramp(age - lastLock, kRigFormSeconds);
+}
+
+float stowFormGate(float age, float intensity) noexcept {
+  if (intensity < .5f) return 0;
+  return 1 - ramp(age, kRigUnformSeconds);
+}
+
+float stowLead(float shutdown, bool formed) noexcept {
+  return formed ? std::max(shutdown, kRigUnformSeconds) : shutdown;
+}
+
+float relayoutFormGate(float age, float lead, float seconds, float intensity) noexcept {
+  if (intensity < .5f) return 1;
+  if (lead > 0 && age < lead) return 1 - ramp(age, lead);
+  return ramp(age - lead - seconds, kRigFormSeconds);
+}
+
 float relayoutTravelSeconds(float distanceCells) noexcept {
   return 0.5f + 0.4f * std::clamp(distanceCells / kCellsPerLabMetre, 0.0f, 1.0f);
 }
@@ -364,7 +479,8 @@ RelayoutPose slabRelayout(const RelayoutSpec& s, float t, float intensity) noexc
   if (intensity < .5f || t >= end || still) {
     p.centre = s.to;
     p.yaw = s.toYaw;
-    p.settled = intensity < .5f || t >= end;
+    // A slab whose pose does not change stays clamped throughout (M25.3).
+    p.settled = still || intensity < .5f || t >= end;
     return p;
   }
   // The turn takes the short way round.

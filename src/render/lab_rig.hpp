@@ -87,7 +87,8 @@ std::vector<RigPiece> appendRig(InstanceSet& set, const LabScene& lab,
 /// shadows, flourishes, the standby LED) of a slab that is not clamped moves rigidly with
 /// the slab's pose, shrunk to the bay's size while it is edge-on; parked in the bay it is
 /// not drawn. Clamped slabs are untouched, so the lock swaps nothing. Render-only:
-/// picking and every board-space system stay where they are.
+/// picking and every board-space system stay where they are. M25.3: so does the shape
+/// view's surface mesh (flat while it travels), vertex by vertex, its normals turned.
 void carryBoard(InstanceSet& set, const RigLayout& layout,
                 const std::vector<view::SlabPose>& poses);
 /// The parked carriage and bridges are replaced by the per-group copies; a parked
@@ -109,12 +110,16 @@ struct Relayout {
   std::vector<int> arrivals;              ///< new slabs from the rack
   std::vector<int> leaving;               ///< old slabs back into it
   float seconds{0};  ///< until every slab is clamped and the lab placed
+  /// M25.3: seconds before anything moves, while a formed shape unforms to flat
+  /// (`view::kRigUnformSeconds`; 0 when the shape was flat). Set by the front end.
+  float lead{0};
 };
 [[nodiscard]] Relayout relayoutOf(const LabScene& lab, const RigLayout& from,
                                   const std::vector<view::Placement>& fromPlacements,
                                   const RigLayout& to,
                                   const std::vector<view::Placement>& toPlacements);
-/// One frame of a relayout `age` seconds in (calm: the end at once).
+/// One frame of a relayout `age` seconds in (calm: the end at once). Through the move's
+/// `lead` every slab holds its starting pose, clamped (M25.3).
 struct RelayoutFrame {
   /// The new rig in the eased lab, plus one extra single-slab group per leaving slab
   /// (indices from `to.slabs.size()` on), so `appendRig` draws them all.

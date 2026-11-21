@@ -756,6 +756,8 @@ void trackLayout(const app::Shell& shell, bool animate) {
                         : render::rigLayout(*gLabScene, next);
   if (animate && current && layout) {
     t.move = render::relayoutOf(*gLabScene, *current, t.placements, *layout, next);
+    // M25.3: a formed shape unforms to flat before any slab moves.
+    if (shell.settings().geometryFormed > 1e-4f) t.move->lead = view::kRigUnformSeconds;
     t.moveTo = next;
     t.start = gRigNow;
     t.fromCamera = t.lastCamera;
@@ -774,7 +776,7 @@ float relayoutAge() {
 /// A relayout still moving the slabs: input waits for it (skip ends it).
 bool relayoutRunning(float intensity) {
   const auto& t = gRigTrack;
-  return t.move && intensity >= .5f && relayoutAge() < t.move->seconds;
+  return t.move && intensity >= .5f && relayoutAge() < t.move->lead + t.move->seconds;
 }
 
 /// Slabs on their own boot clock (M24.6): a relayout's arrivals boot once they lock;
@@ -809,16 +811,25 @@ bool stackedShapeView(const app::Shell& shell) {
          render::hasPlaySurface(session->variant());
 }
 
+/// The stow's board shutdown in seconds (0 for a finished game), apart from the lead
+/// the stow waits before its slabs leave, which also unforms a formed shape (M25.3).
+float gStowFxShutdown = app::kStowShutdownSeconds;
+
 /// Before the interface builds: on the lab path, menu to game becomes Deploy and game to
 /// menu Stow, timed by this game's mast groups. A finished game has already shut down.
+/// M25.3: a stow from the shape view waits for the shape to unform before any slab
+/// leaves.
 void configureRigMoves(render::Ui& ui, const app::Shell& shell) {
   const bool on = labEnabled(shell) && gStation.empty() && shell.hasGame() &&
                   !shell.attracting() && gLabScene->doc().deploy.has_value();
   const render::RigLayout* layout = on ? rigLayoutFor(shell) : nullptr;
   const int groups = layout ? layout->slots : 1;
-  const float shutdown =
+  gStowFxShutdown =
       on && shell.session()->endEvent().has_value() ? 0.0f : app::kStowShutdownSeconds;
-  ui.setRigMoves(layout != nullptr, view::deployLastLock(groups), shutdown,
+  const bool formed =
+      on && optionsFor(shell, -1).surface && shell.settings().geometryFormed > 1e-4f;
+  ui.setRigMoves(layout != nullptr, view::deployLastLock(groups),
+                 view::stowLead(gStowFxShutdown, formed),
                  view::stowTravelSeconds(groups));
 }
 
@@ -844,10 +855,10 @@ RigFrame rigFrame(app::Shell& shell, const render::Ui& ui, bool hold, float inte
   f.layout = rigLayoutFor(shell);
   if (f.layout == nullptr) return f;
   render::constrainGameCamera(*shell.session(), *f.layout);
-  // A layout change in flight moves the slabs (M24.6).
+  // A layout change in flight moves the slabs (M24.6), after its lead (M25.3).
   if (!f.move && gRigTrack.move) {
     f.relayoutAge = relayoutAge();
-    if (f.relayoutAge < gRigTrack.move->seconds) {
+    if (f.relayoutAge < gRigTrack.move->lead + gRigTrack.move->seconds) {
       auto frame = std::make_shared<render::RelayoutFrame>(render::relayoutFrame(
           *gLabScene, *gRigTrack.move, gRigTrack.moveTo, f.relayoutAge, intensity));
       if (!frame->done) {
@@ -884,10 +895,54 @@ std::optional<float> deployBootAge(float deployAge, float lock) {
 }
 
 /// The stow's compressed shutdown, 0..1; a finished game is already dark (no hold fx).
+/// It runs over the board's own shutdown, not the stow's whole lead (M25.3).
 std::optional<float> stowShutdown(const RigFrame& rig) {
-  if (!rig.is(app::ScreenMove::Stow) || rig.move->shutdown <= 0) return std::nullopt;
-  return std::clamp(rig.move->age / rig.move->shutdown, 0.0f, 1.0f);
+  if (!rig.is(app::ScreenMove::Stow) || rig.move->shutdown <= 0 || gStowFxShutdown <= 0)
+    return std::nullopt;
+  return std::clamp(rig.move->age / std::min(gStowFxShutdown, rig.move->shutdown), 0.0f,
+                    1.0f);
 }
+
+/// M25.3: a slab leaves and enters the rack only as a flat screen. The share of the
+/// shape's morph this frame's rig allows (`view::deployFormGate` and friends): 0 while
+/// any slab is out of its clamp and its bay. 1 off the lab game path.
+float rigFormGate(const app::Shell& shell, const render::Ui& ui, bool hold,
+                  float intensity) {
+  if (!labGame(shell, hold) || shell.session() == nullptr) return 1;
+  if (const auto m = ui.rigMove(); m && !m->done) {
+    if (m->move == app::ScreenMove::Deploy)
+      return view::deployFormGate(m->age, m->lock, intensity);
+    return view::stowFormGate(m->age, intensity);
+  }
+  const auto& t = gRigTrack;
+  if (t.move && t.session == shell.session()->id())
+    return view::relayoutFormGate(relayoutAge(), t.move->lead, t.move->seconds,
+                                  intensity);
+  return 1;
+}
+
+/// The shape's live morph point while a frame is drawn under a rig form gate, or -1.
+float gFormedUngated = -1.0f;
+/// Scales `geometryFormed` by the rig's form gate for the rest of the frame's drawing,
+/// restoring it after (M25.3). Everything drawn - the surface, the parking, the ribs, a
+/// seam latch - sees the gated value; the camera's framing does not (`frameBoard`).
+class FormGate {
+ public:
+  FormGate(app::Settings& s, float gate) : settings_(s), saved_(s.geometryFormed) {
+    gFormedUngated = saved_;
+    settings_.geometryFormed = saved_ * gate;
+  }
+  ~FormGate() {
+    settings_.geometryFormed = saved_;
+    gFormedUngated = -1.0f;
+  }
+  FormGate(const FormGate&) = delete;
+  FormGate& operator=(const FormGate&) = delete;
+
+ private:
+  app::Settings& settings_;
+  float saved_;
+};
 
 /// The deploy's or stow's camera flight (`render::rigFlightCamera`) for this frame.
 view::OrbitCamera rigFlightCamera(const RigFrame& rig, const view::OrbitCamera& game,
@@ -945,9 +1000,9 @@ render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
     render::carryBoard(instances, layout, rig.poses);
   // The eye keeps its place through a relayout and eases onto the new framing.
   if (rig.relayout && gRigTrack.fromCamera && intensity >= .5f)
-    camera = view::blendCamera(
-        *gRigTrack.fromCamera, camera,
-        view::rigEase(rig.relayoutAge / std::max(.01f, gRigTrack.move->seconds)));
+    camera = view::blendCamera(*gRigTrack.fromCamera, camera,
+                               view::rigEase((rig.relayoutAge - gRigTrack.move->lead) /
+                                             std::max(.01f, gRigTrack.move->seconds)));
   if (rig.move && intensity >= .5f) {
     const auto& m = *rig.move;
     const bool deploy = m.move == app::ScreenMove::Deploy;
@@ -1015,8 +1070,9 @@ render::GpuLightBlock drawLabGame(const RigFrame& rig, const app::Shell& shell,
       }
     }
   }
-  // The ribs that hold the skin into its shape (M24.5b), joined to the board's yoke.
-  if (renderer.options().slabSkin && renderer.options().surface)
+  // The ribs that hold the skin into its shape (M24.5b), joined to the board's yoke -
+  // only on a still rig: a travelling slab carries its sheet flat (M25.3).
+  if (renderer.options().slabSkin && renderer.options().surface && still)
     appendSkinFrame(instances, shell, rig, rigPieces, eye);
   const auto projected =
       appendProjector(ui, shell.settings(), instances, renderer.theme());
@@ -1106,6 +1162,7 @@ std::string rigReport(const app::Shell& shell, const render::Ui& ui) {
     out << "\nlast relayout: " << m.matches.size() - m.arrivals.size() - m.leaving.size()
         << " moved, " << m.arrivals.size() << " arrived, " << m.leaving.size()
         << " stowed, " << m.seconds << " s"
+        << (m.lead > 0 ? " after a " + std::to_string(m.lead) + " s unform" : "")
         << (rig.relayout ? ", now at " + std::to_string(rig.relayoutAge) + " s" : "");
   }
   if (rig.parked > 0) out << "\nparked high for the shape view: " << rig.parked;
@@ -1762,8 +1819,13 @@ bool applyStage(app::Session& session, const render::UiRequest& request,
 void frameBoard(app::Shell& shell) {
   app::Session* session = shell.session();
   if (session == nullptr) return;
+  // Under a rig form gate (M25.3) the camera still frames the shape the game is in.
+  app::Settings& s = shell.settings();
+  const float drawn = s.geometryFormed;
+  if (gFormedUngated >= 0.0f) s.geometryFormed = gFormedUngated;
   render::frameGeometryCamera(*session, optionsFor(shell),
                               poseFrom(shell.settings(), session->variant()));
+  s.geometryFormed = drawn;
 }
 
 /// One frame of the trailer's automatic framing (M13.9): ease the camera's target and
@@ -2217,6 +2279,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
     const float intensity = renderer->options().presentationIntensity;
     gRigNow = visualOrigin + sample.seconds;
     shell->session()->setLightBridges(labGame(*shell, hold) && (*ui)->bridges());
+    // M25.3: the shape stays flat while any slab is off its clamp.
+    const FormGate formGate(shell->settings(),
+                            rigFormGate(*shell, **ui, hold, intensity));
     const RigFrame rig = rigFrame(*shell, **ui, hold, intensity);
     // The geometry view builds the warped board as ordinary instances, so the same
     // render path draws it (M17); only the surface flag on the options selects it.
@@ -4094,6 +4159,12 @@ int main(int argc, char** argv) {
     render::InstanceSet instances;
     view::OrbitCamera camera;
 #ifdef CB_HAVE_IMGUI
+    // M25.3: the shape stays flat while any slab is off its clamp; a closing seam then
+    // latches as it forms on the locked slab.
+    gRigNow = visualSeconds;
+    const FormGate formGate(shell->settings(),
+                            rigFormGate(*shell, **ui, holdsBoard(*shell, **ui),
+                                        renderer->options().presentationIntensity));
     renderer->setOptions(optionsFor(*shell, (*ui)->seamHover()));
     // A seam latch (M24.5b): the console forces one; otherwise the live morph closing a
     // wrap axis upward between two frames stamps one. Opening never flashes.
@@ -4163,8 +4234,10 @@ int main(int argc, char** argv) {
         easeTrailerFraming(*shell, dt);
       } else if (morphInFlight) {
         const app::Settings& st = shell->settings();
-        render::easeMorphFraming(*shell->session(), optionsFor(*shell),
-                                 poseFrom(st, shell->session()->variant()),
+        // Framed on the live morph, not the rig's flat-gated one (M25.3).
+        render::SurfacePose pose = poseFrom(st, shell->session()->variant());
+        if (gFormedUngated >= 0.0f) pose.formed = gFormedUngated;
+        render::easeMorphFraming(*shell->session(), optionsFor(*shell), pose,
                                  morphSettling ? 1.0f : render::morphFollowBlend(dt));
       }
 #endif

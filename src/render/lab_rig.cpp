@@ -254,17 +254,18 @@ std::optional<RigLayout> build(const LabScene& lab,
 }  // namespace
 
 namespace {
-/// An instance belongs to the slab under it: inside its bezel, on the highest face at or
-/// below it (a plinth hangs just under its own face). -1 when none.
-int slabUnder(const RigLayout& layout, const Instance& i) {
+/// A point (an instance's centre, a surface vertex) belongs to the slab under it: inside
+/// its bezel, on the highest face at or below it (a plinth hangs just under its own
+/// face). -1 when none.
+int slabUnder(const RigLayout& layout, const float* c) {
   int best = -1;
   float bestDz = 1e30f;
   for (std::size_t s = 0; s < layout.slabs.size(); ++s) {
     const auto& slab = layout.slabs[s];
-    if (i.center[0] < slab.minX - .05f || i.center[0] > slab.maxX + .05f ||
-        i.center[1] < slab.minY - .05f || i.center[1] > slab.maxY + .05f)
+    if (c[0] < slab.minX - .05f || c[0] > slab.maxX + .05f || c[1] < slab.minY - .05f ||
+        c[1] > slab.maxY + .05f)
       continue;
-    const float dz = i.center[2] - slab.z;
+    const float dz = c[2] - slab.z;
     const float rank = dz >= -view::kSlabBelowFace - .05f ? dz : 1e6f - dz;
     if (rank < bestDz) {
       bestDz = rank;
@@ -277,9 +278,9 @@ int slabUnder(const RigLayout& layout, const Instance& i) {
   float bestD = 1e30f;
   for (std::size_t s = 0; s < layout.slabs.size(); ++s) {
     const auto& slab = layout.slabs[s];
-    const float dx = std::max({0.0f, slab.minX - i.center[0], i.center[0] - slab.maxX});
-    const float dy = std::max({0.0f, slab.minY - i.center[1], i.center[1] - slab.maxY});
-    const float dz = std::abs(i.center[2] - slab.z);
+    const float dx = std::max({0.0f, slab.minX - c[0], c[0] - slab.maxX});
+    const float dy = std::max({0.0f, slab.minY - c[1], c[1] - slab.maxY});
+    const float dz = std::abs(c[2] - slab.z);
     const float d = dx * dx + dy * dy + dz * dz;
     if (d < bestD) {
       bestD = d;
@@ -287,6 +288,9 @@ int slabUnder(const RigLayout& layout, const Instance& i) {
     }
   }
   return best;
+}
+int slabUnder(const RigLayout& layout, const Instance& i) {
+  return slabUnder(layout, i.center);
 }
 /// Rotate `i` rigidly about `pivot` by `q`, then move the pivot to `to`.
 void turnInstance(Instance& i, const view::Vec3& pivot, const view::Vec3& to,
@@ -349,6 +353,7 @@ std::vector<view::SlabPose> rigPoses(const RigLayout& layout, RigPhase phase, fl
     // Stow: the path reversed in time, the last group first.
     auto reversed = path;
     reversed.departure = 0;
+    reversed.reversed = true;
     if (intensity < .5f) {
       out.push_back(view::slabDeploy(reversed, -1, 1));
       continue;
@@ -437,7 +442,8 @@ std::vector<RigPiece> appendRig(InstanceSet& set, const LabScene& lab,
           pose.centre + rotate(pose.quat, {0, 0, -kBodyHalf}), pose.quat,
           {std::lerp(bayW, width, f) / backSize, std::lerp(bayD, depth, f) / backSize,
            1});
-      if (pose.quat[3] > .9999f) {
+      // Face-up, give or take the few degrees it rocks on its yoke (M25.3).
+      if (pose.quat[3] > .999f) {
         // The yoke runs under the slab from its mast axis (a rack's arm) to the back's
         // boss; on a rack a T-bar joins the arm to the mast at the yoke's height.
         const auto& arm = layout.arm[s];
@@ -517,10 +523,48 @@ void carryInstance(Instance& i, const SlabCarry& c) {
   i.quat[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
   i.quat[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
 }
-/// Every board instance list a carry moves.
+/// A surface-mesh vertex rides its slab like an instance (M25.3): its position through
+/// the carry, its normal turned (through the inverse of the edge-on shrink), and every
+/// vertex of a slab still in its bay on one point, so its triangles vanish.
+void carryVertex(MeshVertex& v, const SlabCarry& c) {
+  if (!c.moves) return;
+  if (c.hidden) {
+    v.pos[0] = c.centre.x;
+    v.pos[1] = c.centre.y;
+    v.pos[2] = c.centre.z;
+    return;
+  }
+  const view::Vec3 local{(v.pos[0] - c.pivot.x) * c.scale.x,
+                         (v.pos[1] - c.pivot.y) * c.scale.y,
+                         (v.pos[2] - c.pivot.z) * c.scale.z};
+  const auto w = c.centre + rotate(c.quat, local);
+  v.pos[0] = w.x;
+  v.pos[1] = w.y;
+  v.pos[2] = w.z;
+  auto n = rotate(c.quat, {v.normal[0] / c.scale.x, v.normal[1] / c.scale.y,
+                           v.normal[2] / c.scale.z});
+  if (const float l = view::length(n); l > 0) n = n * (1 / l);
+  v.normal[0] = n.x;
+  v.normal[1] = n.y;
+  v.normal[2] = n.z;
+}
+/// Every board instance list a carry moves. The surface mesh's identity instances are
+/// left alone: its vertices are carried themselves (M25.3), so moving those too would
+/// carry the sheet twice.
 template <typename F>
 void eachBoardInstance(InstanceSet& set, F&& f) {
-  for (auto* list : {&set.instances, &set.shadows, &set.flourish})
+  std::vector<bool> surface;
+  if (!set.surfaceVertices.empty()) {
+    surface.assign(set.instances.size(), false);
+    const auto mark = [&](std::uint32_t i) {
+      if (i < surface.size()) surface[i] = true;
+    };
+    mark(set.surfaceInstance);
+    for (const auto& d : set.surfaceDraws) mark(d.instance);
+  }
+  for (std::size_t k = 0; k < set.instances.size(); ++k)
+    if (surface.empty() || !surface[k]) f(set.instances[k]);
+  for (auto* list : {&set.shadows, &set.flourish})
     for (auto& i : *list) f(i);
   if (set.standbyLed) f(*set.standbyLed);
 }
@@ -536,6 +580,10 @@ void carryBoard(InstanceSet& set, const RigLayout& layout,
     const int s = slabUnder(layout, i);
     if (s >= 0) carryInstance(i, carry[static_cast<std::size_t>(s)]);
   });
+  for (auto& v : set.surfaceVertices) {
+    const int s = slabUnder(layout, v.pos);
+    if (s >= 0) carryVertex(v, carry[static_cast<std::size_t>(s)]);
+  }
 }
 
 bool hiddenInGame(const io::LabPart& part, const RigLayout& layout,
@@ -589,10 +637,13 @@ Relayout relayoutOf(const LabScene& lab, const RigLayout& from,
 }
 
 RelayoutFrame relayoutFrame(const LabScene& lab, const Relayout& move,
-                            const std::vector<view::Placement>& toPlacements, float age,
-                            float intensity) {
+                            const std::vector<view::Placement>& toPlacements,
+                            float sinceStart, float intensity) {
   RelayoutFrame f;
   const bool calm = intensity < .5f;
+  // M25.3: nothing moves while the shape unforms; the slabs then move from age 0.
+  const float age = std::max(0.0f, sinceStart - move.lead);
+  const bool holding = !calm && sinceStart < move.lead;
   f.done = calm || age >= move.seconds;
   const float ease = calm ? 1.0f : view::rigEase(age / kLabScaleEaseSeconds);
   const auto xform = easeXform(move.from.xform, move.to.xform, ease);
@@ -635,6 +686,7 @@ RelayoutFrame relayoutFrame(const LabScene& lab, const Relayout& move,
     const auto o = static_cast<std::size_t>(j);
     auto path = move.from.paths[o];
     path.departure = 0;
+    path.reversed = true;
     auto pose = view::slabDeploy(path, f.done ? -1.0f : view::kSlabLockSeconds - age, 1);
     const auto toHere = [&](const view::Vec3& b) {
       return xform.toBoard(move.from.xform.toLab(b));
@@ -644,7 +696,7 @@ RelayoutFrame relayoutFrame(const LabScene& lab, const Relayout& move,
     const float railZ = xform.toBoard({0, 0, f.layout.volume.railZ}).z;
     pose.carriage.z = railZ;
     pose.mastLength = std::max(0.0f, railZ - (pose.centre.z - path.yokeBelow));
-    pose.clamped = false;
+    pose.clamped = age <= 0.0f;  // through the lead it still hangs, clamped
     path.hangCentre = toHere(path.hangCentre);
     path.railZ = railZ;
     view::MastGroup g;
@@ -660,6 +712,9 @@ RelayoutFrame relayoutFrame(const LabScene& lab, const Relayout& move,
     f.layout.groupSlot.push_back(0);
     f.poses.push_back(pose);
   }
+  if (holding)
+    for (auto& p : f.poses)
+      if (!p.inBay) p.clamped = true;
   return f;
 }
 
@@ -685,11 +740,31 @@ void carryRelayout(InstanceSet& set, const RelayoutFrame& frame) {
     else
       carryInstance(i, deploy[static_cast<std::size_t>(s)]);
   });
+  for (auto& v : set.surfaceVertices) {
+    const int s = slabUnder(own, v.pos);
+    if (s < 0) continue;
+    const auto& c = frame.carry[static_cast<std::size_t>(s)];
+    if (!c.moves) {
+      carryVertex(v, deploy[static_cast<std::size_t>(s)]);
+      continue;
+    }
+    const auto q = yawQuat(c.yaw);
+    const auto w =
+        c.to + rotate(q, {v.pos[0] - c.from.x, v.pos[1] - c.from.y, v.pos[2] - c.from.z});
+    const auto normal = rotate(q, {v.normal[0], v.normal[1], v.normal[2]});
+    v.pos[0] = w.x;
+    v.pos[1] = w.y;
+    v.pos[2] = w.z;
+    v.normal[0] = normal.x;
+    v.normal[1] = normal.y;
+    v.normal[2] = normal.z;
+  }
 }
 
 std::optional<float> relayoutBootAge(const Relayout& move, float age,
                                      float intensity) noexcept {
   if (move.arrivals.empty()) return std::nullopt;
+  age -= intensity >= .5f ? move.lead : 0.0f;
   float lock = 0;
   if (intensity >= .5f)
     for (const int a : move.arrivals)

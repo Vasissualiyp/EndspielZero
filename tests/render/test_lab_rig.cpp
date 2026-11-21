@@ -187,7 +187,8 @@ TEST_CASE("the rig groups shipped layouts and keeps standard at lab scale",
   REQUIRE(standard);
   CHECK(standard->xform.labScale == 1.0f);
   CHECK(standard->groups.size() == 1);
-  CHECK(standard->lastLock == Catch::Approx(1.62f));
+  CHECK(standard->lastLock ==
+        Catch::Approx(view::kDeployFirstDeparture + view::kSlabLockSeconds));
   const auto cube5 = rigLayout(lab, placementsOf("cube5"));
   REQUIRE(cube5);
   CHECK(cube5->groups.size() == 1);
@@ -258,9 +259,10 @@ TEST_CASE("a travelling slab carries the board itself, so the lock is no swap",
     carryBoard(rest, *layout, rigPoses(*layout, RigPhase::Deploy, lock + .01f, 1));
     for (std::size_t i = 0; i < set.instances.size(); ++i)
       CHECK(std::memcmp(&rest.instances[i], &set.instances[i], sizeof(Instance)) == 0);
-    // Lowering (face up): every instance moves with its own slab, rigidly.
+    // Settling (face up, done rocking): every instance moves with its own slab, rigidly.
     const float departure = layout->paths[0].departure;
-    const auto lowering = rigPoses(*layout, RigPhase::Deploy, departure + 1.2f, 1);
+    const auto lowering =
+        rigPoses(*layout, RigPhase::Deploy, departure + view::kSlabLowerEnd + .01f, 1);
     auto moved = set;
     carryBoard(moved, *layout, lowering);
     for (std::size_t i = 0; i < set.instances.size(); ++i) {
@@ -276,7 +278,9 @@ TEST_CASE("a travelling slab carries the board itself, so the lock is no swap",
     }
     CHECK(moved.shadows[0].center[2] == Catch::Approx(moved.instances[0].center[2]));
     // Tilting: the slab's orientation composes onto each instance's own.
-    const auto tilting = rigPoses(*layout, RigPhase::Deploy, departure + .42f, 1);
+    const auto tilting =
+        rigPoses(*layout, RigPhase::Deploy,
+                 departure + .5f * (view::kSlabSlideEnd + view::kSlabTiltEnd), 1);
     auto tilted = set;
     carryBoard(tilted, *layout, tilting);
     const auto& q = tilted.instances[0].quat;
