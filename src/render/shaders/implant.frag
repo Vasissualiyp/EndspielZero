@@ -203,16 +203,5 @@ void main() {
     float front=exp(-.5*pow((handUnit(px)-(p.hand.x-.5)/.7)/.05,2.0))*smoothstep(0,.05,p.hand.x-.5);
     c.rgb+=p.deep.rgb/max(p.deep.b,1e-4)*.04*front*(1-smoothstep(1.2,1.4,p.hand.x));
   }
-  // M25.1: an additive, soft peripheral lub-dub, independent of living-vision optics.
-  // Keep glyph cores and exempt tools exactly stable.
-  if(!tool && p.timing.y>=.5 && p.timing.w>1) {
-    vec2 delta=px-size*.5;
-    float r2=dot(delta,delta)/(.25*dot(size,size));
-    vec2 source=p.living.x>.5 ? size*.5+delta*(1+p.living.y*r2) : px;
-    vec4 core=texture(ui,source/size);
-    float edge=1-min(min(px.x,size.x-px.x),min(px.y,size.y-px.y))/(.14*size.y);
-    float band=smoothstep(0,1,clamp(edge,0,1));
-    c.rgb+=p.deep.rgb/max(p.deep.b,1e-4)*.04*((p.timing.w-1)/.20)*band*(1-smoothstep(.8,.9,core.a));
-  }
   outColor=clamp(c,0,1);
 }

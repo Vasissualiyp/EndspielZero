@@ -144,7 +144,12 @@ TEST_CASE("implant composite preserves settled UI and confines organic effects",
   const auto quiet = frame(p);
   p.heartbeat = 1.2f;
   const auto beat = frame(p);
-  CHECK(maxDiff(quiet, beat) >= 8);  // a visible 3-5% peripheral lift
+  // No peripheral vignette (user, 2026-11-21: too visible): the frame edges stay still.
+  for (int y = 0; y < 540; y += 539)
+    for (int x = 0; x < 960; ++x) {
+      const auto i = static_cast<std::size_t>((y * 960 + x) * 4);
+      for (std::size_t c = 0; c < 3; ++c) CHECK(quiet[i + c] == beat[i + c]);
+    }
   std::size_t haloChanged = 0;
   for (int y = 100; y < 440; ++y)
     for (int x = 540; x < 800; ++x) {
