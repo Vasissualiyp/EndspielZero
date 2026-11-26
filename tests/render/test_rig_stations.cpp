@@ -7,6 +7,7 @@
 #include "render/lab_scene.hpp"
 #include "render/ui.hpp"
 #include "support/variants.hpp"
+#include "view/neural_vr.hpp"
 #include "view/rig_move.hpp"
 using namespace cb;
 using namespace cb::render;
@@ -199,6 +200,91 @@ TEST_CASE("Ui station clock camera interruption skip and projector phases",
     (*ui)->setCinema(true);
     frame();
     CHECK((*ui)->hologramRequest().kind == HologramRequest::None);
+  }
+  CHECK(ctx->takeValidationMessages().empty());
+}
+TEST_CASE("Ui calm VR handoff keeps both halves of its clock and the leaving board",
+          "[render][rig][vr][vrcalm]") {
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct Sdl {
+    ~Sdl() { SDL_Quit(); }
+  } sdl;
+  auto* window = SDL_CreateWindow("VR clock", 960, 540, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct Window {
+    SDL_Window* w;
+    ~Window() { SDL_DestroyWindow(w); }
+  } win{window};
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx);
+  {
+    auto ui = Ui::create(*ctx, window, view::Theme::manifold());
+    REQUIRE(ui);
+    auto shell = app::Shell::create({"standard"}, {});
+    REQUIRE(shell);
+    shell->dismissWelcome();
+    shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+      return test::loadVariant(name);
+    });
+    REQUIRE(shell->startGame("standard"));
+    const auto frame = [&] {
+      (*ui)->tick(0);
+      (*ui)->newFrame();
+      (void)(*ui)->build(*shell, 60);
+      (*ui)->endFrame();
+    };
+    frame();
+    for (const bool calm : {true, false}) {
+      (*ui)->setPresentationIntensity(calm ? 0.f : 1.f);
+      for (const bool vr : {true, false}) {
+        for (const bool entering : {true, false}) {
+          CAPTURE(calm, vr, entering);
+          (*ui)->setRigMoves(
+              true, view::kVrEnterSeconds, view::kVrLeaveSeconds,
+              view::stowTravelSeconds(1),
+              vr ? std::optional{Ui::CalmRigTiming{view::kVrEnterCalmSeconds,
+                                                   view::kVrLeaveCalmSeconds}}
+                 : std::nullopt);
+          const auto from = entering ? app::Screen::MainMenu : app::Screen::Game;
+          const auto to = entering ? app::Screen::Game : app::Screen::MainMenu;
+          (*ui)->pinTransitionAge(0.f);
+          shell->previewTransition(from, to);
+          frame();
+          // Configuration is frame-local; a running move must retain its own clock.
+          (*ui)->setRigMoves(true, 20, 30, 40);
+          const float full = entering
+                                 ? view::kVrEnterSeconds + 1.f
+                                 : view::kVrLeaveSeconds + view::stowTravelSeconds(1) +
+                                       app::kStowMenuSeconds;
+          const float total = calm ? (vr ? .6f : .3f) : full;
+          REQUIRE((*ui)->rigMove());
+          CHECK((*ui)->rigMove()->total == Catch::Approx(total));
+          for (const float age : {.3f, .45f, .6f}) {
+            (*ui)->pinTransitionAge(age);
+            frame();
+            const auto move = *(*ui)->rigMove();
+            CHECK(move.age == Catch::Approx(std::min(age, total)));
+            CHECK(move.done == (age >= total));
+            if (calm && vr) {
+              const auto state =
+                  entering ? view::vrEnter(move.age, 0) : view::vrLeave(move.age, 0);
+              CHECK(state.dark == Catch::Approx(age == .3f    ? 1
+                                                : age == .45f ? .5f
+                                                              : 0)
+                                      .margin(1e-5f));
+              CHECK((*ui)->holdsBoard() == (!entering && age < total));
+            }
+          }
+          (*ui)->pinTransitionAge(.1f);
+          frame();
+          (*ui)->skipTransition();
+          CHECK((*ui)->rigMove()->done);
+          CHECK((*ui)->rigMove()->age == Catch::Approx(total));
+          CHECK_FALSE((*ui)->holdsBoard());
+        }
+      }
+    }
   }
   CHECK(ctx->takeValidationMessages().empty());
 }

@@ -58,6 +58,12 @@ class DebugConsole {
     relayout_ = false;
     return out;
   }
+  /// M25.5: `vr on|off` pins the lab game into or out of the neural VR whatever its slab
+  /// count (`vr auto` returns to the count); the front end clears the pin with the
+  /// session. `vr status` (or `vr`) prints the GUI's report.
+  [[nodiscard]] std::optional<bool> vrPin() const noexcept { return vrPin_; }
+  void clearVrPin() noexcept { vrPin_.reset(); }
+  void setVrReport(std::function<std::string()> report) { vrReport_ = std::move(report); }
   /// The GUI supplies the `stretch` report (min/max stretch, pass-through count).
   void setSkinReport(std::function<std::string()> report) {
     skinReport_ = std::move(report);
@@ -79,6 +85,8 @@ class DebugConsole {
   std::optional<int> latch_;
   bool bridges_{true};
   bool relayout_{false};
+  std::optional<bool> vrPin_;
+  std::function<std::string()> vrReport_;
   std::function<std::string()> rigReport_;
   std::function<std::string()> skinReport_;
   const io::LabDoc* labDoc_{nullptr};

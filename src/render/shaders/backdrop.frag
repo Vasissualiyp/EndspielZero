@@ -59,7 +59,54 @@ float stars(vec3 dir, float pixelAngle, float seconds, float intensity, out floa
     return core * tw * (0.35 + 0.65 * unit(hash(h ^ 0xaaaaaaaau)));
 }
 
+// M25.5 the lucid horizon (params.z = 2): the implant's own space. An endless soft-lit
+// floor `board.z` below the eye at `params.xy`, fading to a horizon, with a faint grid
+// every `board.x` cells, under a calm dream sky; `inner` is the synaptic hue that lights
+// it, `outer` the sky, `board.w` how far it has opened out of the dark.
+vec3 lucidHorizon(vec3 dir) {
+    vec3 hue = push.inner.rgb;
+    vec3 sky = push.outer.rgb;
+    float el = dir.z;
+    // A calm gradient: deepest overhead, the hue gathering toward the horizon.
+    vec3 rgb = sky * (0.55 + 0.45 * exp(-max(el, 0.0) * 2.2)) +
+               hue * (0.16 * exp(-abs(el) * 7.0) + 0.04 * exp(-max(el, 0.0) * 1.5));
+    if (el < 0.0) {
+        float h = max(push.board.z, 0.5);
+        float t = h / max(-el, 1e-4);
+        vec2 p = push.params.xy + dir.xy * t;
+        // The floor is lit softly near the eye and fades into the haze of the horizon.
+        float near = exp(-t / (h * 10.0));
+        vec3 floorC = sky * 0.9 + hue * (0.05 + 0.13 * near);
+        vec2 q = p / max(push.board.x, 0.5);
+        vec2 w = max(fwidth(q), vec2(1e-4));
+        vec2 g = abs(fract(q - 0.5) - 0.5) / w;
+        float line = 1.0 - min(min(g.x, g.y), 1.0);
+        // Faint, and gone before the lines would alias toward the horizon.
+        float keep = (1.0 - smoothstep(0.25, 0.8, max(w.x, w.y))) * (0.35 + 0.65 * near);
+        floorC += hue * line * 0.09 * keep;
+        // The floor meets the sky without a seam: both haze into the horizon glow.
+        rgb = mix(rgb, floorC, smoothstep(0.0, 0.012, -el));
+    }
+    rgb += hue * 0.10 * exp(-abs(el) * 60.0);
+    return rgb * push.board.w;
+}
+
 void main() {
+    if (push.params.z > 1.5) {
+        vec2 ndc = uv * push.map.xz + push.map.yw;
+        float tanY = push.right.w;
+        vec3 dir = normalize(push.fwd.xyz + push.right.xyz * (ndc.x * tanY * push.up.w) -
+                             push.up.xyz * (ndc.y * tanY));
+        vec3 rgb = lucidHorizon(dir);
+        if (push.inner.w > 0.5) {
+            uvec2 pixel = uvec2(gl_FragCoord.xy);
+            uint h = hash(pixel.x*0x1f3d5b79u ^ pixel.y*0x9e3779b1u);
+            float dither = (unit(hash(h^0x68bc21ebu))-unit(hash(h^0x31415926u)))/255;
+            rgb = clamp(rgb + vec3(dither), 0.0, 1.0);
+        }
+        outColor = vec4(rgb, 1.0);
+        return;
+    }
     vec2 centre = push.params.xy;
     vec2 extent = max(push.board.xy, vec2(0.02));
     vec2 d = (uv - centre) / extent;

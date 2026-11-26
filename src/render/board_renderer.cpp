@@ -102,6 +102,15 @@ void toFloat4(const view::Rgba& c, float out[4]) {
 
 }  // namespace
 
+const MeshRange& opaqueBoardRange(const MeshLibrary& meshes, std::size_t shape,
+                                  const BoardOptions& options,
+                                  const InstanceSet& set) noexcept {
+  if (options.vrLight && set.surfaceIndices.empty() &&
+      shape == static_cast<std::size_t>(Archetype::Cell))
+    return meshes.lightCellRange;
+  return meshes.ranges[shape];
+}
+
 float shaderMaterial(view::Material m, Cut cut, float variation) {
   if (m == view::Material::Wood)
     return (cut == Cut::Plank ? 2.0f : 6.0f) + std::clamp(variation, 0.0f, 0.99f);
@@ -134,10 +143,11 @@ float panelSeed(CellId cell) {
   return static_cast<float>(1u + materialHash(cell) % 65535u) / 65536.0f;
 }
 
-float pieceMaterial(const view::Theme& t, Piece piece) {
+float pieceMaterial(const view::Theme& t, Piece piece, bool vrLight) {
   const std::uint32_t key = 2u * static_cast<std::uint32_t>(piece.type) +
                             (piece.colorOf() == Color::White ? 0u : 1u);
-  return shaderMaterial(t.materials.pieces, Cut::Turned, 0.99f * hash01(key));
+  return shaderMaterial(vrLight ? view::Material::Hologram : t.materials.pieces,
+                        Cut::Turned, 0.99f * hash01(key));
 }
 
 float surfaceOpacity(const view::Theme& theme, const BoardOptions& options) {
@@ -1394,7 +1404,9 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
                           (options_.latchAxis == 0 || options_.latchAxis == 1);
     std::vector<std::uint32_t> latchIndices;
     // A stacked shape in the lab is light throughout (M24.6).
-    const bool allLight = options_.stackedLight > 0.0f && surf.stacked();
+    const bool allLight =
+        options_.vrLight || (options_.stackedLight > 0.0f && surf.stacked());
+    const float lightOpacity = options_.vrLight ? kVrLightOpacity : options_.stackedLight;
     const auto isLit = [&](CellId c) {
       return allLight || std::binary_search(lit.begin(), lit.end(), c);
     };
@@ -1402,7 +1414,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       fxCellPlus = patch.cell + 1;
       view::Rgba fill = fillFor(patch.cell);
       // Light completes what the skin cannot: the cell's own colour as a hologram cell.
-      if (lightPass) fill.a = allLight ? options_.stackedLight : 0.7f;
+      if (lightPass) fill.a = allLight ? lightOpacity : 0.7f;
       // An LED capture: the captured cell's own emitters switch to the capture colour and
       // settle back through the per-emitter transition (no slab drawn over the board).
       view::Rgba shown = fill;
@@ -1640,7 +1652,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       constexpr int kLast = kFlexSide - 1;
       fxCellPlus = tile.cell + 1;
       view::Rgba fill = fillFor(tile.cell);
-      if (lightPass) fill.a = 0.7f;
+      if (lightPass) fill.a = allLight ? lightOpacity : 0.7f;
       view::Rgba shown = fill;
       prevNow = {0.0f, 0.0f, 0.0f, -1.0f};
       bool pulseCell = false;
@@ -1907,7 +1919,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           body.quat[3] = quat[3];
           toFloat4(pc, body.color);
           body.color[3] = alpha;
-          body.material = pieceMaterial(theme_, piece);
+          body.material = pieceMaterial(theme_, piece, options_.vrLight);
           const std::size_t sh = static_cast<std::size_t>(shape[piece.type]);
           // The disc is the token, in the theme's one shared furniture colour, read live
           // so a palette switch repaints it the same frame it repaints everything else.
@@ -2258,7 +2270,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     body.scale[1] = 0.8f;
     body.scale[2] = 0.8f * h;
     toFloat4(pieceColor, body.color);
-    body.material = pieceMaterial(theme_, piece);
+    body.material = pieceMaterial(theme_, piece, options_.vrLight);
     byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
   };
 
@@ -2318,14 +2330,26 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     cell.material =
         shaderMaterial(theme_.materials.cells, Cut::Plank,
                        0.5f * static_cast<float>(parity & 1) + 0.49f * hash01(pl.cell));
-    if (theme_.materials.cells == view::Material::Led) {
+    if (options_.vrLight) {
+      // M25.5: in the implant's space a cell is light, not an LED on a slab.
+      cell.material = shaderMaterial(view::Material::Hologram, Cut::Plank, 0.0f);
+      cell.panelSignal[0] = cell.panelSignal[1] = cell.panelSignal[3] = 0.0f;
+      cell.panelSignal[2] = -1.0f;
+      // The checker (and every cue mixed into it) lifted into light: the LED colours are
+      // dark until they emit, and a hologram tile only shows its own colour.
+      const view::Rgba led = theme_.ember;
+      cell.color[0] = std::min(1.0f, fill.r * 2.0f + led.r * 0.10f);
+      cell.color[1] = std::min(1.0f, fill.g * 2.0f + led.g * 0.10f);
+      cell.color[2] = std::min(1.0f, fill.b * 2.0f + led.b * 0.10f);
+      cell.color[3] = kVrLightOpacity;
+    } else if (theme_.materials.cells == view::Material::Led) {
       cell.panelSignal[0] = panelSeed(pl.cell);
       cell.panelSignal[2] = isCue(pl.cell) ? -1.0f : 1.0f;
       cell.panelSignal[3] = heatFor(pl.cell);
       ++panelCellCount;
     }
 
-    if (collectPanels && !pulseCell) {
+    if (collectPanels && !pulseCell && !options_.vrLight) {
       panelTargets->push_back(
           {pl.cell, fill, PanelDestination::Instance,
            static_cast<std::uint32_t>(
@@ -2401,7 +2425,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     // rim under the cells is what says so. It comes from the palette rather than from a
     // blend of the ground, because on a light theme a blend of the ground is the ground.
     for (const Extent& e : extents) {
-      if (!e.seen) continue;
+      if (!e.seen || options_.vrLight) continue;
       byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(plinthInstance(
           view::Vec3{(e.minX + e.maxX) * 0.5f, (e.minY + e.maxY) * 0.5f, 0.0f},
           (e.maxX - e.minX) * 0.5f + kPlinthOutset,
@@ -2793,7 +2817,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
             taken.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece;
         toFloat4(pc, body.color);
         body.color[3] = fade;
-        body.material = pieceMaterial(theme_, taken);
+        body.material = pieceMaterial(theme_, taken, options_.vrLight);
         byShapeFlourish[static_cast<std::size_t>(shape[taken.type])].push_back(body);
       }
       if (flash > 0.0f && !ledCells) {  // LED: a per-emitter colour pulse instead
@@ -3149,7 +3173,9 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     const VkRect2D fullScissor{{0, 0}, {target.width(), target.height()}};
 
     vkCmdBeginRendering(cmd, &ri);
-    if (!options_.labMode && glow.valid && backdropPipeline != VK_NULL_HANDLE) {
+    const bool horizon = options_.lucidHorizon > 0.0f && !camera.orthographic;
+    if (!options_.labMode && (glow.valid || horizon) &&
+        backdropPipeline != VK_NULL_HANDLE) {
       vkCmdSetViewport(cmd, 0, 1, &full);
       vkCmdSetScissor(cmd, 0, 1, &fullScissor);
       BackdropPush bp{};
@@ -3194,6 +3220,22 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
       bp.map[1] = -2.0f * board.x / board.width - 1.0f;
       bp.map[2] = 2.0f * th / board.height;
       bp.map[3] = -2.0f * board.y / board.height - 1.0f;
+      if (horizon) {
+        // M25.5: the implant's space, lit in its synaptic hue.
+        const view::Rgba synaptic = theme_.implantDeep;
+        const view::Rgba sky = mix(theme_.ink, view::Rgba::hex(0x0B0A1A), 0.7f);
+        bp.inner[0] = synaptic.r;
+        bp.inner[1] = synaptic.g;
+        bp.inner[2] = synaptic.b;
+        toFloat4(sky, bp.outer);
+        const view::Vec3 eyeAt = camera.eye();
+        bp.params[0] = eyeAt.x;
+        bp.params[1] = eyeAt.y;
+        bp.params[2] = 2.0f;
+        bp.board[0] = 8.0f;  // a grid line every eight cells
+        bp.board[2] = eyeAt.z - options_.lucidFloorZ;
+        bp.board[3] = std::clamp(options_.lucidHorizon, 0.0f, 1.0f);
+      }
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, backdropPipeline);
       vkCmdPushConstants(cmd, backdropLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                          sizeof(BackdropPush), &bp);
@@ -3285,7 +3327,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         }
         const std::uint32_t icons = batch.count - discs;
         if (icons > 0) {
-          const MeshRange& ir = discs > 0 ? meshes_.cylinderRanges[s] : meshes_.ranges[s];
+          const MeshRange& ir = discs > 0 ? meshes_.cylinderRanges[s]
+                                          : opaqueBoardRange(meshes_, s, options_, set);
           if (ir.indexCount > 0) {
             vkCmdDrawIndexed(cmd, ir.indexCount, icons, ir.firstIndex, ir.vertexOffset,
                              batch.first + discs);

@@ -100,6 +100,9 @@ struct BoardRect {
 inline constexpr float kPlinthOutset = 0.78f;
 inline constexpr float kPlinthDepth = 0.13f;
 inline constexpr float kBezelMargin = 0.28f;  ///< kPlinthOutset - the cell's half pitch
+/// M25.5: the boards in the implant's space are light (`BoardOptions::vrLight`): each
+/// cell a hologram tile at this opacity, through the projector opacity path.
+inline constexpr float kVrLightOpacity = 0.85f;
 
 inline constexpr float kSeamHoverGain = 1.8f;  ///< hovered axis: colour multiplier
 inline constexpr float kSeamHoverDim = 0.55f;  ///< other glued axes
@@ -195,6 +198,16 @@ struct BoardOptions {
   /// is drawn as projected light (hologram material, the projector opacity path) at this
   /// opacity. 0 = off, the LED tiles as before. Set by the front end only in a lab game.
   float stackedLight{0.0f};
+  /// M25.5 the neural VR: the implant draws the boards as light - every lattice cell a
+  /// hologram tile at `kVrLightOpacity` (projector opacity path), no plinth or bezel
+  /// under it. Also the 2-D implant picture of a lab game. Set by the front end only.
+  bool vrLight{false};
+  /// M25.5 the lucid horizon behind the boards: how far it has opened, 0..1 (0 = off, the
+  /// ordinary backdrop). An endless soft-lit floor at `lucidFloorZ` (board space) fading
+  /// to a horizon, with a faint grid, a calm sky and the implant's synaptic hue as the
+  /// light.
+  float lucidHorizon{0.0f};
+  float lucidFloorZ{0.0f};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -285,6 +298,13 @@ struct InstanceSet {
     return instances.size() + (standbyLed ? 1 : 0);
   }
 };
+
+/// Mesh for the opaque sculptural batch. Only VR lattice Cells use the light sheet;
+/// sampled surfaces, pieces, and the separately drawn flourish retain their meshes.
+[[nodiscard]] const MeshRange& opaqueBoardRange(const MeshLibrary& meshes,
+                                                std::size_t shape,
+                                                const BoardOptions& options,
+                                                const InstanceSet& set) noexcept;
 
 enum class PanelDestination : std::uint8_t { Instance, Surface };
 

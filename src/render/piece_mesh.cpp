@@ -1053,6 +1053,9 @@ MeshLibrary MeshLibrary::build(const std::vector<CustomBody>& custom) {
     range.indexCount = static_cast<std::uint32_t>(m.indices.size()) - range.firstIndex;
     m.ranges[i] = range;
   }
+  // addBox emits +Z first: retain the exact top position and all existing offsets.
+  m.lightCellRange = m.ranges[static_cast<std::size_t>(Archetype::Cell)];
+  m.lightCellRange.indexCount = 6;
   // The shape view's icon-faced pucks (M17.25), appended into the same buffers so the
   // draw loop is unchanged apart from which range it reads. Archetypes that are not
   // pieces have an empty icon and therefore an empty range.

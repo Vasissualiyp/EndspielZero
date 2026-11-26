@@ -6,14 +6,20 @@
 
 namespace cb::view {
 namespace {
-float clamp01(float x) noexcept { return std::clamp(x, 0.f, 1.f); }
+float clamp01(float x) noexcept {
+  return std::clamp(x, 0.f, 1.f);
+}
 float smooth(float x) noexcept {
   x = clamp01(x);
   return x * x * (3.f - 2.f * x);
 }
 /// 0 before `a`, 1 after `b`, smooth between.
-float ramp(float age, float a, float b) noexcept { return smooth((age - a) / (b - a)); }
-float lerp(float a, float b, float t) noexcept { return a + (b - a) * t; }
+float ramp(float age, float a, float b) noexcept {
+  return smooth((age - a) / (b - a));
+}
+float lerp(float a, float b, float t) noexcept {
+  return a + (b - a) * t;
+}
 
 /// A blink: closes over `close` seconds starting at `start`, then opens over `open`.
 float blink(float age, float start, float close, float open) noexcept {
@@ -37,6 +43,14 @@ void setLids(WakeState& w) noexcept {
   if (w.lidOpen >= 1.f) w.curve = 0.f;
 }
 }  // namespace
+
+WakeState eyelids(float lidOpen) noexcept {
+  WakeState w;
+  w.done = false;
+  w.lidOpen = clamp01(lidOpen);
+  setLids(w);
+  return w;
+}
 
 WakeState wakeState(float age, float intensity) noexcept {
   WakeState w;
@@ -77,7 +91,8 @@ WakeState wakeState(float age, float intensity) noexcept {
   w.lidOpen = open;
   setLids(w);
 
-  // The vision clears in steps: the opening, and then each blink takes it closer to sharp.
+  // The vision clears in steps: the opening, and then each blink takes it closer to
+  // sharp.
   const float opening = ramp(age, .6f, 1.6f);
   const float b1 = ramp(age, kBlink1Start, kBlink1Start + kBlink1Close + kBlink1Open);
   const float b2 = ramp(age, kBlink2Start, kBlink2Start + kBlink2Close + kBlink2Open);
@@ -91,7 +106,9 @@ WakeState wakeState(float age, float intensity) noexcept {
   w.exposureEv = lerp(w.exposureEv, 0.f, b2);
   w.saturation = lerp(.7f, 1.f, ramp(age, kBlink2Start, 2.9f));
   // A pure-black lid needs the glow to be exactly 0 once it ends, and during blinks.
-  w.lidGlow = age < .8f ? .03f * (.8f + .2f * std::sin(2.1f * age)) * (1.f - ramp(age, .6f, .8f)) : 0.f;
+  w.lidGlow =
+      age < .8f ? .03f * (.8f + .2f * std::sin(2.1f * age)) * (1.f - ramp(age, .6f, .8f))
+                : 0.f;
   w.roomUp = ramp(age, 2.0f, 3.2f);
   w.handshake = age >= kHandshakeStart ? age - kHandshakeStart : -1.f;
   w.menuFade = age >= kHandshakeStart ? 1.f : 0.f;

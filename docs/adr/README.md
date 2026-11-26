@@ -35,3 +35,4 @@ Template: [`template.md`](template.md).
 | [0024](0024-explicit-cell-display-response-state.md) | Explicit cell display response state | Accepted |
 | [0025](0025-frame-local-hdr-scene-composition.md) | Frame-local HDR scene composition before the interface | Accepted |
 | [0026](0026-world-is-hardware-screen-is-implant.md) | The world is hardware, the screen is a neural implant | Accepted |
+| [0027](0027-neural-space-beyond-the-rack.md) | Neural space beyond the physical rack; limited exception to ADR-0026 | Accepted |

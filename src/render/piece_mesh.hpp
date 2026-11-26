@@ -161,6 +161,8 @@ struct MeshLibrary {
   std::vector<MeshVertex> vertices;
   std::vector<std::uint16_t> indices;
   MeshRange ranges[kShapeSlots];
+  /// VR light tiles share the Cell's original +Z face, without solid sidewalls.
+  MeshRange lightCellRange;
   MeshRange labRanges[static_cast<std::size_t>(LabShape::Count)];
   std::vector<MeshRange> fileRanges;
   /// The shape view's alternate piece mesh (M17.25): each archetype's **Primitive** icon

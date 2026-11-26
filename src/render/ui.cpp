@@ -974,8 +974,11 @@ app::MoveFx Ui::moveFx() const noexcept {
   if ((move_ == app::ScreenMove::Deploy || move_ == app::ScreenMove::Stow) &&
       intensity_ >= .5f)
     return app::moveFx(move_, enter_ * rigTotal_, intensity_, rigTotal_, rigLock_);
-  return app::moveFx(move_, enter_ * currentMoveSeconds(), intensity_,
-                     currentMoveSeconds());
+  auto fx =
+      app::moveFx(move_, enter_ * currentMoveSeconds(), intensity_, currentMoveSeconds());
+  if (move_ == app::ScreenMove::Stow && intensity_ < .5f && rigCalmSeconds_)
+    fx.holdsBoard = !fx.done;
+  return fx;
 }
 
 std::optional<Ui::RigMove> Ui::rigMove() const noexcept {
@@ -994,9 +997,10 @@ std::optional<Ui::RigMove> Ui::rigMove() const noexcept {
 
 float Ui::currentMoveSeconds() const noexcept {
   if (move_ == app::ScreenMove::Station && intensity_ >= .5f) return stationSeconds_;
-  if ((move_ == app::ScreenMove::Deploy || move_ == app::ScreenMove::Stow) &&
-      intensity_ >= .5f)
-    return rigTotal_;
+  if (move_ == app::ScreenMove::Deploy || move_ == app::ScreenMove::Stow) {
+    if (intensity_ >= .5f) return rigTotal_;
+    if (rigCalmSeconds_) return *rigCalmSeconds_;
+  }
   return app::moveSeconds(move_, intensity_);
 }
 
@@ -2033,16 +2037,19 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
                                                 shell.screen());
     // The lab's game moves (M24.5): the slabs travel, so the clock runs their length.
     if (lastScreen_ >= 0) rigFrom_ = static_cast<app::Screen>(lastScreen_);
+    rigCalmSeconds_.reset();
     if (rigEnabled_ && move_ == app::ScreenMove::MenuToGame) {
       move_ = app::ScreenMove::Deploy;
       rigLock_ = rigDeployLock_;
       rigShutdown_ = 0;
       rigTotal_ = std::max(app::kDeploySeconds, rigDeployLock_ + 1.0f);
+      if (rigCalmTiming_) rigCalmSeconds_ = rigCalmTiming_->deploy;
     } else if (rigEnabled_ && move_ == app::ScreenMove::GameToMenu) {
       move_ = app::ScreenMove::Stow;
       rigShutdown_ = rigStowShutdown_;
       rigLock_ = rigShutdown_ + std::max(rigStowTravel_, app::kStowFlightMinSeconds);
       rigTotal_ = rigLock_ + app::kStowMenuSeconds;
+      if (rigCalmTiming_) rigCalmSeconds_ = rigCalmTiming_->stow;
     }
     labLeaving_ = labLast_;
     if (previewed && stationCamera_ && lastScreen_ >= 0) {

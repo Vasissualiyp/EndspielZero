@@ -278,6 +278,12 @@ class Ui {
   void setRigReport(std::function<std::string()> report) {
     console_.setRigReport(std::move(report));
   }
+  /// M25.5: the console's `vr on|off|auto` pin and `vr status` report.
+  [[nodiscard]] std::optional<bool> vrPin() const { return console_.vrPin(); }
+  void clearVrPin() { console_.clearVrPin(); }
+  void setVrReport(std::function<std::string()> report) {
+    console_.setVrReport(std::move(report));
+  }
   /// M24.5b: the console's `skin` switch, `latch` request and `stretch` report.
   [[nodiscard]] bool skin() const { return console_.skin(); }
   void setSkin(bool on) { console_.setSkin(on); }
@@ -326,12 +332,17 @@ class Ui {
   /// The lab's game moves (M24.5): with `enabled`, menu to game becomes Deploy and game
   /// to menu Stow. `deployLock` is the last slab lock; the stow runs its shutdown
   /// (0 when the game is over), then max(travel, 1.8 s) home, then the menu forms.
-  void setRigMoves(bool enabled, float deployLock, float stowShutdown,
-                   float stowTravel) noexcept {
+  /// VR supplies its own calm enter/leave lengths; physical moves keep the plain fade.
+  struct CalmRigTiming {
+    float deploy, stow;
+  };
+  void setRigMoves(bool enabled, float deployLock, float stowShutdown, float stowTravel,
+                   std::optional<CalmRigTiming> calm = std::nullopt) noexcept {
     rigEnabled_ = enabled;
     rigDeployLock_ = deployLock;
     rigStowShutdown_ = stowShutdown;
     rigStowTravel_ = stowTravel;
+    rigCalmTiming_ = calm;
   }
   struct RigMove {
     app::ScreenMove move;
@@ -371,6 +382,8 @@ class Ui {
   bool rigEnabled_{false};
   float rigDeployLock_{1.62f}, rigStowShutdown_{0}, rigStowTravel_{1.42f};
   float rigTotal_{0}, rigLock_{0}, rigShutdown_{0};
+  std::optional<CalmRigTiming> rigCalmTiming_;
+  std::optional<float> rigCalmSeconds_;  ///< snapshotted when this move starts
   app::Screen rigFrom_{app::Screen::MainMenu};
   std::function<std::optional<view::OrbitCamera>(app::Screen)> stationCamera_;
   std::function<std::string_view(app::Screen)> focusFor_;

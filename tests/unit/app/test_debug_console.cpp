@@ -520,3 +520,26 @@ TEST_CASE("the console switches light bridges and replays a relayout (M24.6)",
   CHECK(has(c.run(*shell, "relayout now"), "usage"));
   for (const char* word : {"relayout", "bridges"}) CHECK(has(DebugConsole::help(), word));
 }
+
+TEST_CASE("the console pins the neural VR and reports it (M25.5)", "[unit][app][vr]") {
+  auto shell = makeShell();
+  DebugConsole c;
+  CHECK_FALSE(c.vrPin().has_value());
+  CHECK(has(c.run(*shell, "vr status"), "no game in the lab"));
+  c.setVrReport([] { return std::string("vr: inside, 256 slab(s) > 8 bay(s)"); });
+  CHECK(c.run(*shell, "vr status") == "vr: inside, 256 slab(s) > 8 bay(s)");
+  CHECK(c.run(*shell, "vr") == "vr: inside, 256 slab(s) > 8 bay(s)");
+  CHECK(c.run(*shell, "vr on") == "vr on");
+  REQUIRE(c.vrPin().has_value());
+  CHECK(*c.vrPin());
+  CHECK(c.run(*shell, "vr off") == "vr off");
+  REQUIRE(c.vrPin().has_value());
+  CHECK_FALSE(*c.vrPin());
+  CHECK(c.run(*shell, "vr auto") == "vr auto");
+  CHECK_FALSE(c.vrPin().has_value());
+  CHECK(has(c.run(*shell, "vr maybe"), "usage"));
+  c.run(*shell, "vr on");
+  c.clearVrPin();
+  CHECK_FALSE(c.vrPin().has_value());
+  CHECK(has(DebugConsole::help(), "vr on|off|auto|status"));
+}

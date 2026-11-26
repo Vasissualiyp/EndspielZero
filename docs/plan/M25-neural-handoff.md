@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # M25 — The neural handoff: one interface, weight, flexible skin, and VR where the room runs out
 
-Status: **M25.1–M25.4 built 2026-11-21; M25.5 planned** from play-testing after M24. Implementers: Codex
+Status: **M25.1–M25.4 built 2026-11-21; M25.5 built and verified 2026-11-25** from play-testing after M24. Implementers: Codex
 **gpt-6.1-sol** (M25.1, M25.2) and **gpt-6-astra** (M25.3, M25.4, M25.5). All on `main`,
 one slice after another, in the order below. Each slice adds its own dated Status entry
 at the end of this file.
@@ -492,3 +492,277 @@ Gates (through `g.sh`, after the last source change): `tools/precommit.sh` print
 (`render-app-view-final.log`; the 10 new `[render][skin][flex]` cases are in it);
 `ctest -L gui` **58/58 passed**, serially, in 842.32 s (`gui-final.log`). No staging or
 commit was performed in this sandbox.
+
+### M25.5 — continuation review (2026-11-21)
+
+Reviewed the interrupted diff and its saved test-first logs (`out/m25.5/red.log`,
+`red-render.log`); all 15 inherited VR cases pass (15,017 assertions). Reviewed all
+nine inherited sheets. Before completing the slice, extend its existing implementation:
+
+- `carryVr` currently skips surface identity instances but never moves the mesh vertices.
+  Carry each vertex by its encoded cell, preserving normals and leaving the identity
+  draws fixed. Extend `BoardRenderer::buildInstances`' existing light range to every
+  VR surface, including forced VR on a 2-D glued board. Existing tests cover lattice
+  cells only; a torus regression reproduces the missing light range.
+- VR layout interpolation currently has no input guard. Reuse the physical relayout's
+  skip-and-consume policy before ImGui receives input, so picking cannot act at a cell's
+  destination while its picture is moving. Retarget from interpolated placements and
+  carry bridge endpoints with the same offsets.
+- Replace the per-frame `FlatGate` session mutations with an explicit-time mode switch:
+  keep the old picture until closed, apply the new mode once, then reopen. Frame the
+  implant's flat picture front-on across the available view, and keep the same camera
+  for rendering and picking.
+- The scene's eyelid pass precedes the neural composite, so T6's check overlay survives
+  darkness. Fade the implant with the handoff too; add a full-black capture assertion.
+  Do not change lab-off shader output or the launch handshake's settled behaviour.
+
+Continuation measurement (2026-11-21): the first M24.8-method sample is standard lab
+88.808 ms, hyper4 VR 55.578 ms, T6 VR **2634.053 ms/frame**. A separate CPU probe
+measures slab counting 1.546 ms, bridge topology 11.529 ms, board instances 4.881 ms,
+and bridge instances 2.195 ms. The 256 bridges produce 8,192 smooth cylinder instances
+(two 32-sided tubes per each of 16 segments), over a million triangles for thin light.
+Extend the existing `appendBridges` sampling and `cylinderBetween` placement, but draw
+VR streaks with one emissive box per segment using the existing box batch. Physical
+bridges retain their smooth tubes. Reuse the session's cached bridge topology when
+settled; only a moving layout rebuilds endpoints. Test the light-only batch and zero
+power, then repeat the same benchmark and review the actual streaks. This changes no
+hardware mesh and does not omit bridges.
+
+### M25.5 — light-tile performance investigation (2026-11-24)
+
+After the bridge change, the same M24.8-method sample reports standard lab
+85.224 ms, hyper4 VR 52.646 ms, and T6 VR 232.529 ms/frame. T6 therefore still
+misses its 127.836 ms target. A diagnostic debugger run suppressing bridges reaches
+197.946 ms; this isolates remaining cost, and is not permission to omit bridges.
+
+Reading the actual draw path finds 8,198 board instances, including 4,096 cells
+and their seam rails, sharing `Archetype::Cell`. `buildArchetype` builds that shape
+with `addBox`: six separate faces, 24 vertices and 36 indices. The board pipeline
+uses `VK_CULL_MODE_NONE`. VR changes materials but still submits all six faces of
+every thin slab. Existing tests check light materials, instance coverage and carry,
+not the geometry submitted by the draw; they cannot detect this wasted work.
+
+Extend the alternate-mesh-range pattern already used by `MeshLibrary::cylinderRanges`
+and the board draw loop, with a VR light-cell range. Reuse the Cell mesh's first
+face (the +Z face emitted first by `addBox`), six indices referencing its existing
+four vertices. Keep its original first index and vertex offset. The range must
+cover x/y = +/-0.46 and z = +0.055, preserving the exact visible cell-top and rail-top
+positions under their existing instance transforms. Keep the ordinary range at
+36 indices. Select this alternate range only for the opaque Cell batch when
+`BoardOptions::vrLight` is true and `set.surfaceIndices` is empty. Do not change
+instance ordering/count, colours, effects, picking, piece meshes, flourishes,
+physical hardware, bridge geometry or sampled surface meshes. The existing
+no-cull pipeline makes this sheet visible from below too; a floating light tile
+has no solid sidewall. Use a named, testable range selector in the actual draw
+path, rather than a test-only reconstruction of its condition.
+
+Test first: verify the selected VR range's two triangles, four unique vertices,
+normal and bounds; verify ordinary Cell and every non-Cell range are unchanged,
+and sampled surfaces keep their existing mesh path. Preserve all T6 cell and
+seam instances and their gameplay cues. Then run the affected render tests and
+repeat the benchmark without diagnostic suppression. Review actual T6 and hyper4
+captures, including an underside/oblique orbit and seam hover, for light tiles and
+readable portals; repeat lab-off byte comparisons. This is a measured-cost hypothesis,
+not a claim that reducing triangles guarantees the target. If the result remains
+above budget, record the number and profile the remaining full render before
+choosing another optimization; do not remove cells, seams or bridges to meet it.
+
+### M25.5 — calm handoff clock review (2026-11-24)
+
+Static continuation review found a clock mismatch requiring a red integration test
+before correction. `Ui::currentMoveSeconds` uses `app::moveSeconds` at calm intensity,
+so Deploy and Stow end after 0.3 s. `Ui::rigMove` supplies that age to `vrFrame`, but
+`view::vrEnter` and `vrLeave` require 0.6 s. At 0.3 s the view function specifies
+full darkness; the UI instead reports a finished move and `vrFrame` selects settled
+VR. The pure view test samples its own 0.6-second clock and never exercises this
+caller, which is why it misses the truncated reopening. Calm leave has another
+integration gap: `app::moveFx` returns `holdsBoard == false`, so the menu fails
+`labGameAny` and bypasses the VR leave picture entirely.
+
+Extend the existing `Ui::setRigMoves` configuration with an explicit optional calm
+handoff timing override (separate deploy/stow seconds), absent for physical moves.
+The VR branch of `configureRigMoves` supplies `kVrEnterCalmSeconds` and
+`kVrLeaveCalmSeconds`; physical configuration clears the override. Snapshot the
+applicable override when the screen move starts, alongside `rigTotal_`, so later
+configuration cannot change a running move. `currentMoveSeconds` uses that value
+only for calm Deploy/Stow. Keep the existing physical 0.3-second fade and full
+intensity timing unchanged. For an explicitly overridden calm Stow, `Ui::moveFx`
+also holds the outgoing board until the move finishes, allowing `vrFrame` to render
+both halves of `vrLeave`. Reuse the existing alpha calculation with the supplied
+total. No change to the pure VR envelope or global calm duration is needed.
+
+Test first using the existing headless Ui fixture pattern in
+`tests/render/test_rig_stations.cpp`: configure the VR override, preview entering
+and leaving, and pin 0.3, 0.45 and 0.6 s. Require a 0.6-second RigMove, unfinished
+at 0.45 s with age 0.45, and finished at 0.6. Feeding that age to the existing
+view functions must give darkness 1 at midpoint and 0.5 at 0.45. Stow must hold
+the board before completion and release it afterwards. Cover ordinary physical
+calm moves still ending at 0.3, full intensity unchanged, and skip completing the
+move. Record the failing result before production edits. Then capture calm enter
+and leave at those times, review the dark midpoint and visible reopening, and
+retain a full-black midpoint assertion. This review ran no tests or captures;
+artifact reproduction and verification remain the continuation's responsibility.
+
+### M25.5 — calm black-frame reproduction (2026-11-24)
+
+The new Ui integration test reproduces the truncated calm clock (18 failed assertions).
+After applying the specified timing override, all 23 VR cases pass, but the GUI
+midpoint assertion finds RGB values of 0 or 1 instead of pure black. The final
+post-composite dither can add one code value after `applyVrLids` darkens the scene
+with exposure -24. Full-intensity closure already uses the wake's opaque eyelids
+and passes the same assertion; calm keeps its lids open, so exposure alone is
+insufficient. At exactly full darkness, reuse the fully closed wake mask in
+`applyVrLids`; on every other calm frame retain open lids and the existing fade.
+This changes no post shader or lab-off output. The unchanged full-black GUI
+assertion is the regression; review calm enter/leave at 0.3, 0.45 and 0.6 s.
+
+### M25.5 — acceptance continuation (2026-11-25)
+
+Continued the interrupted working tree after reviewing `git status`, the complete
+tracked diff, new modules/tests, and the saved failing runs. Retained the implementation
+and the test-first corrections described above; reviewed the completed acceptance
+captures and restarted the interrupted gates. No production rewrite was needed in this continuation.
+
+What was built:
+
+- `view::needsVr` counts deployed slabs for the current layout against the authored
+  rack's eight numbered bays (`render::rackBayCount`). The live session placements
+  drive temporal games, so the ninth visible 5D board triggers the handoff. Once a
+  game enters VR it stays there until leaving or explicitly forcing `vr off`.
+- `vrEnter`, `vrLeave` and `vrBlink` use explicit seconds. One standard stand-in slab
+  follows M25.3's weighted deploy, powers up an animated organic QR-like code, receives
+  the existing BCI handshake, and hands the picture over behind M24.7's eyelids.
+  Leaving restores the coded slab, fades its code, stows it with weight and returns
+  to the menu. Calm handoffs retain both halves of their 0.6-second fade; their UI
+  clock is snapshotted, and calm stow holds the outgoing picture until completion.
+- The lucid horizon is a soft violet floor/grid and sky in the existing backdrop
+  pass. VR cells and pieces use hologram light, with no rig hardware built or drawn
+  in the settled virtual scene. The HUD uses M25.1's neural composite and heartbeat.
+  `VrSwitch` commits 2D/3D changes once behind closed eyes. The 2-D implant picture
+  uses a front-on orthographic camera shared by rendering and picking.
+- AXES/relayout moves carry instances, sampled surface vertices and bridge endpoints
+  from their current positions. Input uses the physical relayout's skip-and-consume
+  policy while pictures move. SHAPE retains the existing surface sampler and picking.
+- VR bridges retain every connection as emissive box segments instead of smooth
+  tubes. VR lattice cells retain the Cell mesh's exact original top face (two
+  triangles), selected by the tested `opaqueBoardRange` used by the real draw loop.
+  Ordinary cells, sampled surfaces, pieces and flourishes keep their meshes. T6
+  retains all 4,096 cells and 4,096 seam instances plus its six piece instances.
+- The final opaque eyelid mask and implant fade eliminate HUD/dither leakage at full
+  darkness, including T6's initial check overlay. Console `vr on|off|auto|status`,
+  CLI `--vr 0|1` / `--vr-t`, existing `--stow-t`, debug documentation and AGENTS.md
+  expose the paths. ADR-0027 records the explicit virtual-space exception to ADR-0026.
+
+Default-view counts (all shipped variants are covered by the threshold tests):
+
+| Variants | Slabs | Default |
+|---|---:|---|
+| standard, cylinder, torus, mobius, klein, mirrorbox, atomic, atomic_torus, mustcapture, charged | 1 | physical |
+| cube5 | 5 | physical |
+| hyper4 | 16 | VR |
+| hyper4_8x8 | 8 | physical |
+| t6 | 256 | VR |
+| torus3d, torus3d_8x8, torus3d_twist | 4 | physical |
+| 5d | 1 initially; live visible boards thereafter | physical through 8, VR from 9 |
+
+Test-first evidence: `red.log` / `red-render.log` predate the new modules;
+`continue-red.log`, `controller-red.log`, `picture-red.log`, `gui-dark-red.log`,
+`streak-red.log`, `palette-red.log`, `skip-red.log` and `light-mesh-red.log` record
+subsequent regressions before their corrections. `calm-clock-red.log` reproduces
+18 failed integration assertions; `calm-gui-red.log` reproduces the remaining
+one-code-value pixels before the opaque-mask fix. The 23 VR cases are included in
+the final combined gate. No golden or assertion tolerance was relaxed.
+
+Visual acceptance, all viewed under `out/m25.5/`: `accepted-enter-hyper4.png`,
+`accepted-leave-hyper4.png`, `accepted-enter-t6.png` and `accepted-leave-t6.png`
+cover entry through 9 s and leave through 7 s in 0.25-second samples at 1280x720.
+`accepted-calm.png` covers both directions for both games at 0, 0.15, 0.3, 0.45 and
+0.6 s; each midpoint is checked as exactly black. `accepted-scenes.png` covers T6,
+Hyper4 and forced-VR torus3d, standard/Hyper4 2-D pictures, code, T6 seam hover,
+T6/Hyper4 underside views, torus/Hyper4 shapes and a Hyper4 relayout.
+`accepted-code-close.png` is the 2x code crop. `accepted-lab-off.png` records ten
+byte-identical comparisons against the saved pre-slice captures (`laboff-final.log`).
+Also reviewed `return-repro.png`, `return-exact.png`, `return-sheet-detail.png`
+and `calm-black-red.png`. The capture audit rechecked all 132 handoff frames, all
+four exactly black calm midpoints, and all ten saved lab-off pairs. The current
+build reports no work to do, confirming these captures follow the last source build.
+
+Decisions and deviations:
+
+- The performance investigation above justified light sheets and box streaks; no
+  cells, seams or bridges were removed to meet the budget. Physical bridges retain
+  their smooth tubes. Sampled shape meshes retain the existing M24 light treatment.
+- Calm uses the required short fade instead of the full deploy/code/handshake; at
+  exactly full darkness it uses the opaque wake mask to suppress final-pass dither.
+- The existing `gui-lab-multislab` cases are explicitly pinned with `--vr 0` because
+  they test physical hardware. `gui-neural-vr` covers the new automatic path.
+- No header-only module required a new `.cpp`. Whole-file formatting rewrapped a few
+  existing wake helpers/comments. No authored model file was changed or included.
+- Per the requested sandbox handoff, no staging or commit was performed. The message
+  and repo-relative file manifest are written only after all gates pass.
+
+Performance (the retained light-mesh run, M24.8 method, lavapipe, dev build,
+1280x720, manifold, lab/post/UI-auto on, intensity 1; three warmed 30-frame runs
+in alternating order, `light-mesh-perf.json`):
+
+| Case | Samples, ms/frame | Median, ms/frame |
+|---|---|---:|
+| Standard physical lab | 83.472, 83.041, 84.989 | 83.472 |
+| Hyper4 VR | 48.872, 49.825, 50.125 | 49.825 |
+| T6 VR | 109.121, 110.159, 109.194 | 109.194 |
+
+T6 is **1.308x** standard, below the 1.5x limit (125.208 ms); Hyper4 is below
+M24.8's 102.5 ms target. The measured optimization retains every bridge and tile.
+
+Fresh gates (through the required `g.sh`, seven build jobs, tests/captures serial):
+- Explicit `clang-format --dry-run --Werror` passed for every changed/new C++ file.
+- `tools/precommit.sh` printed **`precommit: OK`**; architecture, 632 unit cases
+  (389,054 assertions), and 14 property cases (1,230,006 assertions) passed.
+- `[render],[app],[view]` passed **772 cases / 18,955,351 assertions**.
+- The serial `ctest -L gui` gate is still in progress.
+
+The first nonterminal precommit run ended with SIGTERM during property tests,
+without an assertion failure; the terminal-session retry completed the same
+unmodified gate. The successful fresh logs are `precommit-retry-2026-11-25.log`
+and `render-app-view-2026-11-25.log`. No message or file manifest has been issued
+while the final GUI gate is pending.
+
+### M25.5 — final gate and handoff complete (2026-11-25)
+
+Resumed the interrupted acceptance above. Read the instructions and prerequisite
+Status entries, reviewed the tracked diff and all new source/test files, and retained
+the implementation. No further production change was needed. The current wrapped
+build reports `ninja: no work to do`; both successful precommit and combined-test logs
+postdate the latest source/test edit.
+
+The completed slice provides rack-capacity selection, weighted stand-in deployment,
+animated neural code and handshake, eyelid entry/return, the lucid horizon, hologram
+boards/pieces/bridges, the front-on 2-D picture, guarded layout glides, and console/CLI
+access described in the acceptance entry above. Reviewed all eight final acceptance
+sheets again: `accepted-enter-hyper4.png`, `accepted-leave-hyper4.png`,
+`accepted-enter-t6.png`, `accepted-leave-t6.png`, `accepted-calm.png`,
+`accepted-scenes.png`, `accepted-code-close.png`, and `accepted-lab-off.png`, all under
+`out/m25.5/`. No new contact sheet was made in this continuation.
+
+All required gates now pass:
+
+- `tools/precommit.sh`: **`precommit: OK`**, retained successful run
+  `precommit-retry-2026-11-25.log`; 632 unit cases / 389,054 assertions and
+  14 property cases / 1,230,006 assertions, plus the architecture gate.
+- `[render],[app],[view]`: **772 cases / 18,955,351 assertions**, retained successful
+  run `render-app-view-2026-11-25.log`, including all 23 VR cases.
+- Fresh serial `ctest -L gui --output-on-failure`: **59/59 passed** in **954.27 s**,
+  including `gui-neural-vr`; `gui-complete-2026-11-25.log`.
+
+The fresh build and GUI gate used the required `g.sh`, with the seven-job build limit
+and no concurrent captures or parallel ctest. The retained performance and artifact
+results above remain applicable: T6 **109.194 ms/frame** (1.308x standard), Hyper4
+**49.825 ms/frame**, ten byte-identical lab-off pairs, and four exactly black calm
+midpoints.
+
+Deviations are unchanged: VR uses top-face light sheets and box-segment bridge streaks
+to meet the measured budget without removing cells, seams or connections; calm full
+darkness uses the opaque wake mask; existing physical multi-slab tests are pinned with
+`--vr 0`. No header-only module needed a new `.cpp`, and no golden or tolerance changed.
+The requested `m25.5.msg` and 30-path `m25.5.files` handoff includes this spec and
+excludes `out/` and `assets/lab/models/`. No staging or commit was performed.

@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # M24.6: every layout deploys with travel, relayouts move the hardware, light bridges and
 # 5D arrivals. Each multi-slab variant in the lab renders, deterministically, and the
-# lab-off frame is the one captures have always made.
+# lab-off frame is the one captures have always made. M25.5: hyper4 and t6 need more
+# slabs than the rack holds and would go to the neural VR; `--vr 0` pins these cases to
+# the physical rig they test (gui-neural-vr covers the VR).
 file(MAKE_DIRECTORY "${OUT_DIR}/lab-multislab")
 set(common --theme manifold --width 480 --height 270)
+set(rig --lab 1 --vr 0)
 function(shot name)
   execute_process(COMMAND "${GUI}" ${common} ${ARGN}
     --shot "${OUT_DIR}/lab-multislab/${name}.ppm"
@@ -22,9 +25,9 @@ foreach(v hyper4 t6 torus3d 5d)
     set(extra --script "${move5d}")
   endif()
   # Mid-deploy and settled are different pictures, and each is reproducible.
-  shot(${v}-deploy ${v} --lab 1 --deploy-t 1.0 ${extra})
-  shot(${v}-deploy-again ${v} --lab 1 --deploy-t 1.0 ${extra})
-  shot(${v}-lab ${v} --lab 1 ${extra})
+  shot(${v}-deploy ${v} ${rig} --deploy-t 1.0 ${extra})
+  shot(${v}-deploy-again ${v} ${rig} --deploy-t 1.0 ${extra})
+  shot(${v}-lab ${v} ${rig} ${extra})
   if(NOT hash_${v}-deploy STREQUAL hash_${v}-deploy-again)
     message(FATAL_ERROR "${v}: two deploy captures at 1.0 s differ")
   endif()
@@ -45,10 +48,10 @@ endforeach()
 # A layout change moves the hardware: mid-move differs from the end, the end is the
 # snapped layout, and it reproduces.
 set(axes "axes file,aeon vertical")
-shot(relayout-0.5 hyper4 --lab 1 --script "${axes}" --relayout-t 0.5)
-shot(relayout-0.5-again hyper4 --lab 1 --script "${axes}" --relayout-t 0.5)
-shot(relayout-9 hyper4 --lab 1 --script "${axes}" --relayout-t 9)
-shot(relayout-snap hyper4 --lab 1 --script "${axes}")
+shot(relayout-0.5 hyper4 ${rig} --script "${axes}" --relayout-t 0.5)
+shot(relayout-0.5-again hyper4 ${rig} --script "${axes}" --relayout-t 0.5)
+shot(relayout-9 hyper4 ${rig} --script "${axes}" --relayout-t 9)
+shot(relayout-snap hyper4 ${rig} --script "${axes}")
 if(NOT hash_relayout-0.5 STREQUAL hash_relayout-0.5-again)
   message(FATAL_ERROR "two relayout captures at 0.5 s differ")
 endif()

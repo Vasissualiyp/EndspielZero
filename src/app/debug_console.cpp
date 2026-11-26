@@ -592,6 +592,8 @@ std::string DebugConsole::help() {
          "on)\n"
          "stretch      min/max cell stretch (u, v), pass-through count and skin blend\n"
          "latch <axis>  flash the seam latch on axis 0 (files) or 1 (ranks)\n"
+         "vr on|off|auto|status  the neural VR: more slabs than the rack's 8 bays go "
+         "into the implant's space; on/off pin it, auto counts again\n"
          "set hudFraming true|false  frame inside the HUD (false restores the full "
          "camera frame)\n"
          "boot                     replay the board's power-on sequence\n"
@@ -634,7 +636,7 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
   if (args[0] == "deploy" || args[0] == "stow" || args[0] == "focus" ||
       args[0] == "rig" || args[0] == "wallfade" || args[0] == "skin" ||
       args[0] == "stretch" || args[0] == "latch" || args[0] == "relayout" ||
-      args[0] == "bridges") {
+      args[0] == "bridges" || args[0] == "vr") {
     std::string result;
     const auto& cmd = args[0];
     if (cmd == "deploy" || cmd == "stow") {
@@ -700,6 +702,19 @@ std::string DebugConsole::run(Shell& shell, std::string_view line) {
       else {
         relayout_ = true;
         result = "relayout";
+      }
+    } else if (cmd == "vr") {
+      if (args.size() == 1 || (args.size() == 2 && args[1] == "status")) {
+        const std::string report = vrReport_ ? vrReport_() : std::string{};
+        result = report.empty() ? "no game in the lab" : report;
+      } else if (args.size() == 2 && (args[1] == "on" || args[1] == "off")) {
+        vrPin_ = args[1] == "on";
+        result = "vr " + args[1];
+      } else if (args.size() == 2 && args[1] == "auto") {
+        vrPin_.reset();
+        result = "vr auto";
+      } else {
+        result = "usage: vr on|off|auto|status";
       }
     } else if (cmd == "wallfade") {
       if (args.size() != 2 || (args[1] != "on" && args[1] != "off"))

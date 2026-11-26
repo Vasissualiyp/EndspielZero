@@ -39,12 +39,14 @@
 #include "render/image_io.hpp"
 #include "render/lab_rig.hpp"
 #include "render/lab_scene.hpp"
+#include "render/neural_vr.hpp"
 #include "render/panel_response.hpp"
 #include "render/window.hpp"
 #include "view/board_boot.hpp"
 #include "view/game_end_fx.hpp"
 #include "view/implant_fx.hpp"
 #include "view/layout.hpp"
+#include "view/neural_vr.hpp"
 #include "view/rig_deploy.hpp"
 #include "view/rig_move.hpp"
 #include "view/wake.hpp"
@@ -639,11 +641,19 @@ float gLatchT = -1.0f;
 int gLatchAxis = 1;
 
 /// A game happens in the lab (M24.5): the lab is on, a game is drawn (or held while it
-/// stows) and nothing else owns the camera.
-bool labGame(const app::Shell& shell, bool hold) {
+/// stows) and nothing else owns the camera. Physical or in the implant's space (M25.5).
+bool labGameAny(const app::Shell& shell, bool hold) {
   return labEnabled(shell) && gStation.empty() && shell.hasGame() &&
          !shell.attracting() && gLabScene->doc().deploy.has_value() &&
          (shell.showsBoard() || hold) && shell.screen() != app::Screen::Editor;
+}
+/// M25.5: the lab game is drawn by the implant this frame - its space, or its 2-D
+/// picture - rather than on the rig.
+bool vrDrawn(const app::Shell& shell);
+bool vrFor(const app::Shell& shell, const render::Ui* ui);
+/// A lab game on the rig: the hardware carries its slabs (M24.5).
+bool labGame(const app::Shell& shell, bool hold) {
+  return labGameAny(shell, hold) && !vrDrawn(shell);
 }
 
 /// --relayout-t <s>: a lab game's layout change (the capture's script made it) pinned at
@@ -822,6 +832,17 @@ float gStowFxShutdown = app::kStowShutdownSeconds;
 void configureRigMoves(render::Ui& ui, const app::Shell& shell) {
   const bool on = labEnabled(shell) && gStation.empty() && shell.hasGame() &&
                   !shell.attracting() && gLabScene->doc().deploy.has_value();
+  // M25.5: a VR game deploys and stows one stand-in slab, and the handoff runs inside the
+  // moves: the deploy's "lock" is the horizon open (the boards boot then), the stow's
+  // lead is the eyes opening on the room and the code fading. No rig is built for the
+  // game.
+  if (on && vrFor(shell, &ui)) {
+    gStowFxShutdown = 0.0f;
+    ui.setRigMoves(
+        true, view::kVrEnterSeconds, view::kVrLeaveSeconds, view::stowTravelSeconds(1),
+        render::Ui::CalmRigTiming{view::kVrEnterCalmSeconds, view::kVrLeaveCalmSeconds});
+    return;
+  }
   const render::RigLayout* layout = on ? rigLayoutFor(shell) : nullptr;
   const int groups = layout ? layout->slots : 1;
   gStowFxShutdown =
@@ -1211,6 +1232,425 @@ std::string rigReport(const app::Shell& shell, const render::Ui& ui) {
         << ") -> (" << b.b.x << ", " << b.b.y << ", " << b.b.z << ")";
   return out.str();
 }
+
+// ---- M25.5 the neural VR --------------------------------------------------------------
+
+/// --vr 0|1: a lab game out of or in the implant's space whatever its slab count (-1:
+/// the count decides, `view::needsVr`). --vr-t pins the entering handoff (a deploy).
+int gVr = -1;
+float gVrT = -1.0f;
+/// The rack's bays as authored (`render::rackBayCount`), read when the lab loads.
+int gRackBays = view::kRackBays;
+/// This frame's presentation intensity, for the blink clocks read before the frame is
+/// assembled.
+float gVrIntensity = 1.0f;
+
+/// How a lab game is drawn this frame.
+enum class VrScene : std::uint8_t {
+  Physical,  ///< on the rig (M24.5), or no lab game at all
+  Room,      ///< a handoff in the room: the stand-in slab and its neural code
+  Space,     ///< the implant's space: the boards as light over the lucid horizon
+  Picture,   ///< 2D: the implant's own front-on picture, no room, no perspective
+};
+
+/// The lab game's place in the neural VR, followed from frame to frame. Pure in explicit
+/// time: every age is `gRigNow` minus a stamp.
+struct VrTrack {
+  std::uint64_t session{0};
+  bool in{false};        ///< in the implant's space (kept for the whole game)
+  double crossAt{-1e9};  ///< the room ran out mid-game, or the console moved it
+  bool crossIn{true};    ///< ... into the space (false: back to the rig)
+  double flatAt{-1e9};   ///< 2D or 3D was chosen
+  bool flatCode{false};  ///< that blink starts with the neural code (from the room)
+  view::VrSwitch flat;
+  view::OrbitCamera beforeFlat;
+  std::optional<bool> lastPin;
+  std::vector<view::Placement> placements;  ///< the layout the light stands in
+  std::vector<view::Placement> moveFrom;    ///< a relayout's start
+  double moveAt{-1e9};
+} gVrTrack;
+
+/// Whether this game belongs in the implant's space: pinned (--vr, console `vr`), or more
+/// slabs than the rack holds. A 5D game asks with its visible boards, so it crosses when
+/// it appends the ninth.
+bool vrWanted(const app::Shell& shell, const render::Ui* ui) {
+  const app::Session* session = shell.session();
+  if (session == nullptr) return false;
+  if (gVr >= 0) return gVr == 1;
+  if (ui != nullptr)
+    if (const auto pin = ui->vrPin()) return *pin;
+  return view::needsVr(session->placements(), gRackBays);
+}
+
+/// The session's VR state, before its first frame has been followed (a deploy is being
+/// configured for it).
+bool vrFor(const app::Shell& shell, const render::Ui* ui) {
+  const app::Session* session = shell.session();
+  if (session == nullptr) return false;
+  if (gVrTrack.session == session->id()) return gVrTrack.in;
+  return vrWanted(shell, ui);
+}
+
+/// Follow the game into and out of the implant's space: a new game starts where it
+/// belongs (its deploy is the handoff); crossing the limit mid-game, or the console's
+/// pin, blinks across; choosing 2D or 3D blinks. Once in, a game stays in.
+void stepVrTrack(app::Shell& shell, render::Ui& ui) {
+  app::Session* session = shell.session();
+  auto& t = gVrTrack;
+  if (session == nullptr) return;
+  if (t.session != session->id()) {
+    // A new game: the console's pin belonged to the last one.
+    if (t.session != 0) ui.clearVrPin();
+    t = VrTrack{};
+    t.session = session->id();
+    t.in = vrWanted(shell, &ui);
+    t.flat.shown = t.flat.target = session->flatView();
+    t.beforeFlat = session->playerCamera();
+    t.lastPin = ui.vrPin();
+    t.placements = session->placements();
+    return;
+  }
+  if (!labGameAny(shell, false)) return;
+  const auto pin = ui.vrPin();
+  const bool pinChanged = pin != t.lastPin;
+  t.lastPin = pin;
+  const bool want = vrWanted(shell, &ui);
+  if (want != t.in && (want || (pinChanged && pin && !*pin))) {
+    t.in = want;
+    t.crossAt = gRigNow;
+    t.crossIn = want;
+  }
+  // UI and keyboard requests set the session once. Roll back that request once while
+  // the eyes close; commit once at full closure. Never reframe twice per drawn frame.
+  if (session->flatView() != t.flat.shown && !t.flat.active(gRigNow, gVrIntensity)) {
+    const bool wanted = session->flatView();
+    if (gCapturing) {
+      t.flat.shown = t.flat.target = wanted;
+    } else {
+      (void)t.flat.request(wanted, !t.in && !t.flat.shown, gRigNow);
+      t.flatAt = gRigNow;
+      t.flatCode = t.flat.codeStep;
+      session->setFlatView(t.flat.shown);
+      session->setOrbitCamera(t.beforeFlat);
+      shell.settings().flatView = t.flat.shown;
+    }
+  }
+  if (t.flat.advance(gRigNow, gVrIntensity)) {
+    session->setFlatView(t.flat.shown);
+    shell.settings().flatView = t.flat.shown;
+    if (t.flat.shown)
+      session->setOrbitCamera(render::vrPictureCamera(
+          view::boundsOf(session->placements()), session->boardAspect()));
+  }
+}
+
+/// Remember the layout before a capture's script runs, so the change it makes glides.
+void primeVrTrack(const app::Shell& shell) {
+  const app::Session* session = shell.session();
+  gVrTrack = VrTrack{};
+  if (session == nullptr) return;
+  gVrTrack.session = session->id();
+  gVrTrack.in = vrWanted(shell, nullptr);
+  gVrTrack.flat.shown = gVrTrack.flat.target = session->flatView();
+  gVrTrack.beforeFlat = session->playerCamera();
+  gVrTrack.placements = session->placements();
+}
+
+float vrCrossAge() {
+  return static_cast<float>(gRigNow - gVrTrack.crossAt);
+}
+float vrFlatAge() {
+  return static_cast<float>(gRigNow - gVrTrack.flatAt);
+}
+
+/// The implant's space is shown (rather than the rig), from the track and the time: a
+/// crossing switches behind closed lids.
+bool vrSpaceShown() {
+  const auto& t = gVrTrack;
+  const float age = vrCrossAge();
+  if (age >= 0.0f && age < view::vrBlinkSwitch(t.crossIn, gVrIntensity)) return !t.in;
+  return t.in;
+}
+
+/// The 2-D picture is shown: the choice switches behind closed lids too.
+bool vrFlatShown(const app::Shell& shell) {
+  (void)shell;
+  return gVrTrack.flat.shown;
+}
+
+bool vrDrawn(const app::Shell& shell) {
+  const app::Session* session = shell.session();
+  if (session == nullptr || gVrTrack.session != session->id()) return false;
+  return vrSpaceShown() || vrFlatShown(shell);
+}
+
+/// All transitions that displace the drawn cells lock input before ImGui sees it.
+/// System/window events still pass, so quit and resize remain responsive.
+bool vrInputLocked(const app::Shell& shell) {
+  if (!labGameAny(shell, false)) return false;
+  const auto& t = gVrTrack;
+  const float cross = vrCrossAge();
+  const float glide = static_cast<float>(gRigNow - t.moveAt);
+  return t.flat.active(gRigNow, gVrIntensity) ||
+         (cross >= 0 && cross < view::vrBlinkSeconds(t.crossIn, gVrIntensity)) ||
+         (t.in && !t.moveFrom.empty() && gVrIntensity >= .5f && glide >= 0 &&
+          glide < view::kVrRelayoutSeconds);
+}
+
+/// This frame of the neural VR.
+struct VrFrame {
+  VrScene scene{VrScene::Physical};
+  view::VrState state;  ///< lids, darkness, code, handshake, the horizon
+  const render::RigLayout* standIn{nullptr};
+  std::vector<view::SlabPose> poses;  ///< the stand-in's (Room)
+  std::optional<render::Ui::RigMove> move;
+  /// The neural code on the rig's own slabs: a crossing or a 2D blink from the room.
+  float physicalCode{0};
+};
+
+/// The stand-in slab's rig: one standard slab (`render::vrStandIn`).
+const render::RigLayout* vrStandInLayout() {
+  static std::optional<render::RigLayout> layout;
+  static const render::LabScene* built = nullptr;
+  if (built != &*gLabScene) {
+    layout = render::rigLayout(*gLabScene, render::vrStandIn());
+    built = &*gLabScene;
+  }
+  return layout ? &*layout : nullptr;
+}
+
+VrScene gVrScene = VrScene::Physical;
+
+/// Decide this frame's picture. Before `rigFrame`; the track is already stepped.
+VrFrame vrFrame(const app::Shell& shell, const render::Ui& ui, bool hold,
+                float intensity) {
+  VrFrame f;
+  gVrScene = VrScene::Physical;
+  if (!labGameAny(shell, hold) || shell.session() == nullptr ||
+      gVrTrack.session != shell.session()->id())
+    return f;
+  const auto& t = gVrTrack;
+  const bool flat = vrFlatShown(shell);
+  if (t.in) {
+    if (const auto m = ui.rigMove(); m && !m->done) f.move = m;
+    if (f.move) f.standIn = vrStandInLayout();
+    if (f.move && f.standIn != nullptr && f.move->move == app::ScreenMove::Deploy) {
+      f.state = view::vrEnter(f.move->age, intensity);
+      if (f.state.room)
+        f.poses = render::rigPoses(*f.standIn, render::RigPhase::Deploy,
+                                   std::max(0.0f, f.state.slabAge), intensity);
+    } else if (f.move && f.standIn != nullptr) {
+      const float lead = f.move->shutdown;
+      if (f.move->age < lead || intensity < .5f) {
+        f.state = view::vrLeave(f.move->age, intensity);
+        if (f.state.room)
+          f.poses = render::rigPoses(*f.standIn, render::RigPhase::Rest, 0, intensity);
+      } else {
+        f.state = view::vrLeave(view::kVrLeaveSeconds, intensity);
+        f.poses = render::rigPoses(*f.standIn, render::RigPhase::Stow, f.move->age - lead,
+                                   intensity);
+      }
+    } else {
+      f.move.reset();
+      f.state = view::vrEnter(view::kVrEnterSeconds, intensity);
+    }
+    f.scene = f.state.room && f.standIn != nullptr ? VrScene::Room : VrScene::Space;
+  }
+  // A crossing mid-game: the rig's slabs show the code, the eyes close, the picture
+  // switches, they open (`view::vrBlink`).
+  if (!f.move) {
+    const float cross = vrCrossAge();
+    if (cross >= 0.0f && cross < view::vrBlinkSeconds(t.crossIn, intensity)) {
+      const auto blink = view::vrBlink(cross, t.crossIn, intensity);
+      f.state.lidOpen = blink.lidOpen;
+      f.state.dark = blink.dark;
+      f.scene = vrSpaceShown() ? VrScene::Space : VrScene::Physical;
+      if (f.scene == VrScene::Physical) f.physicalCode = blink.code;
+    }
+    const float flatAge = vrFlatAge();
+    if (flatAge >= 0.0f && flatAge < view::vrBlinkSeconds(t.flatCode, intensity)) {
+      const auto blink = view::vrBlink(flatAge, t.flatCode, intensity);
+      f.state.lidOpen = std::min(f.state.lidOpen, blink.lidOpen);
+      f.state.dark = std::max(f.state.dark, blink.dark);
+      if (f.scene == VrScene::Physical && !flat) f.physicalCode = blink.code;
+    }
+  }
+  if (flat && f.scene != VrScene::Room) f.scene = VrScene::Picture;
+  gVrScene = f.scene;
+  return f;
+}
+
+/// The stand-in's game camera: the standard board framed, from the session's angle.
+view::OrbitCamera vrStandInCamera(const view::OrbitCamera& session, float aspect) {
+  view::OrbitCamera cam =
+      view::OrbitCamera::frame(view::boundsOf(render::vrStandIn()), aspect, 1.4f);
+  cam.fovY = session.fovY;
+  return cam;
+}
+
+/// A handoff in the room (M25.5): the lab around the stand-in slab, which deploys (or
+/// stows) exactly as a standard game's and shows the neural code; no board of the game is
+/// in the room. Returns the light block.
+render::GpuLightBlock drawVrRoom(const VrFrame& vr, const app::Shell& shell,
+                                 render::Ui& ui, const render::BoardRenderer& renderer,
+                                 render::InstanceSet& instances,
+                                 view::OrbitCamera& camera, float aspect,
+                                 float intensity) {
+  const auto& layout = *vr.standIn;
+  const view::OrbitCamera game = vrStandInCamera(camera, aspect);
+  camera = game;
+  if (vr.move && intensity >= .5f) {
+    const auto& m = *vr.move;
+    const bool deploy = m.move == app::ScreenMove::Deploy;
+    if (const auto station =
+            gLabScene->station(stationFor(deploy ? m.from : app::Screen::MainMenu))) {
+      render::RigFlight f;
+      f.deploy = deploy;
+      f.age = m.age;
+      f.lock = deploy ? view::kVrSlabLock : m.lock;
+      f.shutdown = deploy ? 0.0f : m.shutdown;
+      camera = render::rigFlightCamera(layout, vr.poses, f, game,
+                                       render::toBoardCamera(*station, layout.xform));
+    }
+  }
+  render::LabDraw draw;
+  draw.xform = &layout.xform;
+  draw.hidden = [&](const io::LabPart& p) {
+    return render::hiddenInGame(p, layout, vr.poses);
+  };
+  const view::Vec3 eye = camera.eye(), target = camera.target;
+  if (ui.wallFade())
+    draw.fade = [&](const io::LabPart& p, const view::Bounds& b) {
+      return render::labPartFade(p, b, eye, target, layout);
+    };
+  gLabScene->appendTo(instances, renderer.theme(), {}, {}, draw);
+  (void)render::appendRig(instances, *gLabScene, layout, vr.poses);
+  (void)render::appendNeuralCode(instances, layout, vr.poses, vr.state.code,
+                                 static_cast<float>(gRigNow), renderer.theme());
+  const auto projected =
+      appendProjector(ui, shell.settings(), instances, renderer.theme());
+  render::placeInstances(instances.holo, layout.xform);
+  render::placeInstances(instances.holoTokens, layout.xform);
+  render::placeInstances(instances.holoBeam, layout.xform);
+  float focus = render::kFocusLevel;
+  if (vr.move && vr.move->move == app::ScreenMove::Deploy)
+    focus = render::deployFocus(vr.move->age, view::kVrSlabLock, view::kVrSlabLock + 1.0f,
+                                intensity);
+  else if (vr.move)
+    focus = render::stowFocus(vr.move->age, vr.move->shutdown, vr.move->lock,
+                              vr.move->total, intensity);
+  if (const auto pin = ui.focusPin()) focus = *pin;
+  if (gFocus >= 0) focus = gFocus;
+  return render::labLightBlock(
+      gLabScene->doc(), *gLabScene,
+      gRoomLightOverride >= 0 ? gRoomLightOverride : shell.settings().roomLight,
+      render::kLabKey, "projector", .5f + .5f * projected[0], renderer.theme(),
+      .5f + .5f * projected[1], focus, &layout.xform);
+}
+
+/// The implant's space (M25.5): the boards are light (`BoardOptions::vrLight`), laid out
+/// by the current view, gliding through a relayout; light bridges are streaks across the
+/// space; the lucid horizon lies under them. No rig hardware is built or drawn. The 2-D
+/// picture is the same light, front on, with no horizon.
+void drawVrSpace(const VrFrame& vr, const app::Shell& shell, const render::Ui& ui,
+                 render::BoardRenderer& renderer, render::InstanceSet& instances,
+                 float intensity) {
+  const app::Session& session = *shell.session();
+  auto& t = gVrTrack;
+  const auto& now = session.placements();
+  if (!samePlacements(t.placements, now)) {
+    if (!t.placements.empty()) {
+      t.moveFrom = t.moveFrom.empty()
+                       ? t.placements
+                       : view::vrRelayoutPlacements(
+                             t.moveFrom, t.placements,
+                             static_cast<float>(gRigNow - t.moveAt), intensity);
+      t.moveAt = gRigNow;
+    }
+    t.placements = now;
+  }
+  // A capture states the glide's age (--relayout-t) or snaps, as the rig's relayout does.
+  const float age = !gCapturing          ? static_cast<float>(gRigNow - t.moveAt)
+                    : gRelayoutT >= 0.0f ? gRelayoutT
+                                         : view::kVrRelayoutSeconds;
+  if (!t.moveFrom.empty() && age >= 0.0f && age < view::kVrRelayoutSeconds) {
+    const std::size_t cells = session.snapshot().cellCount();
+    std::vector<view::Vec3> offset(cells);
+    const auto drawn = view::vrRelayoutPlacements(t.moveFrom, now, age, intensity);
+    for (std::size_t k = 0; k < now.size(); ++k)
+      if (now[k].cell < cells)
+        offset[now[k].cell] = {drawn[k].x - now[k].x, drawn[k].y - now[k].y,
+                               drawn[k].z - now[k].z};
+    render::carryVr(instances, now, offset);
+  }
+  render::BoardOptions o = renderer.options();
+  o.labMode = false;
+  const bool picture = vr.scene == VrScene::Picture;
+  o.lucidHorizon = picture ? 0.0f : std::max(vr.state.horizon, 1e-3f);
+  const view::Bounds b = view::boundsOf(now);
+  o.lucidFloorZ = b.minZ - 6.0f;
+  renderer.setOptions(o);
+  if (picture || !ui.bridges()) return;
+  float power = 1;
+  if (!instances.cellFx.empty()) {
+    power = 0;
+    for (std::size_t c = 1; c < instances.cellFx.size(); ++c)
+      power += instances.cellFx[c].power * instances.cellFx[c].flicker;
+    power /= static_cast<float>(instances.cellFx.size() - 1);
+  }
+  // Rebuild from the drawn placements so endpoints ride their moving boards.
+  if (!t.moveFrom.empty() && age >= 0 && age < view::kVrRelayoutSeconds) {
+    const auto drawn = view::vrRelayoutPlacements(t.moveFrom, now, age, intensity);
+    const auto bridges = view::lightBridges(session.variant(), session.viewConfig(),
+                                            drawn, renderer.theme());
+    (void)render::appendVrBridges(instances, bridges, power);
+  } else {
+    (void)render::appendVrBridges(instances, session.lightBridges(), power);
+  }
+}
+
+/// The eyelids and the darkness of a handoff or a blink, through the wake's post pass
+/// (M24.7's lids); the launch's own wake wins while it runs.
+void applyVrLids(render::BoardRenderer& renderer, const VrFrame& vr,
+                 const WakeFrame& wake) {
+  if (wake.postActive) return;
+  const auto& s = vr.state;
+  if (s.lidOpen >= 1.0f && s.dark <= 0.0f) return;
+  // Exposure alone leaves the post dither's one-code-value specks. At full darkness
+  // use the wake's opaque mask; all other calm frames keep their lids fully open.
+  const view::WakeState lids = view::eyelids(s.dark >= 1.0f ? 0.0f : s.lidOpen);
+  const float ev = s.dark >= 1.0f ? -24.0f : std::log2(std::max(1e-6f, 1.0f - s.dark));
+  renderer.setWake(render::PostWake{lids.topEdge, lids.bottomEdge, lids.curve,
+                                    lids.feather, 0.0f, ev, 1.0f, 0.0f});
+}
+
+/// The implant's handshake answering the neural code (M24.7's, played by the handoff).
+WakeFrame vrWake(const VrFrame& vr, const WakeFrame& wake) {
+  WakeFrame out = wake;
+  if (!wake.postActive && vr.state.handshake >= 0.0f) {
+    out.handshake = vr.state.handshake;
+    out.menuFade = 1.0f;
+  }
+  if (!wake.postActive) out.menuFade *= (1.0f - vr.state.dark) * vr.state.lidOpen;
+  return out;
+}
+
+/// The console's `vr status`.
+std::string vrReport(const app::Shell& shell) {
+  const app::Session* session = shell.session();
+  if (!labEnabled(shell) || session == nullptr || !shell.hasGame()) return {};
+  const int slabs = view::deployedSlabCount(session->placements());
+  std::ostringstream out;
+  const char* scene = gVrScene == VrScene::Room      ? "handoff in the room"
+                      : gVrScene == VrScene::Space   ? "in the implant's space"
+                      : gVrScene == VrScene::Picture ? "the implant's 2-D picture"
+                                                     : "physical (on the rig)";
+  out << "vr: " << scene << ", " << slabs << " slab(s) "
+      << (slabs > gRackBays ? ">" : "<=") << " " << gRackBays << " bay(s)"
+      << (gVrTrack.in ? ", in VR" : ", in the room");
+  if (gVr >= 0) out << ", pinned by --vr " << gVr;
+  return out.str();
+}
 #endif
 
 float gIntensity = -1.0f;  ///< --presentation: presentation intensity for this run
@@ -1339,6 +1779,11 @@ render::BoardFxState captureFx(const render::BoardRenderer& renderer,
       fx.bootAge = deployBootAge(gDeployT, renderer.options().presentationIntensity < .5f
                                                ? 0.0f
                                                : layout->lastLock);
+  // M25.5: the boards boot as the lucid horizon opens.
+  if (gDeployT >= 0.0f && labGameAny(shell, false) && vrDrawn(shell))
+    fx.bootAge = deployBootAge(gDeployT, renderer.options().presentationIntensity < .5f
+                                             ? 0.0f
+                                             : view::kVrEnterSeconds);
   applySlabBoot(fx, shell, renderer.options().presentationIntensity);
 #endif
   if (gCheckT >= 0.0f) {
@@ -1397,6 +1842,9 @@ bool loadLab(render::BoardRenderer& renderer) {
   try {
     lab->setFileRanges(renderer.addLabMeshes(lab->fileMeshes()));
     gLabScene = std::move(*lab);
+#ifdef CB_HAVE_IMGUI
+    gRackBays = render::rackBayCount(gLabScene->doc());
+#endif
   } catch (const std::exception& e) {
     std::fprintf(stderr, "lab disabled: %s\n", e.what());
     return gStation.empty();
@@ -1645,6 +2093,12 @@ render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight = -1)
   if (o.surface && labGame(shell, true) && stackedShapeView(shell) &&
       s.geometryFormed > 1e-4f)
     o.stackedLight = render::kStackedLightOpacity;
+  // M25.5: drawn by the implant - its space or its 2-D picture - the boards are light.
+  if (labGameAny(shell, true) && vrDrawn(shell)) {
+    o.vrLight = true;
+    if (o.surface && stackedShapeView(shell) && s.geometryFormed > 1e-4f)
+      o.stackedLight = render::kStackedLightOpacity;
+  }
 #else
   (void)shell;
 #endif
@@ -1839,6 +2293,11 @@ bool applyStage(app::Session& session, const render::UiRequest& request,
 void frameBoard(app::Shell& shell) {
   app::Session* session = shell.session();
   if (session == nullptr) return;
+  if (labEnabled(shell) && session->flatView()) {
+    session->setOrbitCamera(render::vrPictureCamera(view::boundsOf(session->placements()),
+                                                    session->boardAspect()));
+    return;
+  }
   // Under a rig form gate (M25.3) the camera still frames the shape the game is in.
   app::Settings& s = shell.settings();
   const float drawn = s.geometryFormed;
@@ -1990,6 +2449,9 @@ int captureFrame(const std::string& variantName, const std::string& path,
   gCapturing = true;
   if (shell->session() != nullptr) {
     primeRigTrack(*shell);
+#ifdef CB_HAVE_IMGUI
+    primeVrTrack(*shell);
+#endif
     shell->session()->setLightBridges(gLab == 1);
   }
   if (!playing && !script.empty()) {
@@ -2298,7 +2760,12 @@ int captureFrame(const std::string& variantName, const std::string& path,
     const bool hold = holdsBoard(*shell, **ui);
     const float intensity = renderer->options().presentationIntensity;
     gRigNow = visualOrigin + sample.seconds;
-    shell->session()->setLightBridges(labGame(*shell, hold) && (*ui)->bridges());
+    // M25.5: the neural VR decides which picture this is before anything is built.
+    gVrIntensity = intensity;
+    stepVrTrack(*shell, **ui);
+    const VrFrame vr = vrFrame(*shell, **ui, hold, intensity);
+    shell->session()->setLightBridges(
+        (labGame(*shell, hold) || vr.scene == VrScene::Space) && (*ui)->bridges());
     // M25.3: the shape stays flat while any slab is off its clamp.
     const FormGate formGate(shell->settings(),
                             rigFormGate(*shell, **ui, hold, intensity));
@@ -2377,7 +2844,26 @@ int captureFrame(const std::string& variantName, const std::string& path,
       gameLights =
           drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
       camera = camera.withNearClip(labOptions.nearClip);
+      if (vr.physicalCode > 0.0f)
+        (void)render::appendNeuralCode(instances, *rig.layout, rig.poses, vr.physicalCode,
+                                       static_cast<float>(gRigNow), renderer->theme());
     }
+    // M25.5: the handoff's room (the stand-in slab, no board of the game), or the
+    // implant's space and picture (the boards as light).
+    if (!room && vr.scene == VrScene::Room) {
+      instances = render::InstanceSet{};
+      labOptions.labMode = true;
+      renderer->setOptions(labOptions);
+      const float aspect = frame.valid() ? frame.width / frame.height
+                                         : static_cast<float>(target->width()) /
+                                               static_cast<float>(target->height());
+      gameLights =
+          drawVrRoom(vr, *shell, **ui, *renderer, instances, camera, aspect, intensity);
+      camera = camera.withNearClip(labOptions.nearClip);
+    } else if (!room && (vr.scene == VrScene::Space || vr.scene == VrScene::Picture)) {
+      drawVrSpace(vr, *shell, **ui, *renderer, instances, intensity);
+    }
+    applyVrLids(*renderer, vr, wake);
     if (room) {
 #ifdef CB_HAVE_IMGUI
       gLabScene->appendTo(
@@ -2406,7 +2892,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
           target->height(), renderer->options().presentationIntensity);
       setImplantFrame(*renderer, **ui, *shell, implantActive,
                       visualOrigin + sample.seconds, target->height(), true, living,
-                      wake);
+                      vrWake(vr, wake));
     }
 #endif
     renderer->setLights(room ? render::labLightBlock(
@@ -2907,6 +3393,9 @@ int main(int argc, char** argv) {
           "stow (live game to menu), with --lab 1; --focus 0..1 pins the room focus.\n"
           "--relayout-t SECONDS pins the layout change a --script makes (axes ...) in a\n"
           "lab game: the gantry carrying the slabs (M24.6), with --lab 1.\n"
+          "--vr 0|1 keeps a lab game on the rig or starts it in the implant's space\n"
+          "(M25.5; default: more slabs than the rack's 8 bays go to VR); --vr-t SECONDS\n"
+          "pins the entering handoff (a VR deploy); --stow-t pins the leaving one.\n"
           "--implant 0|1 toggles the neural lab interface; --wake 0|1 and --wake-t "
           "SECONDS "
           "(--handshake-t SECONDS) play or pin the launch waking-up sequence; --panel-t "
@@ -3001,6 +3490,26 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "--bloom requires a scale from 0 to 4\n");
         return 1;
       }
+    } else if (arg == "--vr") {
+      const std::string value = i + 1 < argc ? argv[++i] : "";
+      if (value != "0" && value != "1") {
+        std::fprintf(stderr, "--vr requires 0 or 1\n");
+        return 1;
+      }
+#ifdef CB_HAVE_IMGUI
+      gVr = value == "1" ? 1 : 0;
+#endif
+    } else if (arg == "--vr-t") {
+      char* end = nullptr;
+      const char* value = i + 1 < argc ? argv[++i] : "";
+      const float v = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(v) || v < 0) {
+        std::fprintf(stderr, "--vr-t requires finite seconds\n");
+        return 1;
+      }
+#ifdef CB_HAVE_IMGUI
+      gVrT = v;
+#endif
     } else if (arg == "--skin" || arg == "--latch-axis") {
       const std::string value = i + 1 < argc ? argv[++i] : "";
       if (value != "0" && value != "1") {
@@ -3274,6 +3783,21 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "--relayout-t requires --lab 1\n");
     return 1;
   }
+#ifdef CB_HAVE_IMGUI
+  // M25.5: --vr-t pins the entering handoff - a VR game's deploy - at that age.
+  if (gVrT >= 0) {
+    if (gDeployT >= 0 || gStowT >= 0) {
+      std::fprintf(stderr, "--vr-t is exclusive with --deploy-t and --stow-t\n");
+      return 1;
+    }
+    gDeployT = gVrT;
+    if (gVr < 0) gVr = 1;
+  }
+  if ((gVr >= 0 || gVrT >= 0) && gLab != 1) {
+    std::fprintf(stderr, "--vr and --vr-t require --lab 1\n");
+    return 1;
+  }
+#endif
   if ((gDeployT >= 0 || gStowT >= 0) && gLab != 1) {
     std::fprintf(stderr, "--deploy-t and --stow-t require --lab 1\n");
     return 1;
@@ -3422,6 +3946,7 @@ int main(int argc, char** argv) {
 #ifdef CB_HAVE_IMGUI
   (*ui)->setRigReport([&] { return rigReport(*shell, **ui); });
   (*ui)->setSkinReport([&] { return skinReport(*shell); });
+  (*ui)->setVrReport([&] { return vrReport(*shell); });
 #endif
   // Hover aids (M20): events only mark the pointer dirty; the cell is resolved once per
   // frame, because the shape view's pick builds a whole surface.
@@ -3452,6 +3977,10 @@ int main(int argc, char** argv) {
   };
 
   while (running && !shell->quitRequested()) {
+#ifdef CB_HAVE_IMGUI
+    if (shell->session() != nullptr && !gVrTrack.flat.active(gRigNow, gVrIntensity))
+      gVrTrack.beforeFlat = shell->session()->playerCamera();
+#endif
     SDL_Event e;
     // A board game has nothing to animate most of the time, so the loop waits for
     // input rather than spinning. While a piece is actually moving it wants frames, so
@@ -3485,6 +4014,25 @@ int main(int argc, char** argv) {
         }
       }
 #ifdef CB_HAVE_IMGUI
+      if (vrInputLocked(*shell) &&
+          (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP ||
+           e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+           e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_WHEEL ||
+           e.type == SDL_EVENT_TEXT_INPUT)) {
+        if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+          // Match the rig: the first press completes the move and is consumed.
+          gVrTrack.flat.skip(gRigNow, gVrIntensity);
+          gVrTrack.crossAt = gVrTrack.moveAt = -1e9;
+          ImGui::GetIO().ClearInputKeys();
+          for (int button = 0; button < 5; ++button)
+            ImGui::GetIO().AddMouseButtonEvent(button, false);
+        }
+        // A button which initiated the transition must not remain held in ImGui.
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_UP)
+          for (int button = 0; button < 5; ++button)
+            ImGui::GetIO().AddMouseButtonEvent(button, false);
+        continue;
+      }
       const bool consumed = (*ui)->processEvent(e);
 #else
       const bool consumed = false;
@@ -3837,7 +4385,8 @@ int main(int argc, char** argv) {
       const bool inGameNow = shell->screen() == app::Screen::Game;
       const bool dragging = orbiting || panning || sliding;
       CellId cell = kInvalidCell;
-      if (inGameNow && hoverOver && !dragging && !shell->attracting()) {
+      if (inGameNow && hoverOver && !dragging && !shell->attracting() &&
+          !vrInputLocked(*shell)) {
         cell = hoverPick(hoverX, hoverY);
       }
       shell->session()->setHover(cell, (SDL_GetModState() & SDL_KMOD_CTRL) != 0);
@@ -4182,6 +4731,11 @@ int main(int argc, char** argv) {
     // M25.3: the shape stays flat while any slab is off its clamp; a closing seam then
     // latches as it forms on the locked slab.
     gRigNow = visualSeconds;
+    // M25.5: the neural VR decides which picture this is before anything is built.
+    gVrIntensity = renderer->options().presentationIntensity;
+    stepVrTrack(*shell, **ui);
+    const VrFrame vr = vrFrame(*shell, **ui, holdsBoard(*shell, **ui),
+                               renderer->options().presentationIntensity);
     const FormGate formGate(shell->settings(),
                             rigFormGate(*shell, **ui, holdsBoard(*shell, **ui),
                                         renderer->options().presentationIntensity));
@@ -4214,7 +4768,12 @@ int main(int argc, char** argv) {
     const float intensity = renderer->options().presentationIntensity;
     gRigNow = visualSeconds;
     if (shell->session() != nullptr) {
+#ifdef CB_HAVE_IMGUI
+      shell->session()->setLightBridges(
+          (labGame(*shell, hold) || vr.scene == VrScene::Space) && (*ui)->bridges());
+#else
       shell->session()->setLightBridges(labGame(*shell, hold) && (*ui)->bridges());
+#endif
       // The console's `relayout` replays the last layout change from now.
       if ((*ui)->takeRelayout() && gRigTrack.move) {
         gRigTrack.start = visualSeconds;
@@ -4310,7 +4869,29 @@ int main(int argc, char** argv) {
       gameLights =
           drawLabGame(rig, *shell, **ui, *renderer, instances, camera, intensity);
       camera = camera.withNearClip(labOptions.nearClip);
+#ifdef CB_HAVE_IMGUI
+      if (vr.physicalCode > 0.0f)
+        (void)render::appendNeuralCode(instances, *rig.layout, rig.poses, vr.physicalCode,
+                                       static_cast<float>(gRigNow), renderer->theme());
+#endif
     }
+#ifdef CB_HAVE_IMGUI
+    // M25.5: the handoff's room (the stand-in slab), or the implant's space and picture.
+    if (!room && vr.scene == VrScene::Room) {
+      instances = render::InstanceSet{};
+      labOptions.labMode = true;
+      renderer->setOptions(labOptions);
+      const float aspect = boardRect.valid() ? boardRect.width / boardRect.height
+                                             : static_cast<float>(window->width()) /
+                                                   static_cast<float>(window->height());
+      gameLights =
+          drawVrRoom(vr, *shell, **ui, *renderer, instances, camera, aspect, intensity);
+      camera = camera.withNearClip(labOptions.nearClip);
+    } else if (!room && (vr.scene == VrScene::Space || vr.scene == VrScene::Picture)) {
+      drawVrSpace(vr, *shell, **ui, *renderer, instances, intensity);
+    }
+    applyVrLids(*renderer, vr, wake);
+#endif
     if (room) {
 #ifdef CB_HAVE_IMGUI
       gLabScene->appendTo(
@@ -4367,7 +4948,7 @@ int main(int argc, char** argv) {
           stepLiving(**ui, *shell, camera, false, visualSeconds, dt, window->width(),
                      window->height(), renderer->options().presentationIntensity);
       setImplantFrame(*renderer, **ui, *shell, implantActive, visualSeconds,
-                      window->height(), false, living, wake);
+                      window->height(), false, living, vrWake(vr, wake));
     }
 #endif
     auto frame = window->beginFrame();
