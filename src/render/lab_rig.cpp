@@ -190,7 +190,7 @@ std::optional<RigLayout> build(const LabScene& lab,
   }
 
   // Departures: a column of carriages (one bridge) leaves together, nearest the
-  // magazine first, the slots spread over at most 1.2 s (M24.6).
+  // magazine first, the slots spread over at most 0.5 s (M24.6).
   const auto departures =
       view::departureOrder(out.groups, partCentre(lab, x, bayName(lab, 0)));
   out.groupSlot = departures.slot;
@@ -247,6 +247,7 @@ std::optional<RigLayout> build(const LabScene& lab,
       path.departure =
           view::kDeployFirstDeparture + step * static_cast<float>(out.groupSlot[g]);
       path.parkCarriage = park;
+      path.labScale = x.labScale;
     }
   }
   return out;
@@ -607,6 +608,39 @@ bool hiddenInGame(const io::LabPart& part, const RigLayout& layout,
   return false;
 }
 
+namespace {
+// A changed layout can ask the rack to reach farther than any default game. Calibrate
+// once when the move is created, with headroom for 60 Hz sampling and the causal swing.
+float rackTimeScale(view::SlabPathSpec path) {
+  path.departure = 0;
+  double scale = 1;
+  const double metre = static_cast<double>(kCellsPerMetre * path.labScale);
+  for (bool reverse : {false, true}) {
+    path.reversed = reverse;
+    auto last = view::slabDeploy(path, -1.f / 240, 1).centre;
+    std::array<double, 3> velocity{};
+    for (int i = 0; i <= static_cast<int>((view::kSlabLockSeconds + .1f) * 240); ++i) {
+      const auto p = view::slabDeploy(path, static_cast<float>(i) / 240, 1).centre;
+      const std::array<double, 3> v{
+          (static_cast<double>(p.x) - static_cast<double>(last.x)) * 240 / metre,
+          (static_cast<double>(p.y) - static_cast<double>(last.y)) * 240 / metre,
+          (static_cast<double>(p.z) - static_cast<double>(last.z)) * 240 / metre};
+      double speed2 = 0, acceleration2 = 0;
+      for (std::size_t k = 0; k < 3; ++k) {
+        speed2 += v[k] * v[k];
+        const double a = (v[k] - velocity[k]) * 240;
+        acceleration2 += a * a;
+      }
+      scale = std::max({scale, std::sqrt(speed2) / .75, std::abs(v[2]) / .45,
+                        std::sqrt(std::sqrt(acceleration2) / 1.3)});
+      last = p;
+      velocity = v;
+    }
+  }
+  return static_cast<float>(scale);
+}
+}  // namespace
+
 Relayout relayoutOf(const LabScene& lab, const RigLayout& from,
                     const std::vector<view::Placement>& fromPlacements,
                     const RigLayout& to,
@@ -638,6 +672,13 @@ Relayout relayoutOf(const LabScene& lab, const RigLayout& from,
     spec.lift = 0.08f * kCellsPerMetre;
     out.seconds = std::max(out.seconds, view::relayoutSeconds(spec));
   }
+  for (int i : out.arrivals)
+    out.timeScale =
+        std::max(out.timeScale, rackTimeScale(to.paths[static_cast<std::size_t>(i)]));
+  for (int i : out.leaving)
+    out.timeScale =
+        std::max(out.timeScale, rackTimeScale(from.paths[static_cast<std::size_t>(i)]));
+  out.seconds *= out.timeScale;
   return out;
 }
 
@@ -647,9 +688,10 @@ RelayoutFrame relayoutFrame(const LabScene& lab, const Relayout& move,
   RelayoutFrame f;
   const bool calm = intensity < .5f;
   // M25.3: nothing moves while the shape unforms; the slabs then move from age 0.
-  const float age = std::max(0.0f, sinceStart - move.lead);
+  const float elapsed = std::max(0.0f, sinceStart - move.lead);
+  const float age = elapsed / move.timeScale;
   const bool holding = !calm && sinceStart < move.lead;
-  f.done = calm || age >= move.seconds;
+  f.done = calm || elapsed >= move.seconds;
   const float ease = calm ? 1.0f : view::rigEase(age / kLabScaleEaseSeconds);
   const auto xform = easeXform(move.from.xform, move.to.xform, ease);
   auto live = build(lab, toPlacements, &xform, &move.to.groups);
@@ -775,6 +817,7 @@ std::optional<float> relayoutBootAge(const Relayout& move, float age,
     for (const int a : move.arrivals)
       lock = std::max(lock, move.to.paths[static_cast<std::size_t>(a)].departure +
                                 view::kSlabLockSeconds);
+  lock *= move.timeScale;
   if (age < lock) return 0.0f;
   if (age - lock >= view::kBootSeconds) return std::nullopt;
   return age - lock;

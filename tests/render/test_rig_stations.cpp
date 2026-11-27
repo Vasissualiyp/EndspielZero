@@ -288,4 +288,75 @@ TEST_CASE("Ui calm VR handoff keeps both halves of its clock and the leaving boa
   }
   CHECK(ctx->takeValidationMessages().empty());
 }
+TEST_CASE("the neural HUD advertises rig skip from the first frame (M25.3b)",
+          "[render][rig][gantryhint]") {
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct Sdl {
+    ~Sdl() { SDL_Quit(); }
+  } sdl;
+  auto* window = SDL_CreateWindow("gantry hint", 960, 540, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct Window {
+    SDL_Window* w;
+    ~Window() { SDL_DestroyWindow(w); }
+  } win{window};
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx);
+  {
+    auto ui = Ui::create(*ctx, window, view::implantTheme(view::Theme::manifold()));
+    REQUIRE(ui);
+    auto shell = app::Shell::create({"standard"}, {});
+    REQUIRE(shell);
+    shell->dismissWelcome();
+    shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+      return test::loadVariant(name);
+    });
+    REQUIRE(shell->startGame("standard"));
+    (*ui)->setImplantActive(true);
+    (*ui)->setHudFx(0, 0, 0);
+    (*ui)->setRigMoves(true, view::deployLastLock(1), 1, view::stowTravelSeconds(1));
+    const auto frame = [&] {
+      (*ui)->tick(0);
+      (*ui)->newFrame();
+      (void)(*ui)->build(*shell, 60);
+      (*ui)->endFrame();
+    };
+    frame();
+    for (bool entering : {true, false}) {
+      shell->previewTransition(entering ? app::Screen::MainMenu : app::Screen::Game,
+                               entering ? app::Screen::Game : app::Screen::MainMenu);
+      for (float age : {0.f, .05f, .25f, 2.f}) {
+        CAPTURE(entering, age);
+        (*ui)->pinTransitionAge(age);
+        frame();
+        auto* hint = ImGui::FindWindowByName("##rig-hint");
+        REQUIRE(hint);
+        CHECK(hint->LastFrameActive == ImGui::GetFrameCount());
+        CHECK_FALSE(hint->DrawList->VtxBuffer.empty());
+        CHECK(
+            std::any_of((*ui)->implantRecords().begin(), (*ui)->implantRecords().end(),
+                        [&](const auto& r) { return r.seed == hint->ID && r.settled; }));
+        // The implant chooses the strongest transition record at each glyph. An
+        // invisible booting HUD overlapping this hint must not erase its settled text.
+        for (const auto& r : (*ui)->implantRecords()) {
+          if (r.seed == hint->ID) continue;
+          CAPTURE(r.seed, r.rect, r.age, r.leaving);
+          CHECK_FALSE((hint->Pos.x + hint->Size.x >= r.rect[0] - 24 &&
+                       hint->Pos.x <= r.rect[2] + 24 &&
+                       hint->Pos.y + hint->Size.y >= r.rect[1] - 24 &&
+                       hint->Pos.y <= r.rect[3] + 24));
+        }
+      }
+      (*ui)->pinTransitionAge(std::nullopt);
+      (*ui)->skipTransition();
+      frame();
+      CHECK((*ui)->rigMove()->done);
+      auto* hint = ImGui::FindWindowByName("##rig-hint");
+      REQUIRE(hint);
+      CHECK(hint->LastFrameActive != ImGui::GetFrameCount());
+    }
+  }
+  CHECK(ctx->takeValidationMessages().empty());
+}
 #endif

@@ -2110,6 +2110,45 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   // The departing menu first, so the arriving one is drawn over it.
   drawGhost(shell);
 
+  // The longer physical move is skippable from its first frame. Use the HUD's
+  // hint font and implant inventory, independent of the board's boot/dissolve alpha.
+  const auto drawRigHint = [&] {
+    if (implantActive_ && !cinema_ && intensity_ >= .5f && enter_ < 1 &&
+        (move_ == app::ScreenMove::Deploy || move_ == app::ScreenMove::Stow) &&
+        !rigCalmTiming_) {
+      const auto* vp = ImGui::GetMainViewport();
+      float bottom = vp->WorkPos.y + vp->WorkSize.y - px(16);
+      // Invisible forming/dissolving HUD records still affect the composite. Keep
+      // this settled hint outside their 24-pixel expansion, using this frame's dock.
+      if (const auto* dock = ImGui::FindWindowByName("##controls");
+          dock && dock->LastFrameActive == ImGui::GetFrameCount() && !dock->Hidden)
+        bottom = dock->Pos.y - px(28);
+      // The right-side departing menu can still dissolve across this height.
+      // Keep the entire hint clear of that record, not only its centre.
+      ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + px(16), bottom), ImGuiCond_Always,
+                              ImVec2(0, 1));
+      auto* hintFont = static_cast<ImFont*>(fontLabel_);
+      const auto hintSize = hintFont->CalcTextSizeA(hintFont->FontSize, FLT_MAX, 0,
+                                                    "any key or click to skip");
+      const auto padding = ImGui::GetStyle().WindowPadding;
+      ImGui::SetNextWindowSize(
+          ImVec2(hintSize.x + 2 * padding.x, hintSize.y + 2 * padding.y));
+      ImGui::Begin("##rig-hint", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
+                       ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings);
+      ImGui::PushFont(static_cast<ImFont*>(fontLabel_));
+      ImGui::PushStyleColor(ImGuiCol_Text, col(theme_.boneDim));
+      ImGui::TextUnformatted("any key or click to skip");
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+      ImGui::End();
+      recordImplantWindows();
+      const auto id = ImGui::FindWindowByName("##rig-hint")->ID;
+      for (auto& record : implantRecords_)
+        if (record.seed == id) record.settled = true;
+    }
+  };
+
   // Game to menu: for the first 0.8 s the board powers down and the menu is not there
   // yet. Nothing is built, so nothing can be clicked; any key or click skips to the menu.
   if ((move_ == app::ScreenMove::GameToMenu || move_ == app::ScreenMove::Stow) &&
@@ -2119,6 +2158,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     held.boardRect[1] = 0;
     held.boardRect[2] = ImGui::GetMainViewport()->Size.x;
     held.boardRect[3] = ImGui::GetMainViewport()->Size.y;
+    drawRigHint();
     return held;
   }
 
@@ -2187,6 +2227,7 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
   }
   if (waiting) ImGui::EndDisabled();
   if (implantActive_) recordImplantWindows();
+  drawRigHint();
   drawCheckEdges(shell);
   // An action may have closed a modal or changed screens. Prepare navigation before
   // the next NewFrame processes queued Tab/Space events with the new ownership.

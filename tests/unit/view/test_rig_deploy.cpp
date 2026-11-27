@@ -191,7 +191,8 @@ TEST_CASE("the slab path is continuous, carried and unit", "[unit][view][rig]") 
   const Bounds rails{-34, -24, 0, 34, 24, 0};
   auto last = slabDeploy(s, 0, 1);
   float lowest = 1e9f;
-  for (int ms = 1; ms <= 4000; ++ms) {
+  for (int ms = 1; static_cast<float>(ms) / 1000 <= s.departure + kSlabLockSeconds + .3f;
+       ++ms) {
     const float t = static_cast<float>(ms) / 1000.0f;
     const auto p = slabDeploy(s, t, 1);
     CAPTURE(t);
@@ -369,7 +370,7 @@ TEST_CASE("departures: nearest the magazine first, a column together, within 1.4
   CHECK(d.slot == std::vector<int>{1, 0, 0, 2});
   CHECK(departureStep(1) == Approx(.12f));
   CHECK(departureStep(4) == Approx(.12f));
-  CHECK(departureStep(20) == Approx(1.2f / 19));
+  CHECK(departureStep(20) == Approx(kDeployDepartureSpan / 19));
   for (const int n : {1, 2, 4, 11, 40, 200}) {
     CAPTURE(n);
     const float last =
@@ -390,10 +391,10 @@ TEST_CASE("a relayout lifts, travels, turns, lowers and settles", "[unit][view][
   s.toYaw = std::numbers::pi_v<float> / 2;
   const float end = relayoutSeconds(s);
   CHECK(end ==
-        Approx(kRelayoutLiftSeconds + relayoutTravelSeconds(length(s.to - s.from)) +
-               kRelayoutLowerSeconds + kRelayoutSettleSeconds));
-  CHECK(relayoutTravelSeconds(0) == Approx(.5f));
-  CHECK(relayoutTravelSeconds(200) == Approx(.9f));
+        Approx(.5f * (kRelayoutLiftSeconds + kRelayoutLowerSeconds) +
+               relayoutTravelSeconds(length(s.to - s.from)) + kRelayoutSettleSeconds));
+  CHECK(relayoutTravelSeconds(0) == Approx(.7f));
+  CHECK(relayoutTravelSeconds(200) == Approx(40.f));
   // Exact endpoints.
   const auto a = slabRelayout(s, 0, 1);
   CHECK(a.centre.x == s.from.x);
@@ -407,9 +408,9 @@ TEST_CASE("a relayout lifts, travels, turns, lowers and settles", "[unit][view][
   CHECK(b.centre.z == s.to.z);
   CHECK(b.yaw == Approx(s.toYaw));
   CHECK(b.settled);
-  // Lifted by `lift` once the lift is done, turning only during the travel.
-  const auto lifted = slabRelayout(s, kRelayoutLiftSeconds, 1);
-  CHECK(lifted.centre.z == Approx(s.from.z + s.lift));
+  // Lift and travel overlap: at half lift the rail travel has not yet started.
+  const auto lifted = slabRelayout(s, .5f * kRelayoutLiftSeconds, 1);
+  CHECK(lifted.centre.z == Approx(s.from.z + .5f * s.lift));
   CHECK(lifted.yaw == Approx(s.fromYaw));
   // Continuous: no jump bigger than 0.6 cells or 0.1 rad in 1 ms.
   auto last = a;
@@ -482,13 +483,13 @@ float tiltDegrees(const std::array<float, 4>& q) {
 }
 }  // namespace
 
-TEST_CASE("one slab deploys in 2.5-3.5 s and every departure within 5 s (M25.3)",
+TEST_CASE("heavy deploy including its trailing second completes within 9 s (M25.3b)",
           "[unit][view][rig][weight]") {
-  CHECK(deployLastLock(1) >= 2.5f);
-  CHECK(deployLastLock(1) <= 3.5f);
+  CHECK(deployLastLock(1) >= 5.0f);
+  CHECK(deployLastLock(1) + 1 <= 9.0f);
   for (const int n : {1, 2, 4, 11, 40, 200, 256}) {
     CAPTURE(n);
-    CHECK(deployLastLock(n) <= 5.0f);
+    CHECK(deployLastLock(n) + 1 <= 9.0f);
   }
   // The phases follow one another.
   CHECK(0 < kSlabTakeUpEnd);
@@ -505,7 +506,7 @@ TEST_CASE("a heavy slab hesitates, drops off its latch, then starts slowly (M25.
   const auto s = samplePath();
   const float u0 = s.departure + kSlabTakeUpEnd, u1 = s.departure + kSlabBreakFreeEnd;
   CHECK(kSlabBreakFreeEnd - kSlabTakeUpEnd >= .12f);
-  CHECK(kSlabBreakFreeEnd - kSlabTakeUpEnd <= .2f);
+  CHECK(kSlabBreakFreeEnd - kSlabTakeUpEnd <= .21f);
   const auto before = slabDeploy(s, u0, 1);
   CHECK(before.centre.z == Approx(s.bayCentre.z).margin(1e-5));
   // The carriage has arrived over the pick-up before the slab moves.
@@ -561,7 +562,7 @@ TEST_CASE("the slab's speed never jumps and peaks late in its travel (M25.3)",
   CAPTURE(worst, worstCarriage);
   CHECK(worst < 700.0f);
   CHECK(worstCarriage < 700.0f);
-  CHECK(peakAt > kSlabTiltEnd + .55f * (kSlabTravelEnd - kSlabTiltEnd));
+  CHECK(peakAt > kSlabTravelStart + .55f * (kSlabTravelEnd - kSlabTravelStart));
 }
 
 TEST_CASE("the slab lags its carriage by a few degrees, critically damped (M25.3)",
@@ -594,7 +595,7 @@ TEST_CASE("the slab lags its carriage by a few degrees, critically damped (M25.3
   // Critically damped: back while accelerating, forward while braking, and no ringing.
   CHECK(signChanges == 1);
   // Level again by the lock.
-  CHECK(tiltDegrees(slabDeploy(s, s.departure + kSlabLowerEnd, 1).quat) < .01f);
+  CHECK(tiltDegrees(slabDeploy(s, s.departure + kSlabLockSeconds, 1).quat) < .01f);
   // The stow (the path reversed in time) lags its own motion, too: its first lean as it
   // sets off back towards the rack is towards the hang, i.e. forward along the deploy.
   auto r = s;

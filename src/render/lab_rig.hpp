@@ -113,7 +113,8 @@ struct Relayout {
   std::vector<view::RelayoutSpec> specs;  ///< per new slab, lab world (matched ones)
   std::vector<int> arrivals;              ///< new slabs from the rack
   std::vector<int> leaving;               ///< old slabs back into it
-  float seconds{0};  ///< until every slab is clamped and the lab placed
+  float seconds{0};    ///< until every slab is clamped and the lab placed
+  float timeScale{1};  ///< cached dilation for unusually long rack arrival/return paths
   /// M25.3: seconds before anything moves, while a formed shape unforms to flat
   /// (`view::kRigUnformSeconds`; 0 when the shape was flat). Set by the front end.
   float lead{0};

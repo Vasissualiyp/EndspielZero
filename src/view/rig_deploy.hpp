@@ -71,14 +71,18 @@ struct MastGroup {
 /// slab). The carriage arrives over the pick-up and takes up the load; the slab hesitates
 /// while it breaks free of the bay, dropping kSlabDrop as the latch lets go; it slides
 /// out, tilts face-up as it rises under the rail, travels, lowers and settles. Every
-/// phase starts and ends at rest on an S-curve, so no velocity ever changes at once.
+/// displacement is C2, with overlapping lift, travel and lowering (M25.3b).
 inline constexpr float kSlabTakeUpEnd = 0.40f;
-inline constexpr float kSlabBreakFreeEnd = 0.55f;
-inline constexpr float kSlabSlideEnd = 1.05f;
-inline constexpr float kSlabTiltEnd = 1.60f;
-inline constexpr float kSlabTravelEnd = 2.60f;
-inline constexpr float kSlabLowerEnd = 3.10f;
-inline constexpr float kSlabLockSeconds = 3.30f;  ///< the lock: the path's full length
+inline constexpr float kSlabBreakFreeEnd = 0.60f;
+inline constexpr float kSlabLiftStart = 0.70f;
+inline constexpr float kSlabLiftEnd = 5.20f;
+inline constexpr float kSlabTravelStart = 2.90f;
+inline constexpr float kSlabLowerStart = 3.10f;
+inline constexpr float kSlabSlideEnd = 3.90f;
+inline constexpr float kSlabTiltEnd = 4.60f;
+inline constexpr float kSlabTravelEnd = 7.00f;
+inline constexpr float kSlabLowerEnd = 7.05f;
+inline constexpr float kSlabLockSeconds = 7.30f;  ///< the lock: the path's full length
 /// The settle: one dip below the hang and back, from 0.1 s before the lowering ends to
 /// the lock. 2 mm, in cells.
 inline constexpr float kSlabOvershoot = 0.04f;
@@ -86,14 +90,14 @@ inline constexpr float kSlabDrop = 0.14f;  ///< 7 mm as the bay's latch lets go,
 /// Inertia: the slab rocks on its yoke against the carriage's acceleration, at most this
 /// many degrees (a 1 m travel's peak braking, before the damping), critically damped.
 inline constexpr float kSlabSwingDegrees = 2.5f;
-inline constexpr float kSlabSwingOmega = 15.0f;  ///< rad/s: a stiff hanger
+inline constexpr float kSlabSwingOmega = 20.0f;  ///< rad/s: a stiff hanger
 inline constexpr float kClampPulseRise = 0.03f;
 inline constexpr float kClampPulseEnd = 0.25f;
 /// Departures overlap: slot i leaves at kDeployFirstDeparture + departureStep(n) * i.
 inline constexpr float kDeployFirstDeparture = 0.2f;
 inline constexpr float kDeployStagger = 0.12f;
 /// The last departure is at most this long after the first (M24.6).
-inline constexpr float kDeployDepartureSpan = 1.2f;
+inline constexpr float kDeployDepartureSpan = 0.5f;
 
 /// M24.6 routing, in metres of the lab (board distances divide by 20 x labScale).
 /// Carriages on different bridges stand this far apart in x; ...
@@ -121,7 +125,7 @@ struct Departures {
 };
 [[nodiscard]] Departures departureOrder(const std::vector<MastGroup>& groups,
                                         const Vec3& magazine);
-/// The stagger between departure slots: min(0.12, 1.2 / max(1, n - 1)).
+/// The stagger between departure slots: min(0.12, 0.5 / max(1, n - 1)).
 [[nodiscard]] float departureStep(int slots) noexcept;
 
 struct SlabPathSpec {
@@ -138,6 +142,7 @@ struct SlabPathSpec {
   /// M25.3: the path is played backwards in time (a stow), so the slab's inertia answers
   /// the reversed motion: its swing is causal in the stow's own time.
   bool reversed{false};
+  float labScale{1};  ///< board units per lab unit, for physical acceleration/swing
 };
 struct SlabPose {
   Vec3 centre{};
@@ -183,9 +188,9 @@ inline constexpr float kRigUnformSeconds = 0.8f;
 /// M24.6: a layout change moves the hardware. One slab from its old pose to its new one,
 /// in lab-world cells: lift, travel along the rails (turning to the new yaw on the way),
 /// lower and settle with the deploy's overshoot.
-inline constexpr float kRelayoutLiftSeconds = 0.15f;
-inline constexpr float kRelayoutLowerSeconds = 0.15f;
-inline constexpr float kRelayoutSettleSeconds = 0.12f;
+inline constexpr float kRelayoutLiftSeconds = 1.0f;
+inline constexpr float kRelayoutLowerSeconds = 1.0f;
+inline constexpr float kRelayoutSettleSeconds = 0.3f;
 struct RelayoutSpec {
   Vec3 from{}, to{};           ///< slab centre
   float fromYaw{0}, toYaw{0};  ///< radians about +Z
@@ -196,7 +201,7 @@ struct RelayoutPose {
   float yaw{0};
   bool settled{false};  ///< the move is over (or never moves it): clamped at `to`
 };
-/// 0.5 s for a slab that stays put, up to 0.9 s for a metre (20 cells) or more.
+/// Distance-limited rail travel in lab cells; longer paths take longer, without a cap.
 [[nodiscard]] float relayoutTravelSeconds(float distanceCells) noexcept;
 [[nodiscard]] float relayoutSeconds(const RelayoutSpec& s) noexcept;
 /// The pose `t` seconds into the move; calm (intensity < 0.5) is the final pose. A slab

@@ -262,7 +262,7 @@ TEST_CASE("a travelling slab carries the board itself, so the lock is no swap",
     // Settling (face up, done rocking): every instance moves with its own slab, rigidly.
     const float departure = layout->paths[0].departure;
     const auto lowering =
-        rigPoses(*layout, RigPhase::Deploy, departure + view::kSlabLowerEnd + .01f, 1);
+        rigPoses(*layout, RigPhase::Deploy, departure + view::kSlabLockSeconds - .01f, 1);
     auto moved = set;
     carryBoard(moved, *layout, lowering);
     for (std::size_t i = 0; i < set.instances.size(); ++i) {
@@ -477,7 +477,7 @@ TEST_CASE("a new board arrives from the rack, one slab per new board", "[render]
   CHECK(move.arrivals.size() == 1);
   // It leaves its bay, and its cells boot once it locks: dark before, booting after.
   const auto& path = to->paths[static_cast<std::size_t>(move.arrivals.front())];
-  const float lock = path.departure + view::kSlabLockSeconds;
+  const float lock = (path.departure + view::kSlabLockSeconds) * move.timeScale;
   const auto early = relayoutFrame(lab, move, after, .05f, 1);
   CHECK(early.poses[static_cast<std::size_t>(move.arrivals.front())].inBay);
   CHECK(relayoutBootAge(move, lock - .1f, 1) == Catch::Approx(0));

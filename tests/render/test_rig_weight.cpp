@@ -59,6 +59,193 @@ bool locked(const view::SlabPose& p) {
 }
 }  // namespace
 
+TEST_CASE("physical gantry loads obey speed and acceleration caps at 60 Hz (M25.3b)",
+          "[render][rig][weight][gantryspeed]") {
+  const auto lab = shippedLab();
+  for (const auto& file :
+       std::filesystem::directory_iterator(test::repoRoot() / "variants")) {
+    if (file.path().extension() != ".toml") continue;
+    const auto name = file.path().stem().string();
+    for (bool shape : {false, true}) {
+      CAPTURE(shape);
+      const auto layout = rigLayout(lab, rigView(name.c_str(), shape));
+      REQUIRE(layout);
+      if (layout->slabs.size() > 8) continue;
+      CAPTURE(name);
+      CHECK(layout->lastLock + 1 <= 9.0f);
+      for (const auto phase : {RigPhase::Deploy, RigPhase::Stow}) {
+        const float end = phase == RigPhase::Deploy
+                              ? layout->lastLock
+                              : view::stowTravelSeconds(layout->slots);
+        float speed = 0, vertical = 0, acceleration = 0;
+        auto previous = rigPoses(*layout, phase, -1.0f / 60, 1);
+        std::vector<view::Vec3> velocity(previous.size());
+        const float metre = kCellsPerMetre * layout->xform.labScale;
+        for (int i = 0; i <= static_cast<int>((end + .5f) * 60); ++i) {
+          const auto poses = rigPoses(*layout, phase, static_cast<float>(i) / 60, 1);
+          for (std::size_t k = 0; k < poses.size(); ++k) {
+            const auto v = (poses[k].centre - previous[k].centre) * (60 / metre);
+            speed = std::max(speed, view::length(v));
+            vertical = std::max(vertical, std::abs(v.z));
+            acceleration = std::max(acceleration, view::length(v - velocity[k]) * 60);
+            velocity[k] = v;
+          }
+          previous = poses;
+        }
+        CAPTURE(phase, speed, vertical, acceleration);
+        std::printf("GANTRY %s %s speed=%.5f vertical=%.5f acceleration=%.5f lock=%.3f\n",
+                    name.c_str(), phase == RigPhase::Deploy ? "deploy" : "stow",
+                    static_cast<double>(speed), static_cast<double>(vertical),
+                    static_cast<double>(acceleration),
+                    static_cast<double>(layout->lastLock));
+        CHECK(speed <= .8f);
+        CHECK(vertical <= .5f);
+        CHECK(acceleration <= 1.5f);
+      }
+    }
+  }
+}
+
+TEST_CASE("relayout loads obey gantry limits in lab metres at 60 Hz (M25.3b)",
+          "[render][rig][weight][gantryspeed]") {
+  const auto lab = shippedLab();
+  for (const char* name : {"standard", "cube5", "hyper4", "hyper4_8x8"}) {
+    const auto before = rigView(name, false);
+    const auto after = afterAction(
+        name, std::string_view(name) == "standard" ? "axes rank,file"
+              : std::string_view(name) == "cube5"  ? "axes file,level"
+                                                   : "axes file,aeon vertical");
+    const auto from = rigLayout(lab, before);
+    REQUIRE(from);
+    const auto to = rigLayoutAfter(lab, *from, after);
+    REQUIRE(to);
+    const auto move = relayoutOf(lab, *from, before, *to, after);
+    auto previous = relayoutFrame(lab, move, after, -1.f / 60, 1);
+    std::vector<view::Vec3> velocities(previous.poses.size());
+    float speed = 0, vertical = 0, acceleration = 0;
+    for (int i = 0; i <= static_cast<int>((move.seconds + .5f) * 60); ++i) {
+      const auto frame = relayoutFrame(lab, move, after, static_cast<float>(i) / 60, 1);
+      REQUIRE(frame.poses.size() == previous.poses.size());
+      for (std::size_t k = 0; k < frame.poses.size(); ++k) {
+        const auto at = frame.layout.xform.toLab(frame.poses[k].centre);
+        const auto was = previous.layout.xform.toLab(previous.poses[k].centre);
+        const auto v = (at - was) * (60 / kCellsPerMetre);
+        speed = std::max(speed, view::length(v));
+        vertical = std::max(vertical, std::abs(v.z));
+        acceleration = std::max(acceleration, view::length(v - velocities[k]) * 60);
+        velocities[k] = v;
+      }
+      previous = frame;
+    }
+    CAPTURE(name, speed, vertical, acceleration);
+    std::printf(
+        "RELAYOUT %s speed=%.5f vertical=%.5f acceleration=%.5f seconds=%.3f "
+        "scale=%.3f\n",
+        name, static_cast<double>(speed), static_cast<double>(vertical),
+        static_cast<double>(acceleration), static_cast<double>(move.seconds),
+        static_cast<double>(move.timeScale));
+    CHECK(speed <= .8f);
+    CHECK(vertical <= .5f);
+    CHECK(acceleration <= 1.5f);
+  }
+}
+
+TEST_CASE("scale-changing rack arrivals and returns obey the caps (M25.3b)",
+          "[render][rig][weight][gantryspeed]") {
+  const auto lab = shippedLab();
+  const auto small = rigView("standard", false);
+  auto large = small;
+  for (auto p : small) {
+    p.cell += 100000;
+    p.slice += 1;
+    p.x += 80;
+    large.push_back(p);
+  }
+  const auto from = rigLayout(lab, small);
+  REQUIRE(from);
+  const auto to = rigLayoutAfter(lab, *from, large);
+  REQUIRE(to);
+  REQUIRE(to->xform.labScale > from->xform.labScale + .1f);
+  for (bool reverse : {false, true}) {
+    auto move = reverse ? relayoutOf(lab, *to, large, *from, small)
+                        : relayoutOf(lab, *from, small, *to, large);
+    REQUIRE((reverse ? move.leaving : move.arrivals).size() == 1);
+    move.lead = view::kRigUnformSeconds;
+    const auto& placements = reverse ? small : large;
+    auto previous = relayoutFrame(lab, move, placements, -1.f / 60, 1);
+    std::vector<view::Vec3> velocities(previous.poses.size());
+    float speed = 0, vertical = 0, acceleration = 0;
+    for (int i = 0; i <= static_cast<int>((move.lead + move.seconds + .5f) * 60); ++i) {
+      const auto frame =
+          relayoutFrame(lab, move, placements, static_cast<float>(i) / 60, 1);
+      REQUIRE(frame.poses.size() == previous.poses.size());
+      for (std::size_t k = 0; k < frame.poses.size(); ++k) {
+        const auto at = frame.layout.xform.toLab(frame.poses[k].centre);
+        const auto was = previous.layout.xform.toLab(previous.poses[k].centre);
+        const auto v = (at - was) * (60 / kCellsPerMetre);
+        speed = std::max(speed, view::length(v));
+        vertical = std::max(vertical, std::abs(v.z));
+        acceleration = std::max(acceleration, view::length(v - velocities[k]) * 60);
+        velocities[k] = v;
+      }
+      previous = frame;
+    }
+    CAPTURE(reverse, move.timeScale, speed, vertical, acceleration);
+    std::printf(
+        "RESCALE %s speed=%.5f vertical=%.5f acceleration=%.5f seconds=%.3f scale=%.3f\n",
+        reverse ? "return" : "arrival", static_cast<double>(speed),
+        static_cast<double>(vertical), static_cast<double>(acceleration),
+        static_cast<double>(move.seconds), static_cast<double>(move.timeScale));
+    CHECK(speed <= .8f);
+    CHECK(vertical <= .5f);
+    CHECK(acceleration <= 1.5f);
+    const float lock =
+        move.lead +
+        (move.to.paths.back().departure + view::kSlabLockSeconds) * move.timeScale;
+    if (!reverse) {
+      CHECK(relayoutBootAge(move, lock - .01f, 1) == Catch::Approx(0));
+      CHECK(relayoutBootAge(move, lock + .5f, 1) == Catch::Approx(.5f));
+    }
+  }
+}
+
+TEST_CASE("heavy shipped slabs keep moving and retain visible lean (M25.3b)",
+          "[render][rig][weight][gantryspeed]") {
+  const auto lab = shippedLab();
+  for (const char* name : {"standard", "cube5"}) {
+    const auto layout = rigLayout(lab, rigView(name, false));
+    REQUIRE(layout);
+    for (auto path : layout->paths) {
+      for (bool reverse : {false, true}) {
+        path.reversed = reverse;
+        float lean = 0;
+        for (int i = 0; i <= static_cast<int>(view::kSlabLockSeconds * 60); ++i) {
+          const float u = static_cast<float>(i) / 60;
+          const auto p = view::slabDeploy(path, path.departure + u, 1);
+          if (u >= view::kSlabTiltEnd) {
+            const auto up = rotate(p.quat, {0, 0, 1});
+            lean = std::max(lean, std::atan2(std::hypot(up.x, up.y), up.z) * 57.29578f);
+          }
+          // After break-free and before the final settle there are no rest-to-rest
+          // phase joins. Both playback directions follow these same centres.
+          if (u > view::kSlabBreakFreeEnd + .2f && u < view::kSlabTravelEnd - .2f) {
+            const auto prev = view::slabDeploy(path, path.departure + u - 1.f / 60, 1);
+            const auto speed = view::length(p.centre - prev.centre) * 60 /
+                               (kCellsPerMetre * layout->xform.labScale);
+            CAPTURE(name, reverse, u, speed);
+            CHECK(speed > .001f);
+          }
+        }
+        CAPTURE(name, reverse, lean);
+        std::printf("LEAN %s %s %.4f degrees\n", name, reverse ? "stow" : "deploy",
+                    static_cast<double>(lean));
+        CHECK(lean >= 1);
+        CHECK(lean <= 2);
+      }
+    }
+  }
+}
+
 TEST_CASE("a slab leaves and enters the rack only flat (M25.3)",
           "[render][rig][weight]") {
   const auto lab = shippedLab();
@@ -195,7 +382,7 @@ TEST_CASE("the shape's flat sheet rides its travelling slab (M25.3)",
   const auto& path = layout->paths[0];
   // Mid-travel, the vertex moves exactly as a board instance at the same place does.
   const float mid = path.departure + .5f * (view::kSlabTiltEnd + view::kSlabTravelEnd);
-  for (const float age : {mid, path.departure + view::kSlabLowerEnd - .1f}) {
+  for (const float age : {mid, path.departure + view::kSlabLockSeconds - .17f}) {
     CAPTURE(age);
     auto set = setAt();
     const auto poses = rigPoses(*layout, RigPhase::Deploy, age, 1);
@@ -248,7 +435,7 @@ TEST_CASE("M25.3 weight plot data", "[.weightplot]") {
   if (path == nullptr) return;
   std::FILE* out = std::fopen(path, "w");
   REQUIRE(out != nullptr);
-  std::fprintf(out, "variant,phase,t,height_m,speed_ms,lean_deg\n");
+  std::fprintf(out, "variant,phase,t,height_m,speed_ms,lean_deg,acceleration_ms2\n");
   const auto lab = shippedLab();
   for (const char* name : {"standard", "cube5"}) {
     const auto layout = rigLayout(lab, rigView(name, false));
@@ -261,17 +448,23 @@ TEST_CASE("M25.3 weight plot data", "[.weightplot]") {
       const float end = deploy ? layout->lastLock + .5f
                                : lead + view::stowTravelSeconds(layout->slots) + .5f;
       std::optional<view::Vec3> last;
-      for (int i = 0; i <= static_cast<int>(end * 100); ++i) {
-        const float t = static_cast<float>(i) / 100;
+      view::Vec3 previousVelocity{};
+      for (int i = 0; i <= static_cast<int>(end * 60); ++i) {
+        const float t = static_cast<float>(i) / 60;
         const auto p = rigPoses(*layout, deploy ? RigPhase::Deploy : RigPhase::Stow,
                                 deploy ? t : t - lead, 1)[slab];
-        const float speed = last ? view::length(p.centre - *last) * 100 / m : 0.0f;
+        const auto velocity = last ? (p.centre - *last) * (60 / m) : view::Vec3{};
+        const float speed = view::length(velocity);
+        const float acceleration = view::length(velocity - previousVelocity) * 60;
+        previousVelocity = velocity;
         last = p.centre;
         // Only face-up poses lean meaningfully; edge-on reports the tilt into the bay.
         const float lean = 2 * std::acos(std::min(1.0f, std::abs(p.quat[3]))) * 57.29578f;
-        std::fprintf(out, "%s,%s,%.2f,%.5f,%.5f,%.4f\n", name, deploy ? "deploy" : "stow",
-                     static_cast<double>(t), static_cast<double>((p.centre.z - hang) / m),
-                     static_cast<double>(speed), static_cast<double>(lean));
+        std::fprintf(out, "%s,%s,%.5f,%.5f,%.5f,%.4f,%.5f\n", name,
+                     deploy ? "deploy" : "stow", static_cast<double>(t),
+                     static_cast<double>((p.centre.z - hang) / m),
+                     static_cast<double>(speed), static_cast<double>(lean),
+                     static_cast<double>(acceleration));
       }
     }
   }

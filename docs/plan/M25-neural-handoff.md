@@ -205,7 +205,259 @@ virtual space the implant generates. T6 (256 slabs) must no longer lag.
 9. Commit: `render: the neural VR - when the room runs out, the implant takes over
    (M25.5)`.
 
+## M25.3b — Measured gantry speed and continuous phases (2026-11-26)
+
+This follow-up supersedes M25.3's old 2.5–3.5 s slab / 5 s overall targets.
+The load must stay at or below **0.8 m/s**, vertical speed **0.5 m/s**, and
+acceleration magnitude **1.5 m/s²**, measured at 60 Hz through deploy and stow
+for every shipped variant using the physical rig. Expect roughly 5–7 s for one
+slab; the entire deploy, including its trailing second, must finish within 9 s.
+Departures still overlap. Keep flat-in-transit, skip-and-consume, calm endpoints,
+the camera clearance and the existing debug/capture entry points.
+
+**Investigation / red evidence.** `out/m25.3b/red.log`, from the new
+`[gantryspeed]` case in `tests/render/test_rig_weight.cpp`, measures standard at
+3.801 m/s, 3.143 m/s vertically and 29.659 m/s²; hyper4_8x8 reaches about
+4.68 m/s and 36.59 m/s². `view::slabDeploy` serialises four rest-to-rest moves
+into fixed 0.5, 0.55, 1.0 and 0.5 s windows, regardless of their metre distances.
+Zero velocity at joins prevents jumps but does not make the intervening movement
+slow. Existing weight tests checked continuity with a 700 cells/s² threshold,
+timings and swing, not physical speed limits. Even the 7 mm drop in 0.12 s alone
+exceeds the new acceleration bound. `slabRelayout` has the same compressed
+lift/lower windows and a damped sine settle with nonzero initial velocity.
+
+**Implementation, extending the existing pure explicit-time path.** Keep a
+single fixed clock and existing `SlabPathSpec`, duration consumers and reverse
+stow mechanism. In `src/view/rig_deploy.*`, replace the mutually exclusive centre
+branches with overlapping C2 displacement ramps. Use
+`S(x)=6x^5-15x^4+10x³` for vertical and orientation movement. The old horizontal
+`H(x)=x^4(15-24x+10x²)` has peak velocity 2.0736 times its mean: tuning its
+overlapping windows to a 7.05 s movement end still measured about 0.927 m/s,
+so merely moving its phase boundaries does not meet the cap. Replace H with
+the integral of this broader late-peaking velocity profile, for progress x:
+`v=.9*S(x/.2)` on [0,.2], `v=.9+.1*S((x-.2)/.5)` on [.2,.7], and
+`v=1-S((x-.7)/.3)` on [.7,1]. Divide its cumulative integral by **0.715**;
+use `Q(x)=x^6-3x^5+2.5x^4` as the antiderivative of S, carrying each previous
+segment's integral into the next. Clamp outside [0,1]. This H starts slowly,
+continues gaining speed until x=.7, then brakes; its peak/mean speed is 1.39860.
+Velocity, acceleration and jerk join continuously. Its normalized acceleration
+maximum is 11.8007, so a 0.92 m slide alone needs at least 2.69 s to stay below
+1.5 m/s²; allow additional margin for simultaneous axes and the pivot offset.
+Starting from the
+bay, add `(pick-bay)*H(slide)`, the vertical rise
+`(liftZ-pick.z+drop)*S(lift)`, horizontal `(hang-pick)*H(travel)`, and vertical
+`(hang.z-liftZ)*S(lower)`, then subtract the latch drop and settle envelopes.
+Horizontal means x/y only. Every ramp clamps outside its own time window;
+their sum therefore has exact original endpoints without a stop at each join.
+
+Start tuning with slide 0.60–3.50 s, lift 1.00–4.80 s, travel 2.10–7.10 s,
+lower 3.90–7.10 s, and lock 7.30 s. These are candidate coefficients, not
+claimed passing measurements: use the recorded shipped path distances to tune
+the overlapping windows before production changes, then prove the real poses
+meet the limits. Limit departure span to 0.50 s (keep the 0.12 s per-slot upper
+bound), giving `0.2 + 0.5 + 7.3 + 1 = 9 s` even at the largest slot count.
+Prefer shortening the common lock time if the physical measurements allow it.
+Rise and lowering overlap deliberately: the slab need not touch the old rail-height
+waypoint, but must retain the magazine clearance and adequate mast/yoke clearance.
+Do not rotate a slab through the rack: delay orientation change until the slab has
+cleared its bay, independently of when its centre starts rising. Check this on
+standard and the stacked/rack carriers in the real captures.
+
+Keep the carriage take-up and visible break-free; spread the 7 mm latch drop over
+at least 0.20 s (for example 0.40–0.60), and use a C2 one-dip 1–3 mm settle
+envelope such as sin⁴ over its support. Recompute carriage/mast position from
+the combined centre. Drive the existing causal critically damped swing kernel
+from the new horizontal acceleration, including stow's own time direction;
+retune the gain so a visible 1–2° lean survives the slower movement. Include the
+yoke-pivot centre displacement in cap measurements, rather than checking only
+the nominal centre. Avoid a final orientation or position snap at lock.
+
+**Relayout.** Extend `slabRelayout` and `relayoutTravelSeconds` in the same file:
+distance-dependent horizontal duration, overlapping smooth lift/travel/lower,
+and a zero-velocity, zero-acceleration settle in place of the damped sine.
+Use lab-world distances divided by 20; deploy/stow board-space distances divide
+by `20 * layout.xform.labScale`. `render::relayoutOf` already takes the maximum
+of per-slab durations; retain that pattern and the still-slab fast path. Its
+arrivals and departures automatically use the retimed rack path. Check any lab
+transform easing against actual lab-space poses, including arrivals/leavers.
+
+The measured implementation passes default physical deploy/stow at maxima
+0.76246 m/s, 0.45467 m/s vertically and 1.23148 m/s², but a
+`hyper4_8x8` relayout to `axes file,aeon vertical` produces longer arriving rack
+routes and reaches 0.9839 m/s and 1.7658 m/s². Matched-slab relayout already
+passes. This is a distinct route-length case: retain the fixed default deploy
+clock and add a cached `Relayout::timeScale` (default 1), computed once by
+`render::relayoutOf`. Sample actual arriving/departing `slabDeploy` paths at
+240 Hz in lab metres, including their causal swing directions and samples
+before departure and after lock. Compute maxima v, vz and a, then use
+`max(1, v/.75, vz/.45, sqrt(a/1.3))`; the margins allow sampling and floating
+point error. Use double arithmetic for finite differences. Multiply the
+existing maximum `out.seconds` by this scale. The 9 s deploy budget does not
+apply to relayouts; never clamp this safety scale to fit that budget.
+
+In `relayoutFrame`, compare wall elapsed `max(0,sinceStart-lead)` against
+scaled `move.seconds` for completion, and use elapsed divided by `timeScale`
+for every motion evaluator and the lab-transform easing. Keep the unform lead
+in wall seconds. `relayoutBootAge` scales the arrival lock timestamp only;
+the boot's age since lock and duration remain wall seconds. Preserve calm,
+unchanged-slab and lead-hold behaviour. Endpoint path calibration alone is not
+a proof for paths rebuilt while the lab scale changes: acceptance must sample
+the actual `relayoutFrame` poses converted through each frame's xform, with
+both count-changing and scale-changing cases. If those exceed the caps,
+calibrate the live lab-space arrival paths as well, rather than weakening the
+test or increasing an arbitrary universal duration.
+
+**Early-hint artifact correction (2026-11-26).** The first rendered deploy frame
+has no readable skip hint although its ImGui vertices and settled implant record
+exist. `implant.frag` chooses the strongest transition record at each pixel; the
+booting `##controls` window overlaps the hint and its form-zero record wins. The
+structural test never checked that competition. `hint-overlap-red.log` reproduces
+seven failures before correction. Draw the hint after the current or ghost HUD has
+been measured, above the current frame's controls window by 28 scaled pixels (the
+composite's 24-pixel expansion plus a gap). Read a dock only when its
+`LastFrameActive` is the current frame; otherwise use the existing bottom anchor.
+Keep the held-stow early return covered, the record settled, and the normal implant
+composite. Test competing expanded records, including the departing HUD. Do not
+change the shader, game framing, or use a tool-overlay bypass.
+
+**Full-hint artifact correction (2026-11-26).** The resumed `early-detail.png`
+shows the centred hint overlapping the departing menu's Settings row at zero,
+and losing its rightmost words to that menu's dissolve at 0.25 s. The first
+regression checked only the hint's centre, missing partial overlap. Extend it
+to the entire hint rectangle against every other expanded implant record,
+including settled records that can contain competing text. Keep the dock's
+vertical clearance and existing draw order, but anchor the hint's left edge
+at the viewport's existing 16-scaled-pixel margin (pivot 0,1). This keeps it
+clear of the right-side departing menu without changing the composite or
+the game framing. Rebuild and review the first frames and full sheets again.
+
+**Acceptance.** First extend the red tests: all physical shipped variants in
+flat and shape framing, both travel directions, negative/predeparture and
+postlock samples, all slabs, and relayouts of standard, cube5 and hyper4 plus a
+case with changed slab count. Use successive finite differences at 60 Hz on the
+actual `rigPoses`/`relayoutFrame` centres in metres; assert all three limits,
+and last lock plus trailing second ≤9 s. Preserve break-free/drop, late speed
+peak, visible causal lean, exact endpoints, flat gates, no intermediate full
+stops, and ≥0.30 m camera clearance. Update timing-pinned tests and capture
+times from named duration constants. Run the existing view/app/render and GUI
+checks through `g.sh`. Review standard/cube5 deploy contact sheets at 0.25 s,
+and height/speed/acceleration/tilt plots in
+`out/m25.3b/`; verify lab-off frames remain identical. Record final coefficients,
+measured maxima and any departures from the candidate table in Status.
+
+If the fixed overlapping curve cannot satisfy both caps and the 9 s envelope
+with the existing route clearances, record the failing path and change the
+design explicitly before implementing distance-dependent clocks or changing
+the route. Do not weaken the physical limits or silently truncate a movement.
+
 ## Status
+
+### M25.3b — built and verified (2026-11-27)
+
+Completed the interrupted acceptance without restarting the slice. Reviewed the full
+working diff, the red evidence, the implementation and timing consumers, and all seven
+PNG artifacts in `out/m25.3b/`. The final standard/cube5 deploy sheets cover 0–9.5 s
+at 0.25-second intervals; `early-detail.png` shows the complete skip hint from the
+first frame and the slabs turning only after extraction. `weight-plot.png` shows
+continuous travel between the latch and settle, with the speed and acceleration caps
+intact. The two earlier first-frame diagnostics are superseded by the final sheets.
+
+Retained the overlapping deploy/stow curves, distance-dependent relayout, cached
+arrival/return time scaling, causal damped lean, and early neural skip hint described
+below. Default physical variants in flat and shape framing peak at **0.76246 m/s**,
+**0.45467 m/s vertically**, and **1.23148 m/s²** across deploy/stow. Relayout peaks
+are **0.74993 m/s**, **0.30302 m/s vertically**, and **1.24120 m/s²**; the separate
+scale-changing arrival/return case also passes. Flat-in-transit, input skip, and
+M24.9 camera-clearance regressions remain green.
+
+Verified the completed gate logs from the interrupted continuation, all newer than
+the final code and test changes:
+
+- `precommit-complete.log`: **`precommit: OK`**, including architecture, **632 unit
+  cases / 429,367 assertions** and **14 property cases / 1,230,006 assertions**.
+- `render-app-view-complete.log`: **777 cases / 19,074,767 assertions**, all passed.
+- `gui-complete.log`: **59/59 GUI ctests passed**, serially.
+- `resume-focused.log`: **5 cases / 7,372 assertions**, including the physical caps
+  and complete hint-rectangle regression. Ten lab-off captures compare byte-identical
+  (`laboff.log`).
+
+A final `g.sh` build reports `ninja: no work to do`; explicit
+`clang-format --dry-run --Werror` passes for all nine changed C++ files
+(`handoff-freshness.log`). No production or test edits followed the completed gates.
+Builds use at most seven jobs; tests/captures use `g.sh`, with no parallel ctest or
+concurrent GUI captures.
+
+Deviations remain those recorded below: the tuned windows give a **7.30 s local
+slab path** (7.50 s to the first lock), slightly beyond the approximate 5–7 s target,
+while the full deploy including its trailing second is **at most 9.00 s**. Long
+relayouts may exceed 9 s (the changed-count case is 10.312 s). The physical-cap sweep
+excludes default VR layouts above eight slabs; existing forced-physical/VR tests pass.
+No header-only exception, authored-model change, or additional design deviation.
+
+Handoff: the requested `m25.3b.msg` and 14-path `m25.3b.files` are written to the
+specified scratchpad, excluding `out/` and authored models. No staging or commit was
+attempted.
+
+### M25.3b — heavy gantry motion, acceptance in progress (2026-11-26)
+
+Continued the interrupted slice after reviewing the working-tree diff, its written
+design and red runs (`red.log`, `red-more.log`, `hint-overlap-red.log`). Retained the
+implementation, formatted the final hint correction, and rebuilt before verification.
+
+- Deploy and reverse stow use overlapping C2 displacement ramps and the broad,
+  late-peaking horizontal velocity profile specified above. Final local seconds:
+  take-up ends 0.40; 7 mm latch drop 0.40–0.60; slide 0.60–3.90; lift 0.70–5.20;
+  rail travel 2.90–7.00; face-up rotation 2.90–4.60; lower 3.10–7.05; 2 mm settle
+  6.95–7.30; lock 7.30. Departures start at 0.20 with at most a 0.50-second span.
+  One slab locks at 7.50 s; the entire deploy including its trailing second is at
+  most 9.00 s. The phase overlap eliminates intermediate rest-to-rest joins.
+- The critically damped swing uses omega 20 rad/s and a demand of 2 degrees per
+  1.25 m/s², causal in each direction. Standard peaks at 1.3582 degrees and cube5
+  at 1.4387 degrees; the yoke-pivot centre displacement is included in measurements.
+- Relayouts overlap lift/travel/lower, use distance-dependent travel and a smooth
+  settle. Arriving/departing rack paths cache a measured `Relayout::timeScale`;
+  motion and lab easing share it while boot ages remain wall seconds. The
+  hyper4_8x8 changed-count route takes 10.312 s (scale 1.312); relayouts are not
+  subject to the deploy's 9-second limit.
+- The neural skip hint is drawn after the current/ghost HUD is measured, remains
+  settled during boot/dissolve, and sits above the controls' expanded composite
+  record at the left margin. The full-rectangle regression reproduced three
+  failures before the left-anchor correction (`hint-edge-red.log`), then passed
+  69 assertions (`hint-edge-green.log`). It also covers the held-stow return.
+  Existing key/click skip handling,
+  flat-in-transit form gates and camera clearance are retained.
+- GUI samples derive their lock/boot/VR phase ages from shared timing constants
+  through `tests/rig_timing.cmake`; no golden or pixel tolerance changed.
+
+Fresh focused verification: **5 cases / 7,372 assertions** passed. Sampling every
+shipped physical variant in flat and shape framing, deploy and stow, at 60 Hz gives
+maxima **0.76246 m/s**, **0.45467 m/s vertically**, **1.23148 m/s²**. Relayout cases
+reach at most **0.74993 m/s**, **0.30302 m/s vertically**, **1.24120 m/s²**.
+The additional scale-changing arrival/return case reaches **0.53363 m/s**,
+**0.44985 m/s vertically**, **0.83195 m/s²**. Tests cover predeparture/postlock,
+every carried slab, continuous motion, visible lean, and scaled arrival boot time.
+
+Deviations from the candidate table are the tuned overlapping windows recorded
+above. The slab's 7.30-second local path slightly exceeds the requested approximate
+5–7 seconds to preserve the hard caps and route clearance; the hard whole-deploy
+limit still holds. Physical-limit coverage excludes the >8-slab default VR layouts;
+the existing forced-physical and VR regressions remain in the broader gates.
+No header-only module needed a new `.cpp`, and no authored model was changed.
+
+Visual acceptance under `out/m25.3b/`, all viewed: `deploy-standard.png` and
+`deploy-cube5.png` (0–9.5 s at 0.25-second intervals, 960×540 originals),
+`early-detail.png` (full-size early hint/rack details), `weight-plot.png` (height,
+speed, face-up tilt and acceleration for deploy/stow), and `lab-off.png`.
+The final early frames show the complete skip hint clear of the departing menu.
+The slabs stay flat while extracting and turn face-up clear of the rack; cube5's
+departures overlap. Ten lab-off captures remain byte-identical to the accepted
+pre-slice captures (`laboff.log`). Also inspected the diagnostic `first-frame.png`
+and `first-frame-fixed.png`; the latter predates the final left-anchor correction,
+which is shown in `early-detail.png`.
+
+Final gates are pending; no commit message or manifest has been issued. All
+builds/tests/captures use the required `g.sh`, builds at seven jobs, with serial
+GUI captures and no parallel ctest.
 
 ### M25.1 — built and verified (2026-11-21)
 

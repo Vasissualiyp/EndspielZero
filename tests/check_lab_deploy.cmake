@@ -25,9 +25,19 @@ function(shot_of name variant)
   set(hash_${name} ${h} PARENT_SCOPE)
 endfunction()
 
-# Four ages of the deploy are four different pictures: the menu dissolving, the slab
-# carried, the lock, the booted game.
-set(ages 0.1 1.0 1.6 3.2)
+# Four ages: departing menu, carried slab, lock, booted game. Read the physical
+# and boot clocks instead of pinning M25.3's superseded 3.5-second lock.
+include("${CMAKE_CURRENT_LIST_DIR}/rig_timing.cmake")
+rig_milliseconds(rig_deploy kDeployFirstDeparture departure_ms)
+rig_milliseconds(rig_deploy kSlabLockSeconds travel_ms)
+rig_milliseconds(board_boot kBootSeconds boot_ms)
+math(EXPR lock_ms "${departure_ms} + ${travel_ms}")
+math(EXPR settled_ms "${lock_ms} + ${boot_ms} + 300")
+math(EXPR late_ms "${settled_ms} + 2000")
+rig_seconds(${lock_ms} lock)
+rig_seconds(${settled_ms} settled)
+rig_seconds(${late_ms} late)
+set(ages 0.1 1.0 ${lock} ${settled})
 foreach(t IN LISTS ages)
   shot(deploy-${t} --lab 1 --deploy-t ${t})
 endforeach()
@@ -45,15 +55,14 @@ if(NOT hash_deploy-1.0 STREQUAL hash_deploy-1.0-again)
   message(FATAL_ERROR "two deploy captures at 1.0 s differ")
 endif()
 
-# Settled and booted: the last lock (3.5 s, M25.3's heavier slab) plus the 1.8 s boot is
-# 5.3 s, so 5.6 s equals the long-settled game, and that is a plain lab game.
-shot(deploy-5.6 --lab 1 --deploy-t 5.6)
-shot(deploy-9 --lab 1 --deploy-t 9)
+# Settled and booted equals a later capture and the plain lab game.
+shot(deploy-settled --lab 1 --deploy-t ${settled})
+shot(deploy-late --lab 1 --deploy-t ${late})
 shot(lab-game --lab 1)
-if(NOT hash_deploy-5.6 STREQUAL hash_deploy-9)
-  message(FATAL_ERROR "the deploy has not settled by 5.6 s")
+if(NOT hash_deploy-settled STREQUAL hash_deploy-late)
+  message(FATAL_ERROR "the deploy has not settled by ${settled} s")
 endif()
-if(NOT hash_deploy-9 STREQUAL hash_lab-game)
+if(NOT hash_deploy-late STREQUAL hash_lab-game)
   message(FATAL_ERROR "a settled deploy differs from the lab game")
 endif()
 
@@ -69,7 +78,7 @@ endif()
 # locked. Mid-travel the torus frame is the flat sheet; settled it is the formed shape.
 shot_of(torus-travel torus --geometry --lab 1 --deploy-t 2.2)
 shot_of(torus-travel-again torus --geometry --lab 1 --deploy-t 2.2)
-shot_of(torus-settled torus --geometry --lab 1 --deploy-t 9)
+shot_of(torus-settled torus --geometry --lab 1 --deploy-t ${settled})
 if(NOT hash_torus-travel STREQUAL hash_torus-travel-again)
   message(FATAL_ERROR "two shape-view deploy captures at 2.2 s differ")
 endif()
