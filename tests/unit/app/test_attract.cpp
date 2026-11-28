@@ -103,6 +103,26 @@ TEST_CASE("every attract beat is a real, legal game for its variant",
   }
 }
 
+TEST_CASE("only a game the player started is a physical board (M25.7)",
+          "[unit][app][attract]") {
+  auto shell = makeShell(tempSettings("real_board.conf"));
+  CHECK(shell->boardIsReal());
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK(shell->boardIsReal());
+  // The trailer plays in a remote space: its boards never left the rack, and stopping it
+  // leaves the session behind with the flag still down.
+  shell->startAttract(defaultAttractSequence());
+  REQUIRE(shell->attracting());
+  CHECK_FALSE(shell->boardIsReal());
+  shell->stopAttract();
+  REQUIRE(shell->session() != nullptr);
+  CHECK_FALSE(shell->attracting());
+  CHECK_FALSE(shell->boardIsReal());
+  // The next game the player starts is real again.
+  REQUIRE(shell->startGame("standard").has_value());
+  CHECK(shell->boardIsReal());
+}
+
 TEST_CASE("the attract sequence plays every shape and loops back forever",
           "[unit][app][attract]") {
   auto shell = makeShell(tempSettings("attract.conf"));

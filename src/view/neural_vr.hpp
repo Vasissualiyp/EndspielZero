@@ -24,7 +24,11 @@ inline constexpr int kRackBays = 8;
 /// game crosses into VR when it appends its ninth board.
 [[nodiscard]] bool needsVr(const std::vector<Placement>& placements,
                            int rackBays = kRackBays);
-/// The same for every board of the variant's layout under `cfg`.
+/// M25.7 whether the variant's rules can create boards during a game: any temporal or
+/// multiverse axis (time travel appends boards and timelines). Such a game starts in VR.
+[[nodiscard]] bool canAddSlabs(const VariantSpec& variant);
+/// The same for every board of the variant's layout under `cfg`, or a variant that can
+/// add slabs (`canAddSlabs`), whatever the starting count.
 [[nodiscard]] bool needsVr(const VariantSpec& variant, const ViewConfig& cfg,
                            int rackBays = kRackBays);
 

@@ -358,6 +358,10 @@ class Ui {
     rigStowTravel_ = stowTravel;
     rigCalmTiming_ = calm;
   }
+  /// M25.7: the game's board never left the rack (the trailer, an attract scene): in the
+  /// lab, leaving it is a cut to the menu, not a screen move with a stow behind it.
+  /// Frame-local like `setRigMoves`; lab-off frames never set it.
+  void setUnrealBoard(bool unreal) noexcept { rigUnreal_ = unreal; }
   struct RigMove {
     app::ScreenMove move;
     float age, total, lock, shutdown;
@@ -393,7 +397,7 @@ class Ui {
 
  private:
   bool labBackdrop_{false}, labLast_{false}, labLeaving_{false};
-  bool rigEnabled_{false};
+  bool rigEnabled_{false}, rigUnreal_{false};
   float rigDeployLock_{1.62f}, rigStowShutdown_{0}, rigStowTravel_{1.42f};
   float rigTotal_{0}, rigLock_{0}, rigShutdown_{0};
   std::optional<CalmRigTiming> rigCalmTiming_;

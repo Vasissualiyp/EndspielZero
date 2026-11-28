@@ -37,8 +37,14 @@ bool needsVr(const std::vector<Placement>& placements, int rackBays) {
   return deployedSlabCount(placements) > rackBays;
 }
 
+bool canAddSlabs(const VariantSpec& variant) {
+  for (std::size_t a = 0; a < variant.dims.dims(); ++a)
+    if (variant.dims.kind(a) != AxisKind::Spatial) return true;
+  return false;
+}
+
 bool needsVr(const VariantSpec& variant, const ViewConfig& cfg, int rackBays) {
-  return needsVr(layout(variant.dims, cfg), rackBays);
+  return canAddSlabs(variant) || needsVr(layout(variant.dims, cfg), rackBays);
 }
 
 VrState vrEnter(float age, float intensity) noexcept {

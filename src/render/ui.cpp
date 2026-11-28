@@ -2047,6 +2047,8 @@ UiRequest Ui::build(app::Shell& shell, float fps) {
     // The lab's game moves (M24.5): the slabs travel, so the clock runs their length.
     if (lastScreen_ >= 0) rigFrom_ = static_cast<app::Screen>(lastScreen_);
     rigCalmSeconds_.reset();
+    // M25.7: a board that never left the rack has nothing to stow; the menu is just there.
+    if (rigUnreal_ && move_ == app::ScreenMove::GameToMenu) move_ = app::ScreenMove::Cut;
     if (rigEnabled_ && move_ == app::ScreenMove::MenuToGame) {
       move_ = app::ScreenMove::Deploy;
       rigLock_ = rigDeployLock_;

@@ -57,6 +57,31 @@ TEST_CASE("neural vr: games with more slabs than the rack's bays go to VR",
   }
 }
 
+TEST_CASE("neural vr: a variant that can add slabs enters VR at the start (M25.7)",
+          "[unit][view][vr]") {
+  // Decided from the rules, not the placement count: a temporal or multiverse axis lets a
+  // move create boards, so the game cannot stay in the room however few it starts with.
+  const std::map<std::string, bool> grows{
+      {"standard", false},      {"cylinder", false},      {"torus", false},
+      {"mobius", false},        {"klein", false},         {"mirrorbox", false},
+      {"atomic", false},        {"atomic_torus", false},  {"mustcapture", false},
+      {"charged", false},       {"cube5", false},         {"hyper4", false},
+      {"hyper4_8x8", false},    {"t6", false},            {"torus3d", false},
+      {"torus3d_8x8", false},   {"torus3d_twist", false}, {"5d", true},
+  };
+  for (const auto& [name, want] : grows) {
+    CAPTURE(name);
+    const VariantSpec v = test::loadVariant(name);
+    CHECK(canAddSlabs(v) == want);
+    const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+    const bool bays = deployedSlabCount(layout(v.dims, cfg)) > kRackBays;
+    CHECK(needsVr(v, cfg) == (bays || want));
+  }
+  // Even with a rack that would hold the whole starting layout.
+  const VariantSpec v = test::loadVariant("5d");
+  CHECK(needsVr(v, ViewConfig::forBoard(v.dims), 1000));
+}
+
 TEST_CASE("neural vr: the rack holds eight boards, the ninth crosses into VR",
           "[unit][view][vr]") {
   CHECK(kRackBays == 8);

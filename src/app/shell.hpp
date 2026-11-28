@@ -268,6 +268,10 @@ class Shell {
   /// main menu.
   void stopAttract();
   [[nodiscard]] bool attracting() const noexcept { return !attract_.empty(); }
+  /// M25.7: the current game's board is a physical one. False for the trailer's boards,
+  /// which never left the rack, and it stays false after the trailer stops, until the
+  /// next game the player starts. The lab's rack moves (deploy, stow) are for real boards.
+  [[nodiscard]] bool boardIsReal() const noexcept { return boardReal_; }
   /// Which beat of the sequence is playing.
   [[nodiscard]] std::size_t attractIndex() const noexcept { return attractIndex_; }
   /// Which beat of the sequence is playing, for a status line or a test.
@@ -575,6 +579,7 @@ class Shell {
   view::Vec3 shapeCentre_{3.5f, 3.5f, 0.7f};
   std::size_t attractIndex_{0};
   TrailerCamera trailerCamera_{TrailerCamera::Authored};
+  bool boardReal_{true};  ///< see `boardIsReal`
   bool trailerEditing_{false};
   /// A beat was entered outside `advanceAttract` (a jump); the next call reports it.
   bool trailerCutPending_{false};

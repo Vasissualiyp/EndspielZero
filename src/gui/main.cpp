@@ -268,6 +268,14 @@ void applyWake(render::BoardRenderer& renderer, const WakeFrame& wake,
                                     w.exposureEv, w.saturation, w.lidGlow});
 }
 
+/// M25.7: a game is being played (or paused over its board). The board is then never
+/// defocused - no daydream floor or gaze spot, no depth of field, no pause blur - so the
+/// player can think; only the menus (and panels in front of the board) blur. The attract
+/// loop and the trailer are not games being played.
+bool boardStaysSharp(const app::Shell& shell) {
+  return shell.hasGame() && !shell.attracting();
+}
+
 void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
                      const app::Shell& shell, bool active, double seconds,
                      std::uint32_t height, bool capture, const LivingFrame& living = {},
@@ -336,7 +344,7 @@ void setImplantFrame(render::BoardRenderer& renderer, const render::Ui& ui,
     dof.spotRadius = view::kSpotRadius * static_cast<float>(height);
     dof.spotFeather = view::kSpotFeather * static_cast<float>(height);
     dof.spotFraction = view::kSpotBlurFraction;
-    renderer.setDepthOfField(dof);
+    if (!boardStaysSharp(shell)) renderer.setDepthOfField(dof);
   }
   for (const auto& record : ui.implantRecords()) {
     if (p.panelCount == p.panels.size()) break;
@@ -838,6 +846,9 @@ float gStowFxShutdown = app::kStowShutdownSeconds;
 void configureRigMoves(render::Ui& ui, const app::Shell& shell) {
   const bool on = labEnabled(shell) && gStation.empty() && shell.hasGame() &&
                   !shell.attracting() && gLabScene->doc().deploy.has_value();
+  // M25.7: a board that never left the rack (the trailer) has no stow to play.
+  ui.setUnrealBoard(labEnabled(shell) && gStation.empty() && shell.hasGame() &&
+                    !shell.boardIsReal());
   // M25.5: a VR game deploys and stows one stand-in slab, and the handoff runs inside the
   // moves: the deploy's "lock" is the horizon open (the boards boot then), the stow's
   // lead is the eyes opening on the room and the code fading. No rig is built for the
@@ -1277,15 +1288,17 @@ struct VrTrack {
 } gVrTrack;
 
 /// Whether this game belongs in the implant's space: pinned (--vr, console `vr`), or more
-/// slabs than the rack holds. A 5D game asks with its visible boards, so it crosses when
-/// it appends the ninth.
+/// slabs than the rack holds, or a variant whose rules can add boards (M25.7: 5D starts in
+/// VR). The live count stays as the fallback, so a game crosses when it appends the ninth.
 bool vrWanted(const app::Shell& shell, const render::Ui* ui) {
   const app::Session* session = shell.session();
   if (session == nullptr) return false;
   if (gVr >= 0) return gVr == 1;
   if (ui != nullptr)
     if (const auto pin = ui->vrPin()) return *pin;
-  return view::needsVr(session->placements(), gRackBays);
+  // M25.7: a variant that can add boards starts in VR; the live count is the fallback.
+  return view::canAddSlabs(session->variant()) ||
+         view::needsVr(session->placements(), gRackBays);
 }
 
 /// The session's VR state, before its first frame has been followed (a deploy is being
@@ -2815,7 +2828,7 @@ int captureFrame(const std::string& variantName, const std::string& path,
                          shell->screen() == app::Screen::MainMenu || cinema;
       const float away = sharp ? 0.0f : 1.0f;
       shell->session()->setPullBack(away);
-      renderer->setBlur(away);
+      renderer->setBlur(boardStaysSharp(*shell) ? 0.0f : away);
       if (frame.valid()) {
         shell->session()->setBoardAspect(frame.width / frame.height);
         if (applyStage(*shell->session(), request, frame,
@@ -4494,7 +4507,7 @@ int main(int argc, char** argv) {
       shell->session()->setPullBack(steppedBack);
       // Out of focus by the same amount the camera has stepped back, so the two read as
       // one movement. Past the pause it is already fully soft.
-      renderer->setBlur(std::min(steppedBack, 1.0f));
+      renderer->setBlur(boardStaysSharp(*shell) ? 0.0f : std::min(steppedBack, 1.0f));
     }
 
     // Whether the flat<->shape morph is in flight this frame, and whether this is the

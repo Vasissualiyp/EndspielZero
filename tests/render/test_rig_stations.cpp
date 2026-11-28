@@ -288,6 +288,60 @@ TEST_CASE("Ui calm VR handoff keeps both halves of its clock and the leaving boa
   }
   CHECK(ctx->takeValidationMessages().empty());
 }
+TEST_CASE("leaving a game whose board never left the rack is a cut, not a stow (M25.7)",
+          "[render][rig][unreal]") {
+  SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+  REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+  struct Sdl {
+    ~Sdl() { SDL_Quit(); }
+  } sdl;
+  auto* window = SDL_CreateWindow("unreal board", 960, 540, SDL_WINDOW_HIDDEN);
+  REQUIRE(window);
+  struct Window {
+    SDL_Window* w;
+    ~Window() { SDL_DestroyWindow(w); }
+  } win{window};
+  auto ctx = VulkanContext::create();
+  REQUIRE(ctx);
+  {
+    auto ui = Ui::create(*ctx, window, view::implantTheme(view::Theme::manifold()));
+    REQUIRE(ui);
+    auto shell = app::Shell::create({"standard"}, {});
+    REQUIRE(shell);
+    shell->dismissWelcome();
+    shell->setVariantLoader([](const std::string& name) -> Result<VariantSpec> {
+      return test::loadVariant(name);
+    });
+    REQUIRE(shell->startGame("standard"));
+    (*ui)->setImplantActive(true);
+    const auto frame = [&] {
+      (*ui)->tick(0);
+      (*ui)->newFrame();
+      (void)(*ui)->build(*shell, 60);
+      (*ui)->endFrame();
+    };
+    frame();
+    for (const bool unreal : {false, true}) {
+      for (const bool entering : {true, false}) {
+        CAPTURE(unreal, entering);
+        (*ui)->setRigMoves(true, view::deployLastLock(1), 1, view::stowTravelSeconds(1));
+        (*ui)->setUnrealBoard(unreal);
+        (*ui)->pinTransitionAge(0.f);
+        shell->previewTransition(entering ? app::Screen::MainMenu : app::Screen::Game,
+                                 entering ? app::Screen::Game : app::Screen::MainMenu);
+        frame();
+        // Only the way out of a board that never left the rack changes: it is a cut.
+        const bool cut = unreal && !entering;
+        CHECK((*ui)->screenMove() == (cut ? app::ScreenMove::Cut
+                                          : entering ? app::ScreenMove::Deploy
+                                                     : app::ScreenMove::Stow));
+        CHECK((*ui)->rigMove().has_value() == !cut);
+        CHECK_FALSE((cut && (*ui)->holdsBoard()));
+      }
+    }
+  }
+  CHECK(ctx->takeValidationMessages().empty());
+}
 TEST_CASE("the neural HUD advertises rig skip from the first frame (M25.3b)",
           "[render][rig][gantryhint]") {
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");

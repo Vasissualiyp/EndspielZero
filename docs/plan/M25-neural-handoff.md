@@ -407,7 +407,65 @@ carry agreement. Sheets in `out/m25.6/`: before/after for each scene, the T6 orb
 (underside, oblique, hover) and lab-off. Re-measure T6 against standard.
 Commit: `render: readable neural VR - quiet bridges, shape and torus in VR (M25.6)`.
 
+## M25.7 - play-test fixes (2026-11-28)
+
+From the user's play-test on 2026-11-28. Lab-off output stays byte-identical, except
+that a paused game's board is no longer blurred (item 1, in any mode). Sheets in
+`out/m25.7/`.
+
+1. **Defocus only in menus.** The user: "Only keep the defocus in the main (and secondary)
+   menus. Never defocus the board during the game (that makes it harder to think when
+   playing, distracting). The menu items in front of the board can be defocused, no
+   issues with that." While a game is being played - any view - the board is never
+   blurred: no daydream floor, no gaze spot, no uniform defocus (`DepthOfField` in
+   `setImplantFrame`), and no pause blur (`setBlur`, stepped back or not). The menus keep
+   all of it, and an implant panel in front of the board may still soften. One predicate
+   in `src/gui/main.cpp`, `boardStaysSharp(shell)`: a game exists and it is not the
+   attract/trailer. Test: `gui-play-sharp` (`tests/check_play_sharp.cmake`) - the board
+   core of a game frame equals the plain frame under daydream and a gaze target, the main
+   menu's differs.
+2. **No physical board moves when the board is not real.** The user: "no need to do board
+   move animations for the cases when the board played isn't in real life (i.e. when
+   'play trailer' is pressed, the trailer immediately plays in some remote space outside
+   of the garage - but when I stop the trailer, there's still animation of the board
+   moving back)." `Shell::boardIsReal()` is false for the trailer's boards and stays
+   false after it stops (the session lingers) until the next `startGame`. In the lab,
+   `Ui::setUnrealBoard` turns the game-to-menu move into a `Cut`, so no Stow plays and
+   the rack, which never moved, is already at rest. Tests: `[unit][app][attract]`
+   (the flag's life) and `[render][rig][unreal]` (Stow vs Cut).
+3. **5D in VR from the start.** The user: "5D mode: it should entirely be in VR, but right
+   now it only switches when we get a 2nd timeline - not good!" `view::canAddSlabs(variant)`
+   is true when the variant has a temporal or multiverse axis (its rules create boards);
+   `view::needsVr(variant, cfg)` is that or the layout exceeding the rack. The front end's
+   `vrWanted` uses `canAddSlabs` first and the live placement count as the fallback, so the
+   mid-game crossing remains. Every shipped variant is in the test; only `5d` grows.
+   ADR 0027 carries the amendment.
+
 ## Status
+
+### M25.7 - built and verified (2026-11-28)
+
+Built the three items above, test first (each red before its change: the daydream frame
+differed by 8,534 board pixels; the `canAddSlabs` and `boardIsReal` tests did not compile).
+
+Paths examined for item 2:
+- **Fixed - the trailer, leaving it** (`stopAttract` -> menu): it was a Stow of a board
+  that never left the rack. Now a Cut. Entering it was already a plain `MenuToGame` (the
+  rig is off while attracting).
+- **Already correct - the trailer's beats and the menu attract loop**: `labGameAny`,
+  `configureRigMoves` and `rigFrame` all exclude `attracting()`, so there is no deploy and
+  no relayout.
+- **Already correct - overtures** (library, new-game hologram, wall projector): no session,
+  hence no rig move.
+- **Already correct - the editor preview**: `labGameAny` excludes the Editor screen.
+- **Already correct - VR relayouts**: a VR game is not `labGame`, so `trackLayout` never
+  queues a rack relayout; its layout changes are the light glide. Kept on purpose: a VR
+  game's enter and leave, which move the one stand-in slab that really left the rack.
+- **Kept - watching a bundled game**: it is a physical board playing on the rack.
+
+Items 1 and 3 cost no lab-off bytes except the pause blur; that one is the user's explicit
+ask. A gaze on the interface still dims the room's tone (an implant effect, not a defocus);
+untouched.
 
 ### M25.6 - built and verified (2026-11-28)
 

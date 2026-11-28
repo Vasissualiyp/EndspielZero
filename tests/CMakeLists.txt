@@ -137,6 +137,12 @@ if(TARGET endspielzero_gui)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_living.cmake)
   set_tests_properties(gui-living PROPERTIES LABELS "render;gui" TIMEOUT 300
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-play-sharp
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_play_sharp.cmake)
+  set_tests_properties(gui-play-sharp PROPERTIES LABELS "render;gui" TIMEOUT 300
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   add_test(NAME gui-wake
     COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
             -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures

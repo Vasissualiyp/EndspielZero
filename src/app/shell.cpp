@@ -380,6 +380,7 @@ Result<void> Shell::startGame(const std::string& variantName) {
   }
   session_ = std::move(*session);
   currentVariant_ = variantName;
+  boardReal_ = true;
   settings_.lastVariant = variantName;
   message_.clear();
   applySettings();
@@ -640,6 +641,7 @@ Result<void> Shell::startAttractStep(std::size_t index) {
     fromFlatBoard = attract_[attractIndex_].variant == "standard";
   }
   if (auto ok = startGame(step.variant); !ok.has_value()) return ok;
+  boardReal_ = false;  // the trailer plays in a remote space; nothing left the rack
   if (carried.has_value()) {
     if (carriedAspect > 0.0f) session_->setBoardAspect(carriedAspect);
     view::OrbitCamera c = *carried;

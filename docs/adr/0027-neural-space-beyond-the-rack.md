@@ -42,3 +42,10 @@ handoffs so room hardware does not leak into the virtual space.
 Disable the neural-space route and restore physical deployment for every layout;
 large-layout performance and framing would then require another solution. Keep
 ADR-0026's original text unchanged as the record of its original decision.
+
+## Amendment (2026-11-28, M25.7)
+The threshold above also holds for a variant that can add boards. A variant with a
+temporal or multiverse axis (5D) creates boards during play, so it enters neural space at
+game start, decided from the variant (`view::canAddSlabs`) and not from the starting slab
+count. The live-count test remains as the fallback for any other layout that grows past
+the rack mid-game.
