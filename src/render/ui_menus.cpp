@@ -1329,6 +1329,12 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::Checkbox("Name the seam colours", &s.showSeamLegend);
   ImGui::EndDisabled();
   ImGui::Checkbox("Show coordinates", &s.showCoordinates);
+  // The tiled view (M22.3): the neighbours of a glued board, fainter each ring. Ignored on
+  // the shape, and on boards with nothing glued to draw.
+  ImGui::Checkbox("Show the adjacent boards (glued boards)", &s.showAdjacent);
+  ImGui::BeginDisabled(!s.showAdjacent);
+  ImGui::SliderInt("Adjacent board rings", &s.adjacentRings, 1, 3);
+  ImGui::EndDisabled();
   ImGui::SliderFloat("Trailer: shape morph speed", &s.trailerMorphSpeed, 0.25f, 4.0f,
                      "%.2fx");
   ImGui::SliderFloat("Trailer: near clip", &s.trailerNearClip, view::kMinNearClip, 8.0f,
@@ -1545,6 +1551,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showLastMove != s.showLastMove || before.showCheck != s.showCheck ||
       before.showSeams != s.showSeams || before.showSeamLegend != s.showSeamLegend ||
       before.showCoordinates != s.showCoordinates ||
+      before.showAdjacent != s.showAdjacent || before.adjacentRings != s.adjacentRings ||
       before.swapLayerColors != s.swapLayerColors ||
       before.trailerMovePreview != s.trailerMovePreview ||
       before.trailerMorphSpeed != s.trailerMorphSpeed ||

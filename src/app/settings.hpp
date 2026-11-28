@@ -157,9 +157,9 @@ struct Settings {
   float geometryGhost{1.0f};
   /// The tiled view (M22): draw the board's neighbours through its glued edges, on the
   /// flat and the solid board (never on the shape - `view::adjacentDrawn`). How many
-  /// rings, 1 to 3, and the live reveal 0..1 the arrival animation eases (M22.4).
-  /// Transient for now: M22.3 writes the switch and the rings to disk; the reveal stays
-  /// transient like `geometryFormed`.
+  /// rings, 1 to 3, and the live reveal 0..1 the arrival animation eases (M22.4). The
+  /// switch (`adjacent_boards`) and the rings (`adjacent_rings`) are saved (M22.3); the
+  /// reveal stays transient like `geometryFormed`.
   bool showAdjacent{false};
   int adjacentRings{2};
   float adjacentFormed{1.0f};

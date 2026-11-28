@@ -358,3 +358,44 @@ Deviations / decisions:
 - Copies get no contact shadows; on the manifold/lab theme their hologram pieces read
   fairly bright even dimmed - a tuning item for M22.6. Camera framing unchanged: the copies
   spill past the frame (the spec allows it).
+
+### 2026-11-28 - M22.3 built (switch, setting and button)
+
+What was built:
+- `Settings::showAdjacent` / `adjacentRings` are saved as `adjacent_boards` / `adjacent_rings`
+  (parsed, written, rings clamped 1-3 by `sanitize`); `adjacentFormed` stays transient. Both
+  are in the `moved` comparison of `ui_menus.cpp`. Settings -> BOARD gets a checkbox and a
+  rings slider (disabled while the switch is off).
+- The game dock's **ADJ** button (`render::adjacentButton`, a free function like
+  `viewModeButton`): offered only where `view::adjacentCopies` is non-empty, lit while the
+  switch is on, live in 2D and 3D, greyed (and not lit) only while the shape stands in for
+  the board. The rule is the one predicate `view::adjacentDrawn` that `optionsFor` already
+  reads. It sits between 2D/3D and SHAPE. `--adjacent`, `--adjacent-rings`,
+  `--adjacent-amount` and the console `adjacent` already existed (M22.2).
+- Neural interface (M25.1): the button goes through the same `widgets::button` /
+  `drawLiveControl` as the rest of the dock, so it is frameless `implant`-ink in the lab and
+  neural VR. That path draws every cold label in `rift` whether lit or not, so a lit ADJ
+  would not read; it alone drops `cold` while lit under `implantFrameless`, which makes it the
+  bright `implant` ink. (SHAPE and the other cold dock buttons keep that quirk; not touched,
+  to leave existing lab captures as they were.)
+
+Tests: `tests/render/test_ui_labels.cpp` (ADJ offered / enabled / lit / greyed on the
+shape, flat wins), `tests/unit/app/test_shell.cpp` (round-trip of the two keys, `adjacentFormed`
+not saved, clamping); `tests/check_adjacent.cmake` compares amount 0 to off with `--cinema` (the lit ADJ
+button otherwise differs) and checks the button lights. `[render],[app],[view]`: 796 test cases pass;
+`ctest -L gui` passes (60 tests).
+
+Deviations / decisions:
+- The ADJ button is the cost of one more dock slot. At 3x scale on a 1280x720 window with the
+  shape buttons showing, a full-width ADJ wrapped the dock to a third row and the ledger
+  (`HUD panel bands...` test) lost its room, so a *wrapped* (compact) dock gives ADJ
+  `px(34)` instead of `px(52)`. Unwrapped it is 52.
+- Dock captures of glued variants (torus, klein, mobius, cylinder, ...) and the Settings
+  screen now show the new button / rows even with the switch off, as the spec requires; the
+  3-D board itself is unchanged with the switch off. Variants with no copies (standard,
+  cube5, mirrorbox, ...) have a byte-identical dock.
+- Settings -> BOARD was not captured (the screen has no scroll flag); the rows are plain
+  ImGui checkbox/slider calls beside the existing ones.
+- Sheets: `out/m22.3/sheet1.png` (torus off / on / flat / shape, console), `sheet2.png`
+  (standard, klein lab, settings, torus neural VR), `sheet3.png` (ADJ lit vs off in lab
+  and VR).

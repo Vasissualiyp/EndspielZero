@@ -69,6 +69,45 @@ TEST_CASE("coordinate labels are drawn only in the flat 2-D view", "[render]") {
   CHECK_FALSE(coordinateLabelsShown(settings, **cube));
 }
 
+TEST_CASE("the ADJ button is offered only where there are neighbours, and greyed on the shape",
+          "[render]") {
+  // M22.3. Offered exactly where `adjacentCopies` is non-empty; lit while the switch is
+  // on; live in 2D and 3D; greyed only while the shape stands in for the board.
+  app::Settings settings;
+  settings.showAdjacent = false;
+  {
+    const AdjacentButton b = adjacentButton(settings, false, true, false);
+    CHECK_FALSE(b.offered);
+  }
+  {
+    const AdjacentButton b = adjacentButton(settings, false, false, true);
+    CHECK(b.offered);
+    CHECK(b.enabled);
+    CHECK_FALSE(b.lit);
+  }
+  settings.showAdjacent = true;
+  for (bool flat : {false, true}) {
+    const AdjacentButton b = adjacentButton(settings, flat, false, true);
+    CHECK(b.enabled);
+    CHECK(b.lit);
+  }
+  // The shape on a variant that has one (and not flat): greyed, and not lit - the
+  // switch is ignored there (`view::adjacentDrawn`).
+  settings.geometryView = true;
+  {
+    const AdjacentButton b = adjacentButton(settings, false, true, true);
+    CHECK(b.offered);
+    CHECK_FALSE(b.enabled);
+    CHECK_FALSE(b.lit);
+  }
+  // Flat wins over the shape, so the tiling is live again there.
+  {
+    const AdjacentButton b = adjacentButton(settings, true, true, true);
+    CHECK(b.enabled);
+    CHECK(b.lit);
+  }
+}
+
 TEST_CASE("the 2D/3D button is re-purposed on the shape view", "[render]") {
   // Off the shape view it is the original flat/solid board toggle, with its original
   // enabled state - exactly as before M17.25. On a shape that actually exists the old

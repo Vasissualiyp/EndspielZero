@@ -72,6 +72,14 @@ ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
           flatView || !(settings.geometryView && surfaceAvailable), false};
 }
 
+AdjacentButton adjacentButton(const app::Settings& settings, bool flatView,
+                              bool surfaceAvailable, bool copiesExist) noexcept {
+  // The shape is what is drawn only where there is one and the flat view has not
+  // overridden it - the `surface` of `optionsFor`.
+  const bool shape = settings.geometryView && surfaceAvailable && !flatView;
+  return {copiesExist, !shape, view::adjacentDrawn(settings.showAdjacent, shape)};
+}
+
 std::optional<CellId> pickEditorPreview(std::span<const EditorPickQuad> quads,
                                         ImVec2 point) {
   std::optional<CellId> cell;
@@ -2876,9 +2884,15 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   // The trailer's timeline strip takes the bottom edge; the controls sit above it.
   const float timelineLift = shell.attracting() ? buildTrailerTimeline(shell) : 0.0f;
   std::vector<float> dockWidths;
+  std::size_t adjacentSlot = static_cast<std::size_t>(-1);
   // Sampled once: the AXES click below changes the view mid-frame, and the dock layout
   // above must keep the button count it was measured for.
   const bool offInitialView = v.dims.dims() > 2 && !session.atInitialView();
+  // The ADJ button's state (M22.3), sampled with the layout for the same reason: its
+  // presence is a property of the variant, its lit/greyed state is read where it is drawn.
+  const AdjacentButton adjacentBtn = adjacentButton(
+      shell.settings(), session.flatView(), hasPlaySurface(v),
+      !view::adjacentCopies(v, session.viewConfig(), 1).empty());
   if (!shell.attracting() && !shell.watching()) {
     // Review replaces the game actions with the cursor controls (M23.11 3b).
     if (reviewing)
@@ -2888,6 +2902,10 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     if (v.dims.dims() > 2) dockWidths.push_back(px(78));
     if (offInitialView) dockWidths.push_back(px(96));
     dockWidths.push_back(px(64));
+    if (adjacentBtn.offered) {
+      adjacentSlot = dockWidths.size();
+      dockWidths.push_back(px(52));
+    }
     if (hasPlaySurface(v)) {
       dockWidths.push_back(px(84));
       if (shell.settings().geometryView && !session.flatView()) {
@@ -2906,8 +2924,12 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
   const auto fullDock = dockLayout(dockWidths, gameButtons, dockAvailable, fullRowHeight,
                                    ImGui::GetStyle().ItemSpacing.x, px(12));
   const bool compactDock = fullDock.height > fullRowHeight;
-  if (compactDock)
+  if (compactDock) {
     for (float& width : dockWidths) width *= .98f;
+    // A wrapped dock is already crowded: the three-letter ADJ gives up the most so it
+    // does not cost the dock a further row (and the ledger above it its room).
+    if (adjacentSlot < dockWidths.size()) dockWidths[adjacentSlot] = px(34);
+  }
   const float dockRowHeight =
       compactDock
           ? std::ceil(std::max(controlHeight() * 20 / 42,
@@ -3169,6 +3191,20 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
         shell.settings().flatView = flat;
       }
       request.settingsChanged = true;
+    }
+    // The tiled view (M22.3): the board's neighbours through its glued edges. Offered only
+    // where there are some; live in 2D and 3D, greyed while the shape stands in for the
+    // board (a shape is already cyclic). Cold, like SHAPE: a view, not a move.
+    if (adjacentBtn.offered) {
+      ImGui::SameLine();
+      // The neural interface (M25.1) draws a cold label in `rift` whether lit or not, so
+      // there the lit state drops "cold" and reads as the bright `implant` ink.
+      const bool cold = !(adjacentBtn.lit && t.implantFrameless);
+      if (dockButton("ADJ", t, px(52), adjacentBtn.lit, cold, adjacentBtn.enabled,
+                     actionFont())) {
+        shell.settings().showAdjacent = !shell.settings().showAdjacent;
+        request.settingsChanged = true;
+      }
     }
     // Turn the board into the shape its geometry describes (M17). Offered only where
     // there is a surface to become: a glued two-dimensional variant names one, and

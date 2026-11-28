@@ -138,6 +138,20 @@ struct ViewModeButton {
 [[nodiscard]] ViewModeButton viewModeButton(const app::Settings& settings, bool flatView,
                                             bool surfaceAvailable) noexcept;
 
+/// The ADJ button of the game dock (M22.3): the tiled view's switch. Offered only where the
+/// variant has neighbours to draw (`copiesExist`: `view::adjacentCopies` is non-empty);
+/// lit while the switch is on and actually drawn; live in 2D and 3D, greyed only while the
+/// shape stands in for the board (the same predicate as `view::adjacentDrawn`). A free
+/// function so the branch is testable with no device.
+struct AdjacentButton {
+  bool offered;
+  bool enabled;
+  bool lit;
+};
+[[nodiscard]] AdjacentButton adjacentButton(const app::Settings& settings, bool flatView,
+                                            bool surfaceAvailable,
+                                            bool copiesExist) noexcept;
+
 /// The ordered, filtered main menu. Indices number only the entries being shown.
 struct MainMenuEntry {
   const char* label;

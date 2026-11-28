@@ -458,6 +458,36 @@ TEST_CASE("the Klein square shift can be negative, within its own range", "[unit
   REQUIRE(fine.kleinShift == -3.0f);
 }
 
+TEST_CASE("the tiled view's switch and rings persist; the reveal does not", "[unit][app]") {
+  // M22.3: `adjacent_boards` and `adjacent_rings` are written and read back; the live
+  // reveal `adjacentFormed` is transient, like `geometryFormed`.
+  const Settings defaults;
+  CHECK_FALSE(defaults.showAdjacent);
+  CHECK(defaults.adjacentRings == 2);
+  const auto path = tempSettings("adjacent.conf");
+  Settings s;
+  s.showAdjacent = true;
+  s.adjacentRings = 3;
+  s.adjacentFormed = 0.4f;
+  REQUIRE(s.save(path).has_value());
+  const Settings back = Settings::load(path);
+  CHECK(back.showAdjacent);
+  CHECK(back.adjacentRings == 3);
+  CHECK(back.adjacentFormed == 1.0f);
+  {
+    std::ofstream out(path);
+    out << "adjacent_boards = true\nadjacent_rings = 9\n";
+  }
+  Settings clamped = Settings::load(path);
+  CHECK(clamped.showAdjacent);
+  CHECK(clamped.adjacentRings == 3);
+  {
+    std::ofstream out(path);
+    out << "adjacent_rings = 0\n";
+  }
+  CHECK(Settings::load(path).adjacentRings == 1);
+}
+
 TEST_CASE("a missing settings file means defaults, not an error", "[unit][app]") {
   const Settings s = Settings::load("/nonexistent/path/settings.conf");
   REQUIRE(s.guiScale == 1.0f);

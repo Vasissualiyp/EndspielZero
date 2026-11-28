@@ -138,6 +138,10 @@ Settings Settings::load(const std::filesystem::path& path) {
       s.flatView = asBool(value);
     else if (key == "geometry_view")
       s.geometryView = asBool(value);
+    else if (key == "adjacent_boards")
+      s.showAdjacent = asBool(value);
+    else if (key == "adjacent_rings")
+      s.adjacentRings = asInt(value, s.adjacentRings);
     else if (key == "geometry_evert")
       s.geometryEvert = asFloat(value, s.geometryEvert);
     else if (key == "geometry_invert")
@@ -267,6 +271,8 @@ Result<void> Settings::save(const std::filesystem::path& path) const {
   out << "theme = " << theme << '\n';
   out << "flat_view = " << boolText(flatView) << '\n';
   out << "geometry_view = " << boolText(geometryView) << '\n';
+  out << "adjacent_boards = " << boolText(showAdjacent) << '\n';
+  out << "adjacent_rings = " << adjacentRings << '\n';
   out << "geometry_evert = " << geometryEvert << '\n';
   out << "geometry_invert = " << boolText(geometryInvert) << '\n';
   out << "geometry_ghost = " << geometryGhost << '\n';
