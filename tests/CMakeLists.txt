@@ -155,6 +155,12 @@ if(TARGET endspielzero_gui)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_end_shutdown.cmake)
   set_tests_properties(gui-end-shutdown PROPERTIES LABELS "render;gui" TIMEOUT 300
     ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+  add_test(NAME gui-adjacent
+    COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
+            -DWORKDIR=${PROJECT_SOURCE_DIR} -DOUT_DIR=${CMAKE_BINARY_DIR}/render-captures
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_adjacent.cmake)
+  set_tests_properties(gui-adjacent PROPERTIES LABELS "render;gui" TIMEOUT 300
+    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
   add_test(NAME gui-visual-time
     COMMAND ${CMAKE_COMMAND} -DGUI=$<TARGET_FILE:endspielzero_gui>
             -DWORKDIR=${PROJECT_SOURCE_DIR}

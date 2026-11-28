@@ -155,6 +155,14 @@ struct Settings {
   /// a ghost, so the far side of the shape and the pieces on it show through. The pieces
   /// stay opaque; the point is to see them (M17.10).
   float geometryGhost{1.0f};
+  /// The tiled view (M22): draw the board's neighbours through its glued edges, on the
+  /// flat and the solid board (never on the shape - `view::adjacentDrawn`). How many
+  /// rings, 1 to 3, and the live reveal 0..1 the arrival animation eases (M22.4).
+  /// Transient for now: M22.3 writes the switch and the rings to disk; the reveal stays
+  /// transient like `geometryFormed`.
+  bool showAdjacent{false};
+  int adjacentRings{2};
+  float adjacentFormed{1.0f};
   /// Draw the shape view's pieces as icon-faced pucks instead of the sculptural meshes
   /// (M17.25). The tangent-field walk must put one unavoidable flip on a non-orientable
   /// shape, and a sculptural piece across that line faces the wrong way; a flat icon

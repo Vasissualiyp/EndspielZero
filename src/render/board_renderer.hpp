@@ -212,6 +212,14 @@ struct BoardOptions {
   /// light.
   float lucidHorizon{0.0f};
   float lucidFloorZ{0.0f};
+  /// M22.2 the tiled view: the board's neighbours through its glued edges, drawn
+  /// translucent around it on the ordinary (lattice) path, flat or solid. The front end
+  /// sets it through `view::adjacentDrawn`, so it is never on with the shape.
+  bool showAdjacent{false};
+  /// 0..1, the live reveal (M22.4); a pure number, eased by `shapeEase`. 0 draws no copy.
+  float adjacentAmount{1.0f};
+  /// How many rings of copies, 1 to 3.
+  int adjacentRings{2};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.
@@ -297,6 +305,20 @@ struct InstanceSet {
   /// edges should dim is a separate judgement call. It never enters picking.
   std::vector<Instance> scaffold;
   std::array<Batch, kShapeSlots> scaffoldBatches{};
+
+  /// The tiled view's copies (M22.2): every copy's cells and pieces, farthest ring first
+  /// within each shape's batch, then the centre's glued rails fading under them. All
+  /// translucent, so blended after the opaque board like the shadows. Empty with the
+  /// switch off, which leaves every other list exactly as it was.
+  std::vector<Instance> adjacent;
+  std::array<Batch, kShapeSlots> adjacentBatches{};
+  /// Per `adjacent` instance (CPU side only): the central cell it shows and its copy's
+  /// ring; order 0 is a faded rail of the centre.
+  struct AdjacentMeta {
+    CellId source{kInvalidCell};
+    std::uint8_t order{0};
+  };
+  std::vector<AdjacentMeta> adjacentCells;
 
   [[nodiscard]] std::size_t size() const noexcept {
     return instances.size() + (standbyLed ? 1 : 0);

@@ -2,6 +2,7 @@
 #include "view/adjacent.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 namespace cb::view {
@@ -99,6 +100,48 @@ Placement copyPlacement(const AdjacentCopy& copy, const Placement& central,
 
 CellId sourceCell(const AdjacentCopy& copy, CellId copyLocalCell, const VariantSpec& v) {
   return v.dims.toCell(copy.viaSeams.applyToCoord(v.dims.toCoord(copyLocalCell)));
+}
+
+float adjacentAlpha(int order) noexcept {
+  if (order <= 0) return 1.0f;
+  return kAdjacentAlpha * std::pow(kAdjacentFalloff, static_cast<float>(order - 1));
+}
+
+std::vector<AdjacentCopy> fitAdjacent(std::vector<AdjacentCopy> copies,
+                                      std::size_t perBoard, std::size_t maxInstances) {
+  int keep = 0;
+  for (const AdjacentCopy& c : copies) keep = std::max(keep, static_cast<int>(c.order));
+  const auto boards = [&](int rings) {
+    return static_cast<std::size_t>(
+        std::count_if(copies.begin(), copies.end(), [&](const AdjacentCopy& c) {
+          return c.order >= 1 && c.order <= rings;
+        }));
+  };
+  while (keep > 0 && boards(keep) * perBoard > maxInstances) --keep;
+  std::erase_if(copies, [&](const AdjacentCopy& c) { return c.order > keep; });
+  return copies;
+}
+
+std::vector<AdjacentToken> adjacentTokens(const PositionView& snapshot,
+                                          const std::vector<AdjacentCopy>& copies,
+                                          const std::vector<Placement>& central,
+                                          const ViewConfig& cfg, float reveal,
+                                          CellId skip) {
+  std::vector<AdjacentToken> out;
+  if (reveal <= 0.0f) return out;
+  const VariantSpec& v = snapshot.variant();
+  for (const AdjacentCopy& copy : copies) {
+    if (copy.order == 0) continue;
+    const float alpha = reveal * adjacentAlpha(copy.order);
+    for (const Placement& pl : central) {
+      const Placement at = copyPlacement(copy, pl, v, cfg);
+      if (at.cell == skip) continue;
+      const Piece piece = snapshot.at(at.cell);
+      if (piece.empty()) continue;
+      out.push_back({piece, at, copy.order, alpha});
+    }
+  }
+  return out;
 }
 
 }  // namespace cb::view

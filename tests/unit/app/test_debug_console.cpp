@@ -543,3 +543,23 @@ TEST_CASE("the console pins the neural VR and reports it (M25.5)", "[unit][app][
   CHECK_FALSE(c.vrPin().has_value());
   CHECK(has(DebugConsole::help(), "vr on|off|auto|status"));
 }
+
+TEST_CASE("adjacent switches the tiled view and its rings without a game",
+          "[unit][app]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  // Off by default (M22): the copies are a view a player asks for.
+  CHECK_FALSE(app::Settings{}.showAdjacent);
+  CHECK(app::Settings{}.adjacentRings == 2);
+  CHECK(app::Settings{}.adjacentFormed == 1.0f);
+  shell->settings().showAdjacent = false;
+  shell->settings().adjacentRings = 2;
+  CHECK(console.run(*shell, "adjacent") == "adjacent on, rings 2");
+  CHECK(shell->settings().showAdjacent);
+  CHECK(console.run(*shell, "adjacent off") == "adjacent off, rings 2");
+  CHECK(console.run(*shell, "adjacent 3") == "adjacent on, rings 3");
+  CHECK(shell->settings().adjacentRings == 3);
+  CHECK(console.run(*shell, "adjacent 4") == "usage: adjacent [on|off|1|2|3]");
+  CHECK(console.run(*shell, "adjacent on off") == "usage: adjacent [on|off|1|2|3]");
+  CHECK(has(DebugConsole::help(), "adjacent [on|off|1|2|3]"));
+}

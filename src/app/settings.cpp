@@ -329,6 +329,8 @@ void Settings::sanitize() {
   geometryShellSpread = std::clamp(geometryShellSpread, 0.0f, 1.0f);
   // Never fully transparent: a board you cannot see is not a ghost, it is gone.
   geometryGhost = std::clamp(geometryGhost, 0.35f, 1.0f);
+  adjacentRings = std::clamp(adjacentRings, 1, 3);
+  adjacentFormed = std::clamp(adjacentFormed, 0.0f, 1.0f);
   kleinTwist = std::clamp(kleinTwist, 0.0f, 6.0f);
   geometryWidth = std::clamp(geometryWidth, 0.4f, 4.0f);
   geometryThickness = std::clamp(geometryThickness, 0.2f, 3.0f);

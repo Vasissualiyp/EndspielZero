@@ -570,7 +570,7 @@ void eachBoardInstance(InstanceSet& set, F&& f) {
   }
   for (std::size_t k = 0; k < set.instances.size(); ++k)
     if (surface.empty() || !surface[k]) f(set.instances[k]);
-  for (auto* list : {&set.shadows, &set.flourish})
+  for (auto* list : {&set.shadows, &set.flourish, &set.adjacent})
     for (auto& i : *list) f(i);
   if (set.standbyLed) f(*set.standbyLed);
 }

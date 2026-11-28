@@ -43,6 +43,7 @@
 #include "render/ui_widgets.hpp"
 #endif
 #include "support/variants.hpp"
+#include "view/adjacent.hpp"
 #include "view/theme.hpp"
 
 using namespace cb;
@@ -1286,6 +1287,224 @@ TEST_CASE("a glued board marks each seam with the colour of where it leads", "[r
   const InstanceSet bare =
       renderer.buildInstances(view::PositionView::capture(tp), cfg, &seams);
   CHECK(bare.size() == plain.size());
+}
+
+namespace {
+
+/// The tiled view's instances for `name` at its start position (M22.2): the renderer's
+/// options with the switch set, and the seams the game draws.
+struct Tiled {
+  VariantSpec v;
+  view::ViewConfig cfg;
+  view::SeamMap seams;
+  Position pos;
+  Tiled(const char* name, const view::Theme& theme)
+      : v(test::loadVariant(name)),
+        cfg(view::ViewConfig::forBoard(v.dims)),
+        seams(view::SeamMap::build(v, cfg, theme)),
+        pos(Position::startPosition(v)) {}
+};
+
+bool sameInstances(const std::vector<Instance>& a, const std::vector<Instance>& b) {
+  return a.size() == b.size() &&
+         (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(Instance)) == 0);
+}
+
+bool sameSet(const InstanceSet& a, const InstanceSet& b) {
+  bool batches = true;
+  for (std::size_t s = 0; s < a.batches.size(); ++s)
+    batches = batches && a.batches[s].first == b.batches[s].first &&
+              a.batches[s].count == b.batches[s].count;
+  return batches && sameInstances(a.instances, b.instances) &&
+         sameInstances(a.shadows, b.shadows) && sameInstances(a.flourish, b.flourish) &&
+         a.adjacent.empty() && b.adjacent.empty();
+}
+
+}  // namespace
+
+TEST_CASE("the tiled view draws a board's neighbours, and nothing with the switch off",
+          "[render]") {
+  BoardRenderer renderer;
+  const Tiled t("torus", renderer.theme());
+  const view::PositionView snap = view::PositionView::capture(t.pos);
+  const InstanceSet before = renderer.buildInstances(snap, t.cfg, &t.seams);
+  const std::size_t cells = t.v.dims.cellCount();
+  REQUIRE(before.adjacent.empty());
+
+  BoardOptions on = renderer.options();
+  on.showAdjacent = true;
+  on.adjacentRings = 1;
+  on.adjacentAmount = 1.0f;
+
+  SECTION("off, or at amount zero, the instance list is bit-identical to today's") {
+    BoardOptions zero = on;
+    zero.adjacentAmount = 0.0f;
+    renderer.setOptions(zero);
+    CHECK(sameSet(renderer.buildInstances(snap, t.cfg, &t.seams), before));
+    BoardOptions off = on;
+    off.showAdjacent = false;
+    renderer.setOptions(off);
+    CHECK(sameSet(renderer.buildInstances(snap, t.cfg, &t.seams), before));
+    // The flat board's cells too.
+    off.flat = true;
+    renderer.setOptions(off);
+    const InstanceSet flatOff = renderer.buildInstances(snap, t.cfg, &t.seams);
+    zero.flat = true;
+    renderer.setOptions(zero);
+    CHECK(sameSet(renderer.buildInstances(snap, t.cfg, &t.seams), flatOff));
+  }
+
+  SECTION("a torus at one ring draws nine boards of cells, the centre opaque") {
+    renderer.setOptions(on);
+    const InstanceSet set = renderer.buildInstances(snap, t.cfg, &t.seams);
+    // The centre is untouched apart from its glued rails, which fade into the blended
+    // pass now that their edges lead somewhere.
+    CHECK(set.batches[static_cast<std::size_t>(Archetype::Cell)].count ==
+          before.batches[static_cast<std::size_t>(Archetype::Cell)].count -
+              t.seams.faces().size());
+    REQUIRE(set.adjacentCells.size() == set.adjacent.size());
+    std::size_t copyCells = 0;
+    std::size_t rails = 0;
+    const auto& cellBatch = set.adjacentBatches[static_cast<std::size_t>(Archetype::Cell)];
+    for (std::uint32_t i = 0; i < cellBatch.count; ++i) {
+      if (set.adjacentCells[cellBatch.first + i].order >= 1)
+        ++copyCells;
+      else
+        ++rails;
+    }
+    CHECK(copyCells + cells == 9 * cells);
+    CHECK(rails == t.seams.faces().size());
+    // Every copy also shows every piece once: 8 copies of 32.
+    std::size_t pieces = 0;
+    for (std::size_t s = 0; s < set.adjacentBatches.size(); ++s)
+      if (s != static_cast<std::size_t>(Archetype::Cell)) pieces += set.adjacentBatches[s].count;
+    CHECK(pieces == 8 * 32);
+    // Contact shadows and the plinth stay on the centre.
+    CHECK(sameInstances(set.shadows, before.shadows));
+    std::uint32_t total = 0;
+    for (const auto& b : set.adjacentBatches) total += b.count;
+    CHECK(total == set.adjacent.size());
+    CHECK(set.adjacent.size() <= view::kAdjacentMaxInstances);
+  }
+
+  SECTION("a copy's cell shows its source cell, dimmed, with no cue but the last move") {
+    const CellId sel = t.v.dims.toCell(Coord::of({4, 1}));
+    const CellId dest = t.v.dims.toCell(Coord::of({4, 3}));
+    const CellId lastTo = t.v.dims.toCell(Coord::of({2, 4}));
+    renderer.setLastMove(t.v.dims.toCell(Coord::of({2, 6})), lastTo);
+    renderer.setOptions(on);
+    view::PositionView lit = snap;
+    lit.setSelected(sel);
+    lit.setHighlighted({dest});
+    const InstanceSet plain = [&] {
+      BoardOptions quiet = on;
+      quiet.showAdjacent = false;
+      renderer.setOptions(quiet);
+      auto r = renderer.buildInstances(snap, t.cfg, &t.seams);
+      renderer.setOptions(on);
+      return r;
+    }();
+    const InstanceSet set = renderer.buildInstances(lit, t.cfg, &t.seams);
+    // The centre's untinted colour per cell, from the plain (no selection) board.
+    std::map<CellId, view::Rgba> centre;
+    const auto& pc = plain.batches[static_cast<std::size_t>(Archetype::Cell)];
+    for (std::uint32_t i = 0; i < pc.count; ++i) {
+      const Instance& in = plain.instances[pc.first + i];
+      if (in.fxCell <= 0.0f) continue;
+      const auto cell = static_cast<CellId>(in.fxCell / 2.0f - 1.0f);
+      centre[cell] = view::Rgba{in.color[0], in.color[1], in.color[2], in.color[3]};
+    }
+    REQUIRE(centre.size() == cells);
+    const view::Rgba ink = renderer.theme().ink;
+    const view::Rgba ember = renderer.theme().ember;
+    const auto& cb = set.adjacentBatches[static_cast<std::size_t>(Archetype::Cell)];
+    int checked = 0;
+    for (std::uint32_t i = 0; i < cb.count; ++i) {
+      const auto& meta = set.adjacentCells[cb.first + i];
+      if (meta.order == 0) continue;
+      const Instance& in = set.adjacent[cb.first + i];
+      const view::Rgba src = centre.at(meta.source);
+      const float k = view::kAdjacentDim;
+      CHECK(std::abs(in.color[0] - (src.r + (ink.r - src.r) * k)) < 1e-5f);
+      CHECK(std::abs(in.color[1] - (src.g + (ink.g - src.g) * k)) < 1e-5f);
+      CHECK(std::abs(in.color[2] - (src.b + (ink.b - src.b) * k)) < 1e-5f);
+      CHECK(std::abs(in.color[3] - view::adjacentAlpha(meta.order)) < 1e-6f);
+      // Never the selection accent, even on the selected cell's copies.
+      CHECK_FALSE((std::abs(in.color[0] - ember.r) < 0.01f &&
+                   std::abs(in.color[1] - ember.g) < 0.01f &&
+                   std::abs(in.color[2] - ember.b) < 0.01f));
+      ++checked;
+    }
+    CHECK(checked == static_cast<int>(8 * cells));
+    // The last move's tint does carry: its copies differ from a plain cell of its parity.
+    CHECK(centre.at(lastTo).r != centre.at(t.v.dims.toCell(Coord::of({2, 2}))).r);
+  }
+
+  SECTION("alpha falls with the order and is one only on the centre, rings 1 to 3") {
+    for (int rings = 1; rings <= 3; ++rings) {
+      CAPTURE(rings);
+      on.adjacentRings = rings;
+      renderer.setOptions(on);
+      const InstanceSet set = renderer.buildInstances(snap, t.cfg, &t.seams);
+      for (const Instance& in : set.instances) CHECK(in.color[3] == 1.0f);
+      std::map<int, float> alphaOf;
+      for (std::size_t i = 0; i < set.adjacent.size(); ++i) {
+        const int order = set.adjacentCells[i].order;
+        if (order == 0) continue;
+        CHECK(set.adjacent[i].color[3] < 1.0f);
+        const auto it = alphaOf.find(order);
+        if (it == alphaOf.end())
+          alphaOf[order] = set.adjacent[i].color[3];
+        else
+          CHECK(it->second == set.adjacent[i].color[3]);
+      }
+      REQUIRE(alphaOf.size() == static_cast<std::size_t>(rings));
+      for (int r = 2; r <= rings; ++r) CHECK(alphaOf[r] < alphaOf[r - 1]);
+      // Farthest first within each batch: the blended pass draws back to front.
+      for (const auto& batch : set.adjacentBatches) {
+        int last = 255;
+        for (std::uint32_t i = 0; i < batch.count; ++i) {
+          const int order = set.adjacentCells[batch.first + i].order;
+          if (order == 0) continue;
+          CHECK(order <= last);
+          last = order;
+        }
+      }
+    }
+  }
+
+  SECTION("every glued 2-D board copies whole boards: cells and pieces") {
+    for (const char* name : {"cylinder", "mobius", "klein"}) {
+      CAPTURE(name);
+      const Tiled g(name, renderer.theme());
+      renderer.setOptions(on);
+      const InstanceSet set =
+          renderer.buildInstances(view::PositionView::capture(g.pos), g.cfg, &g.seams);
+      const auto copies = view::adjacentCopies(g.v, g.cfg, 1);
+      std::size_t copyInstances = 0;
+      for (const auto& m : set.adjacentCells)
+        if (m.order >= 1) ++copyInstances;
+      const std::size_t n = g.v.dims.cellCount();
+      // Every copy is a whole board: its cells and its pieces.
+      std::size_t pieceCount = 0;
+      for (CellId c = 0; c < n; ++c)
+        if (!g.pos.at(c).empty()) ++pieceCount;
+      CHECK(copyInstances == (copies.size() - 1) * (n + pieceCount));
+      CHECK(copies.size() == (std::string(name) == "klein" ? std::size_t{9} : std::size_t{3}));
+    }
+  }
+
+  SECTION("no seams on a board with nowhere to go") {
+    const Tiled box("standard", renderer.theme());
+    renderer.setOptions(on);
+    const view::PositionView bs = view::PositionView::capture(box.pos);
+    const InstanceSet set = renderer.buildInstances(bs, box.cfg, &box.seams);
+    CHECK(set.adjacent.empty());
+    BoardOptions off = on;
+    off.showAdjacent = false;
+    renderer.setOptions(off);
+    CHECK(sameSet(set, renderer.buildInstances(bs, box.cfg, &box.seams)));
+  }
 }
 
 TEST_CASE("a portal is a doorway standing across its seam", "[render]") {

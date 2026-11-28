@@ -186,7 +186,7 @@ void carryVr(InstanceSet& set, const std::vector<view::Placement>& placements,
   }
   for (std::size_t k = 0; k < set.instances.size(); ++k)
     if (surface.empty() || !surface[k]) move(set.instances[k]);
-  for (auto* list : {&set.shadows, &set.flourish})
+  for (auto* list : {&set.shadows, &set.flourish, &set.adjacent})
     for (auto& i : *list) move(i);
   if (set.standbyLed) move(*set.standbyLed);
   // Surface vertices encode their own cell in the signed panel tag. Carry the mesh

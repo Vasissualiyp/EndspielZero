@@ -4,12 +4,14 @@
 // thing that makes the picture honest: what a copy shows across an edge is what the engine
 // says is across that edge.
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "support/variants.hpp"
 #include "view/adjacent.hpp"
+#include "view/snapshot.hpp"
 
 using namespace cb;
 using namespace cb::view;
@@ -182,4 +184,93 @@ TEST_CASE("the picture and the engine agree about what is across an edge",
     }
   }
   CHECK(checked >= 4);
+}
+
+// M22.2: the drawing's shared rules - the fade by order, the instance budget, and the flat
+// tokens - are pure here so the 3-D board and the flat tokens cannot disagree.
+
+TEST_CASE("a copy is fainter the higher its order, and only the centre is opaque",
+          "[unit][view]") {
+  CHECK(adjacentAlpha(0) == 1.0f);
+  CHECK(adjacentAlpha(1) == kAdjacentAlpha);
+  CHECK(std::abs(adjacentAlpha(1) - 0.85f) < 1e-6f);
+  CHECK(std::abs(adjacentAlpha(2) - 0.85f * 0.58f) < 1e-6f);
+  CHECK(std::abs(adjacentAlpha(3) - 0.85f * 0.58f * 0.58f) < 1e-6f);
+  for (int r = 1; r <= 3; ++r) {
+    CHECK(adjacentAlpha(r) < adjacentAlpha(r - 1));
+    CHECK(adjacentAlpha(r) < 1.0f);
+  }
+}
+
+TEST_CASE("the tiled view is drawn off the shape only", "[unit][view]") {
+  CHECK(adjacentDrawn(true, false));
+  CHECK_FALSE(adjacentDrawn(true, true));
+  CHECK_FALSE(adjacentDrawn(false, false));
+}
+
+TEST_CASE("the instance budget drops whole outer rings, never a partial one",
+          "[unit][view]") {
+  const VariantSpec v = test::loadVariant("torus");
+  const auto three = copiesOf(v, 3);
+  REQUIRE(three.size() == 49);
+  // Room for every copy but the centre (48 boards): nothing is dropped.
+  CHECK(fitAdjacent(three, 10, 48 * 10).size() == 49);
+  // One instance short: the whole third ring goes, leaving 25.
+  const auto two = fitAdjacent(three, 10, 48 * 10 - 1);
+  CHECK(two.size() == 25);
+  for (const AdjacentCopy& c : two) CHECK(c.order <= 2);
+  // Too little even for the first ring: the centre alone stays.
+  const auto none = fitAdjacent(three, 10, 5);
+  REQUIRE(none.size() == 1);
+  CHECK(none.front().order == 0);
+  // An 8x8 torus fits three rings at two instances per cell.
+  CHECK(fitAdjacent(three, 2 * 64).size() == 49);
+}
+
+TEST_CASE("flat tokens show the source cell's piece at the copy's place", "[unit][view]") {
+  const VariantSpec v = test::loadVariant("mobius");
+  const Position pos = Position::startPosition(v);
+  const PositionView snap = PositionView::capture(pos);
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  const auto central = layout(v.dims, cfg);
+  const auto copies = adjacentCopies(v, cfg, 2);
+  const auto tokens = adjacentTokens(snap, copies, central, cfg, 1.0f);
+
+  std::size_t occupied = 0;
+  for (const Placement& pl : central)
+    if (!snap.at(pl.cell).empty()) ++occupied;
+  // Four copies (orders 2,1,1,2), each showing every piece once; never the centre.
+  REQUIRE(tokens.size() == 4 * occupied);
+  for (const AdjacentToken& t : tokens) {
+    CHECK(t.order >= 1);
+    CHECK(t.alpha == adjacentAlpha(t.order));
+    CHECK(t.piece == snap.at(t.at.cell));
+    CHECK_FALSE(t.piece.empty());
+  }
+  // Farthest first, so translucent tokens layer back to front.
+  for (std::size_t i = 1; i < tokens.size(); ++i) CHECK(tokens[i - 1].order >= tokens[i].order);
+  // Each token stands where copyPlacement puts its copy-local cell.
+  const AdjacentCopy* right = find(copies, 1, 0);
+  REQUIRE(right != nullptr);
+  std::size_t onRight = 0;
+  for (const Placement& pl : central) {
+    const Placement at = copyPlacement(*right, pl, v, cfg);
+    if (snap.at(at.cell).empty()) continue;
+    const bool found = std::any_of(tokens.begin(), tokens.end(), [&](const AdjacentToken& t) {
+      return t.at.x == at.x && t.at.y == at.y && t.at.cell == at.cell;
+    });
+    CHECK(found);
+    ++onRight;
+  }
+  CHECK(onRight == occupied);
+
+  // The reveal scales every alpha; zero draws nothing; a skipped cell is left out.
+  const auto half = adjacentTokens(snap, copies, central, cfg, 0.5f);
+  REQUIRE(half.size() == tokens.size());
+  for (std::size_t i = 0; i < half.size(); ++i)
+    CHECK(std::abs(half[i].alpha - 0.5f * tokens[i].alpha) < 1e-6f);
+  CHECK(adjacentTokens(snap, copies, central, cfg, 0.0f).empty());
+  const CellId moving = central.front().cell;
+  REQUIRE_FALSE(snap.at(moving).empty());
+  CHECK(adjacentTokens(snap, copies, central, cfg, 1.0f, moving).size() == 4 * (occupied - 1));
 }

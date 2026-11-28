@@ -12,6 +12,7 @@
 #include "render/board_glow.hpp"
 #include "render/panel_alive.hpp"
 #include "shaders.hpp"
+#include "view/adjacent.hpp"
 #ifdef CB_HAVE_IMGUI
 #include "render/play_surface.hpp"  // the board as its shape (M17)
 #include "render/slab_skin.hpp"     // the flexible skin (M25.4)
@@ -82,6 +83,12 @@ constexpr float kHintAttackerTint = 0.32f;
 constexpr float kHintPathTint = 0.18f;
 // The square under the pointer is always a little brighter.
 constexpr float kHoverBrighten = 0.14f;
+// The tiled view (M22.2): how far the centre's glued rails fade once the copies have
+// arrived, so the edge that now visibly leads somewhere reads as joined, not walled. The
+// copies' dim and opacity are shared with the flat tokens in view/adjacent.hpp.
+constexpr float kAdjacentRailFade = 0.55f;
+// The last move's tint, shared by the centre and its copies.
+constexpr float kLastMoveTint = 0.22f;
 
 /// The `Instance::fxCell` of a cell, or of the piece standing on it.
 float fxIndex(CellId cell, bool piece) {
@@ -2284,6 +2291,23 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     byShape[static_cast<std::size_t>(shape[piece.type])].push_back(body);
   };
 
+  // M22.2 the tiled view: the copies to draw, if any. With the switch off or the reveal
+  // at zero there are none and every list below is exactly what it always was.
+  const float adjacentReveal =
+      options_.showAdjacent ? shapeEase(std::clamp(options_.adjacentAmount, 0.0f, 1.0f))
+                            : 0.0f;
+  std::vector<view::AdjacentCopy> copies;
+  if (adjacentReveal > 0.0f)
+    copies = view::fitAdjacent(view::adjacentCopies(v, cfg, options_.adjacentRings),
+                               2 * placements.size());
+  // Which drawn axes now lead somewhere: their glued rails fade under the copies.
+  std::array<bool, 3> copiedAxis{};
+  for (const view::AdjacentCopy& copy : copies) {
+    if (copy.stepU != 0) copiedAxis[0] = true;
+    if (copy.stepV != 0) copiedAxis[1] = true;
+  }
+  std::vector<Instance> fadedRails;
+
   std::uint32_t panelCellCount = 0;
   for (const view::Placement& pl : placements) {
     const Coord c = v.dims.toCoord(pl.cell);
@@ -2317,7 +2341,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
           mix(fill, theme_.peek, p.at(pl.cell).empty() ? kPeekTint : kPeekTint + 0.15f);
     } else {
       if (options_.showLastMove && (pl.cell == lastFrom_ || pl.cell == lastTo_)) {
-        fill = mix(fill, theme_.ember, 0.22f);
+        fill = mix(fill, theme_.ember, kLastMoveTint);
       }
       fill = withHint(fill, p, pl.cell, theme_);
     }
@@ -2386,6 +2410,12 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
                                ? view::Material::Glow
                                : view::Material::Matte,
                            Cut::Plank, 0.0f);
+        if (f.kind == view::SeamKind::Glued && f.screenAxis < copiedAxis.size() &&
+            copiedAxis[f.screenAxis]) {
+          rail.color[3] = 1.0f - kAdjacentRailFade * adjacentReveal;
+          fadedRails.push_back(rail);
+          continue;
+        }
         byShape[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
       }
     }
@@ -2398,6 +2428,92 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
 
     emitPiece(piece, pl.x, pl.y, pl.z, pl.cell == checkCell_, pl.cell, false);
     if (!options_.flat) emitShadow(pl.x, pl.y, pl.z);
+  }
+
+  // M22.2 the copies: the same board again beside itself, through its glued edges. A
+  // copy's cell shows its *source* cell - its parity colour and the last-move tint, never
+  // a selection, legal-move, hint, hover or check mark - mixed toward the background and
+  // more transparent the higher its ring. Its pieces keep their own orientation (a
+  // mirrored knight would read as another piece) and fade with their board. No plinth
+  // and no shadows: the copies stand on the page as more of the same world.
+  std::vector<std::vector<Instance>> byShapeAdjacent(kShapeSlots);
+  std::vector<std::vector<InstanceSet::AdjacentMeta>> byShapeAdjacentMeta(kShapeSlots);
+  for (const view::AdjacentCopy& copy : copies) {
+    if (copy.order == 0) continue;
+    const float alpha = adjacentReveal * view::adjacentAlpha(copy.order);
+    if (alpha <= 0.0f) continue;
+    const auto dimmed = [&](view::Rgba c, Instance& inst, float opacity) {
+      c = mix(c, theme_.ink, view::kAdjacentDim);
+      c.a = opacity;
+      toFloat4(c, inst.color);
+    };
+    for (const view::Placement& central : placements) {
+      const view::Placement pl = view::copyPlacement(copy, central, v, cfg);
+      const CellId src = pl.cell;
+      const Coord c = v.dims.toCoord(src);
+      std::uint8_t drawn[3] = {};
+      std::size_t drawnCount = 0;
+      for (std::uint8_t a : cfg.screenAxes) drawn[drawnCount++] = a;
+      const int parity = squareParity(c, drawn, drawnCount, options_.swapLayerColors);
+      view::Rgba fill = (parity % 2 == 0) ? theme_.boardDark : theme_.boardLight;
+      if (options_.showLastMove && (src == lastFrom_ || src == lastTo_))
+        fill = mix(fill, theme_.ember, kLastMoveTint);
+
+      Instance cell{};
+      cell.fxCell = fxIndex(src, false);
+      cell.center[0] = pl.x;
+      cell.center[1] = pl.y;
+      cell.center[2] = pl.z;
+      cell.scale[0] = 1.0f;
+      cell.scale[1] = 1.0f;
+      cell.scale[2] = 1.0f;
+      cell.material =
+          shaderMaterial(theme_.materials.cells, Cut::Plank,
+                         0.5f * static_cast<float>(parity & 1) + 0.49f * hash01(src));
+      if (options_.vrLight) {
+        cell.material = shaderMaterial(view::Material::Hologram, Cut::Plank, 0.0f);
+        cell.panelSignal[2] = -1.0f;
+        dimmed(vrLightColor(fill, theme_), cell, kVrLightOpacity * alpha);
+      } else {
+        if (ledCells) {
+          cell.panelSignal[0] = panelSeed(src);
+          cell.panelSignal[2] = 1.0f;
+          cell.panelSignal[3] = heatFor(src);
+        }
+        dimmed(fill, cell, alpha);
+      }
+      byShapeAdjacent[static_cast<std::size_t>(Archetype::Cell)].push_back(cell);
+      byShapeAdjacentMeta[static_cast<std::size_t>(Archetype::Cell)].push_back(
+          {src, copy.order});
+
+      // The flat board's pieces are the interface's tokens (`view::adjacentTokens`).
+      if (options_.flat) continue;
+      const Piece piece = p.at(src);
+      if (piece.empty()) continue;
+      // The piece in flight is drawn once, on the centre; its copies wait for it.
+      if (moving && src == anim->travellingTo()) continue;
+      Instance body{};
+      body.fxCell = fxIndex(src, true);
+      body.center[0] = pl.x;
+      body.center[1] = pl.y;
+      body.center[2] = pl.z + half.z;
+      const float h = 1.0f + (height[piece.type] - 1.0f) * options_.pieceHeightScale;
+      body.scale[0] = 0.8f;
+      body.scale[1] = 0.8f;
+      body.scale[2] = 0.8f * h;
+      dimmed(piece.colorOf() == Color::White ? theme_.whitePiece : theme_.blackPiece, body,
+             alpha);
+      body.material = pieceMaterial(theme_, piece, options_.vrLight);
+      const auto sh = static_cast<std::size_t>(shape[piece.type]);
+      byShapeAdjacent[sh].push_back(body);
+      byShapeAdjacentMeta[sh].push_back({src, copy.order});
+    }
+  }
+  // The centre's faded rails, last in the cell batch: over the copies they border.
+  for (const Instance& rail : fadedRails) {
+    byShapeAdjacent[static_cast<std::size_t>(Archetype::Cell)].push_back(rail);
+    byShapeAdjacentMeta[static_cast<std::size_t>(Archetype::Cell)].push_back(
+        {kInvalidCell, 0});
   }
 
   // Where each sub-board ended up. Measured once and used twice: by the plinths, and by
@@ -2870,6 +2986,14 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
     out.shadows.insert(out.shadows.end(), byShapeShadow[s].begin(),
                        byShapeShadow[s].end());
   }
+  for (std::size_t s = 0; s < byShapeAdjacent.size(); ++s) {
+    out.adjacentBatches[s].first = static_cast<std::uint32_t>(out.adjacent.size());
+    out.adjacentBatches[s].count = static_cast<std::uint32_t>(byShapeAdjacent[s].size());
+    out.adjacent.insert(out.adjacent.end(), byShapeAdjacent[s].begin(),
+                        byShapeAdjacent[s].end());
+    out.adjacentCells.insert(out.adjacentCells.end(), byShapeAdjacentMeta[s].begin(),
+                             byShapeAdjacentMeta[s].end());
+  }
   return out;
 }
 
@@ -2968,7 +3092,8 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
   const std::size_t holoBase = labBase + set.lab.size();
   const std::size_t holoTokenBase = holoBase + set.holo.size();
   const std::size_t holoBeamBase = holoTokenBase + set.holoTokens.size();
-  const std::size_t instanceCount = holoBeamBase + set.holoBeam.size();
+  const std::size_t adjacentBase = holoBeamBase + set.holoBeam.size();
+  const std::size_t instanceCount = adjacentBase + set.adjacent.size();
   if (auto r = ensureInstanceCapacity(frame, instanceCount); !r.has_value()) return r;
   if (instanceCount > 0) {
     void* mapped = nullptr;
@@ -2995,6 +3120,7 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
     copyHolo(set.holo, holoBase);
     copyHolo(set.holoTokens, holoTokenBase);
     copyHolo(set.holoBeam, holoBeamBase);
+    copyHolo(set.adjacent, adjacentBase);
     vkUnmapMemory(ctx_->device(), instanceMem_[frame]);
   }
 
@@ -3400,6 +3526,27 @@ Result<void> BoardRenderer::record(VkCommandBuffer cmd, const OffscreenTarget& t
         const auto& batch = set.scaffoldBatches[s];
         if (batch.count == 0) continue;
         const MeshRange& range = meshes_.ranges[s];
+        vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
+                         range.vertexOffset, base + batch.first);
+      }
+    }
+    // The tiled view's copies (M22.2), blended: farthest ring first within each batch,
+    // depth-tested against the opaque centre and writing none, so a far ring never hides
+    // a nearer one. The same meshes as the opaque board (a VR cell is the light sheet).
+    if (!set.adjacent.empty()) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blendPipeline);
+      vkCmdPushConstants(cmd, layout_,
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                         sizeof(PushConstants), &push);
+      const VkDeviceSize zero = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer_, &zero);
+      vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuffer_[frame], &zero);
+      vkCmdBindIndexBuffer(cmd, indexBuffer_, 0, VK_INDEX_TYPE_UINT16);
+      const std::uint32_t base = static_cast<std::uint32_t>(adjacentBase);
+      for (std::size_t s = 0; s < set.adjacentBatches.size(); ++s) {
+        const auto& batch = set.adjacentBatches[s];
+        if (batch.count == 0) continue;
+        const MeshRange& range = opaqueBoardRange(meshes_, s, options_, set);
         vkCmdDrawIndexed(cmd, range.indexCount, batch.count, range.firstIndex,
                          range.vertexOffset, base + batch.first);
       }

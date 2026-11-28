@@ -292,3 +292,69 @@ Deviations / decisions:
 - `copyPlacement` shifts by the board's extent only (not `gridGap`), as specified; the
   sub-board grid of a variant with extra axes is not accounted for yet.
 - Not header-only deviation: none (`view` has .cpp files).
+
+### 2026-11-28 - M22.2 built (drawing the copies: 3-D board, flat tokens, lab and neural VR)
+
+What was built:
+- `view/adjacent.*`: `adjacentAlpha` (1 for the centre, `0.85 * 0.58^(r-1)`), the
+  constants `kAdjacentAlpha`, `kAdjacentFalloff`, `kAdjacentDim` (0.35, toward
+  `Theme::ink`) and `kAdjacentMaxInstances` (6400), `adjacentDrawn(on, surface)` (the one
+  predicate, read by `optionsFor` and the interface), `fitAdjacent` (drops whole outer rings
+  to fit the budget at `2 * cells` instances a board, so an 8x8 torus keeps three rings and
+  a larger board loses the outermost first) and `adjacentTokens` (the flat tokens).
+- `BoardOptions::showAdjacent`, `adjacentAmount` (eased with `shapeEase`) and
+  `adjacentRings`. `BoardRenderer::buildInstances`, ordinary path only, emits every copy's
+  cells (source parity colour + last-move tint, no other cue, dimmed, alpha by order) and,
+  on the solid board, its pieces (unmirrored, dimmed, same alpha; the piece in flight is not
+  copied; no shadows) into the new `InstanceSet::adjacent` / `adjacentBatches`, farthest ring
+  first in each batch, with CPU-side `adjacentCells` (source, order) for tests. `record`
+  draws them with the blended pipeline after the opaque board and scaffold, before the
+  shadows; they sit at the end of the instance buffer, so with the switch off the buffer
+  layout is unchanged. The centre's glued rails on a copied axis move to the end of the
+  copies' cell batch at alpha `1 - 0.55 * a` (`kAdjacentRailFade`); mirrors never fade. The
+  plinth stays under the centre only.
+- Flat view: `Ui::buildGameHud` draws the copies' tokens (dimmed disc, rim and figure,
+  `focus * alpha`) before the centre's, from the same copies and cap.
+- Lab and neural VR: the copies carry `fxCell` of their source cell, so boot, check
+  ripple and game-end power-down light them with it; `eachBoardInstance` (deploy, stow,
+  relayout carry) and `carryVr` (the VR glide) include `adjacent`, so the tiling rides the
+  slab and the glide. Under `vrLight` the copies are hologram light like the centre.
+- Debug access: transient `Settings::showAdjacent`, `adjacentRings` (1-3, default 2),
+  `adjacentFormed` (0..1, default 1); console `adjacent [on|off|1|2|3]`; CLI `--adjacent`,
+  `--adjacent-rings N`, `--adjacent-amount A`.
+
+Tests: `tests/unit/view/test_adjacent.cpp` (+4: alpha by order, the predicate, the ring
+budget, the flat tokens); `tests/render/test_offscreen_render.cpp` ("the tiled view draws a
+board's neighbours, and nothing with the switch off": bit-identical instance lists off and at
+amount 0, flat and solid; nine boards of cells at one ring; copy colour = dimmed source
+colour, never the selection; alpha strictly falling with order and 1 only on the centre at
+rings 1-3; cylinder/mobius/klein whole boards; nothing on `standard`);
+`tests/unit/app/test_debug_console.cpp` (+1, the console command); GUI ctest `gui-adjacent`
+(`tests/check_adjacent.cmake`: reproducible at a fixed amount, differs from off, amount 0
+equals off, flat differs, shape ignores the switch, lab and VR draw it). `[render],[app],[view]`:
+794 test cases pass; `ctest -L gui` passes (60 tests). Switch-off byte identity was checked against a
+HEAD build on 11 captures (torus solid/flat/shape, klein manifold, a move, lab, lab flat,
+lab deploy, lab skin, VR space, VR picture): all identical.
+
+Sheets: `out/m22.2/sheet-a.png` (cylinder, torus, mobius, klein, solid and flat, both
+themes), `sheet-b.png` (lab solid/flat/deploy, VR space/picture, rings 1 and 3, solid and
+flat), `sheet-c.png` (lab deploy in flight, mobius reveal at amount 0.1/0.3/0.6/1).
+
+Deviations / decisions:
+- Spec written before M23-M25: the lab and neural-VR paths did not exist. Copies ride the
+  slab via the existing nearest-slab fallback of `slabUnder` (they lie outside every bezel)
+  and the VR glide via their source cell's offset; nothing else in the lab knows about them.
+  They can overlap lab furniture beside the slab; not addressed.
+- `kAdjacentDim` lives in `view/adjacent.hpp`, not at the top of `board_renderer.cpp`, so
+  the flat tokens share it; the renderer's own new constants (`kAdjacentRailFade`,
+  `kLastMoveTint`) are at its top.
+- "Seam rails fade with `a`" read as: glued rails on a copied axis keep 45% at full reveal
+  (`kAdjacentRailFade` 0.55), so the seam colours still teach the gluing.
+- `BoardOptions::adjacentRings` added (the spec named only the switch and amount), and the
+  settings fields exist transiently now because the flat tokens read them; M22.3 persists
+  `showAdjacent`/`adjacentRings`, M22.4 eases `adjacentFormed`.
+- The instance budget is per board `2 * cells` (an upper bound, independent of captures) so
+  the ring count never changes mid-game; no shipped 2-D variant hits the cap.
+- Copies get no contact shadows; on the manifold/lab theme their hologram pieces read
+  fairly bright even dimmed - a tuning item for M22.6. Camera framing unchanged: the copies
+  spill past the frame (the spec allows it).

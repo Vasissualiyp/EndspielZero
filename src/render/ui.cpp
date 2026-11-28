@@ -31,6 +31,7 @@
 #include "render/post_process.hpp"
 #include "render/ui_widgets.hpp"
 #include "shaders.hpp"
+#include "view/adjacent.hpp"
 #include "view/hud_fx.hpp"
 #include "view/piece_tint.hpp"
 #include "view/seams.hpp"
@@ -3745,6 +3746,39 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
 
     const view::MoveAnimation& anim = session.animation();
     const CellId movingTo = anim.active() ? anim.travellingTo() : kInvalidCell;
+    // M22.2 the tiled view: the copies' tokens first, farthest ring first, under the
+    // centre's. The same copies, cap and fade as the renderer's cells
+    // (`view::adjacentTokens`), so the two cannot disagree. No cue tints; the figure and
+    // the disc are mixed toward the background and fade with their board.
+    const app::Settings& st = shell.settings();
+    if (view::adjacentDrawn(st.showAdjacent, surfaceView) && focus > 0.01f) {
+      const auto& central = session.placements();
+      const auto copies = view::fitAdjacent(
+          view::adjacentCopies(v, session.viewConfig(), st.adjacentRings),
+          2 * central.size());
+      const auto dim = [&](view::Rgba c) {
+        c.r += (t.ink.r - c.r) * view::kAdjacentDim;
+        c.g += (t.ink.g - c.g) * view::kAdjacentDim;
+        c.b += (t.ink.b - c.b) * view::kAdjacentDim;
+        return c;
+      };
+      for (const view::AdjacentToken& tok :
+           view::adjacentTokens(session.snapshot(), copies, central, session.viewConfig(),
+                                shapeEase(st.adjacentFormed), movingTo)) {
+        const view::OrbitCamera::ScreenPoint sp =
+            cam.project(view::Vec3{tok.at.x, tok.at.y, tok.at.z}, w / h, w, h);
+        if (!sp.visible) continue;
+        const float a = focus * tok.alpha;
+        const ImVec2 centre(sp.x, sp.y);
+        dl->AddCircleFilled(centre, radius, u32(dim(t.pieceToken), a), 24);
+        dl->AddCircle(centre, radius, u32(dim(t.boardRim), a), 24, px(1.5f));
+        const bool white = tok.piece.colorOf() == Color::White;
+        drawPieceOf(dl, centre, radius * 0.82f,
+                    u32(dim(white ? t.whitePiece : t.blackPiece), a),
+                    u32(dim(t.pieceToken), a), v.pieces[tok.piece.type], iconStyle_,
+                    tok.piece.flipped());
+      }
+    }
     for (const view::Placement& pl : session.placements()) {
       if (pl.cell == movingTo) continue;  // the moving piece is drawn at its own point
       drawToken(session.snapshot().at(pl.cell), view::Vec3{pl.x, pl.y, pl.z}, pl.cell,

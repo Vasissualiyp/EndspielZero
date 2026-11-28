@@ -130,6 +130,24 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
     return label + (enabled ? "on" : "off");
   }
 
+  if (cmd == "adjacent") {
+    // M22.2 the tiled view: on/off, or a ring count (which also switches it on).
+    auto& s = shell.settings();
+    if (w.size() > 2) return "usage: adjacent [on|off|1|2|3]";
+    if (w.size() == 1) {
+      s.showAdjacent = !s.showAdjacent;
+    } else if (w[1] == "on" || w[1] == "off") {
+      s.showAdjacent = w[1] == "on";
+    } else if (w[1] == "1" || w[1] == "2" || w[1] == "3") {
+      s.showAdjacent = true;
+      s.adjacentRings = w[1][0] - '0';
+    } else {
+      return "usage: adjacent [on|off|1|2|3]";
+    }
+    return std::string("adjacent ") + (s.showAdjacent ? "on" : "off") + ", rings " +
+           std::to_string(s.adjacentRings);
+  }
+
   if (cmd == "wake" || cmd == "handshake") {
     // M24.7: the frame loop watches these counters and replays the sequence.
     auto& s = shell.settings();
@@ -600,6 +618,7 @@ std::string DebugConsole::help() {
          "ripple [<cell>]          play the check ripple from a cell (default: the "
          "royal)\n"
          "seamhover <axis>|off     pin the seam-legend highlight on one axis\n"
+         "adjacent [on|off|1|2|3]  the tiled view: neighbours through glued edges\n"
          "result                     show the decided game result now\n"
          "review [<ply>|off]       browse the game's history (no ply: the end); off "
          "leaves\n"

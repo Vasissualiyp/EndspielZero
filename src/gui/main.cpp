@@ -42,6 +42,7 @@
 #include "render/neural_vr.hpp"
 #include "render/panel_response.hpp"
 #include "render/window.hpp"
+#include "view/adjacent.hpp"
 #include "view/board_boot.hpp"
 #include "view/game_end_fx.hpp"
 #include "view/implant_fx.hpp"
@@ -639,6 +640,11 @@ int gSkin = -1;
 bool gSkinOn = true;
 float gLatchT = -1.0f;
 int gLatchAxis = 1;
+/// --adjacent, --adjacent-rings N, --adjacent-amount A: the tiled view for a capture
+/// (M22.2); the console's `adjacent` switches it live. Negative means not given.
+bool gAdjacent = false;
+int gAdjacentRings = -1;
+float gAdjacentAmount = -1.0f;
 
 /// A game happens in the lab (M24.5): the lab is on, a game is drawn (or held while it
 /// stows) and nothing else owns the camera. Physical or in the implant's space (M25.5).
@@ -2070,6 +2076,8 @@ render::BoardOptions optionsFrom(const app::Settings& s) {
   o.surfaceShellSpread = s.geometryShellSpread;
   o.shapePieceCylinders = s.shapePieceCylinders;
   o.presentationIntensity = s.presentationIntensity;
+  o.adjacentRings = s.adjacentRings;
+  o.adjacentAmount = s.adjacentFormed;
   return o;
 }
 
@@ -2092,6 +2100,8 @@ render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight = -1)
   const bool wantSurface = (s.geometryView || s.geometryFormed > 1e-4f) && !s.flatView;
   o.surface =
       wantSurface && session != nullptr && render::hasPlaySurface(session->variant());
+  // M22: the tiled view's one rule, which the interface's flat tokens read too.
+  o.showAdjacent = view::adjacentDrawn(s.showAdjacent, o.surface);
   // The slab skin (M24.5b) lives on the lab game path only.
   o.slabSkin = gSkinOn && o.surface && labGame(shell, true);
   // A stacked shape view in the lab is projected light (M24.6).
@@ -2489,6 +2499,10 @@ int captureFrame(const std::string& variantName, const std::string& path,
     if (shell->session() != nullptr) shell->session()->setFlatView(true);
   }
   if (gIntensity >= 0.0f) shell->settings().presentationIntensity = gIntensity;
+  // M22.2 the tiled view, for review the way every other state is reviewable.
+  if (gAdjacent) shell->settings().showAdjacent = true;
+  if (gAdjacentRings > 0) shell->settings().adjacentRings = gAdjacentRings;
+  if (gAdjacentAmount >= 0.0f) shell->settings().adjacentFormed = gAdjacentAmount;
   shell->settings().geometryEvert = evert;
   shell->settings().geometrySlideU = slideU;
   shell->settings().geometrySlideV = slideV;
@@ -3378,6 +3392,8 @@ int main(int argc, char** argv) {
           "--theme console|manifold overrides the theme for this run; --matte disables "
           "materials.\n"
           "--seam-hover AXIS pins that drawn axis's seam-legend highlight for this run.\n"
+          "--adjacent draws the board's neighbours through its glued edges (M22.2);\n"
+          "--adjacent-rings 1..3 how many rings, --adjacent-amount 0..1 the reveal.\n"
           "--ui-scale 0.6..3.0 is exact; --ui-auto opts captures into automatic "
           "scaling.\n"
           "--presentation 0..1 sets the presentation intensity for this run (not "
@@ -3515,6 +3531,24 @@ int main(int argc, char** argv) {
 #ifdef CB_HAVE_IMGUI
       gVrT = v;
 #endif
+    } else if (arg == "--adjacent") {
+      gAdjacent = true;
+    } else if (arg == "--adjacent-rings") {
+      const std::string value = i + 1 < argc ? argv[++i] : "";
+      if (value != "1" && value != "2" && value != "3") {
+        std::fprintf(stderr, "--adjacent-rings requires 1, 2 or 3\n");
+        return 1;
+      }
+      gAdjacentRings = value[0] - '0';
+    } else if (arg == "--adjacent-amount") {
+      char* end = nullptr;
+      const char* value = i + 1 < argc ? argv[++i] : "";
+      const float v = std::strtof(value, &end);
+      if (end == value || *end != '\0' || !std::isfinite(v) || v < 0 || v > 1) {
+        std::fprintf(stderr, "--adjacent-amount requires 0..1\n");
+        return 1;
+      }
+      gAdjacentAmount = v;
     } else if (arg == "--skin" || arg == "--latch-axis") {
       const std::string value = i + 1 < argc ? argv[++i] : "";
       if (value != "0" && value != "1") {
