@@ -268,3 +268,27 @@ it.
 
 Planned (2026-10-30); nothing built. Drawn axes: both in-plane directions are in the first
 version; the third axis (up/down) is sketched in M22.8, with an open decision on it.
+
+### 2026-11-28 - M22.1 built (the pure copies module)
+
+`src/view/adjacent.hpp/.cpp` (`adjacentCopies`, `copyPlacement`, `sourceCell`), tests in
+`tests/unit/view/test_adjacent.cpp` (cylinder, torus rings 1-3, mobius, klein, the no-copy
+variants, `copyPlacement`, and the `[property][view]` agreement with `Geometry::step` over
+every shipped glued variant, orthogonal and diagonal steps). Nothing is drawn yet, so every
+existing capture is unchanged (lab on or off); M22.2 must keep the switch-off instance list
+bit-identical and cover the flat, lab and neural-VR paths.
+
+Deviations / decisions:
+- `viaSeams` is exactly the spec's "copy-local coordinate -> central coordinate": the shift
+  by whole boards composed with the folded face transforms. On a translation gluing it is
+  therefore the identity (the copy shows the same cell); it is the reflection on a twisted
+  one.
+- It is built by folding a representative mid-copy cell the way `Geometry::stepBoundary`
+  does (lowest axis first = file-then-rank, as the spec asks); the same order the engine
+  uses, so the diagonal copies of a Klein bottle agree with the engine (property test).
+- `rings` is clamped to 3. A copy exists only if every face crossed is `Periodic` with a
+  transform; otherwise it is dropped (no copy through a mirror or an open face).
+- Only variants with exactly two drawn axes get copies; any 3-axis variant is empty.
+- `copyPlacement` shifts by the board's extent only (not `gridGap`), as specified; the
+  sub-board grid of a variant with extra axes is not accounted for yet.
+- Not header-only deviation: none (`view` has .cpp files).
