@@ -162,6 +162,9 @@ struct Settings {
   /// reveal stays transient like `geometryFormed`.
   bool showAdjacent{false};
   int adjacentRings{2};
+  /// Whether the copies answer the pointer (M22.5): hover marks the cell a copy shows and
+  /// a click there acts on it. Off ignores them for picking (`adjacent_pick`, saved).
+  bool adjacentPick{true};
   float adjacentFormed{1.0f};
   /// Draw the shape view's pieces as icon-faced pucks instead of the sculptural meshes
   /// (M17.25). The tangent-field walk must put one unavoidable flip on a non-orientable

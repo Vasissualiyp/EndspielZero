@@ -464,15 +464,18 @@ TEST_CASE("the tiled view's switch and rings persist; the reveal does not", "[un
   const Settings defaults;
   CHECK_FALSE(defaults.showAdjacent);
   CHECK(defaults.adjacentRings == 2);
+  CHECK(defaults.adjacentPick);  // M22.5: the copies answer the pointer unless told not to
   const auto path = tempSettings("adjacent.conf");
   Settings s;
   s.showAdjacent = true;
   s.adjacentRings = 3;
+  s.adjacentPick = false;
   s.adjacentFormed = 0.4f;
   REQUIRE(s.save(path).has_value());
   const Settings back = Settings::load(path);
   CHECK(back.showAdjacent);
   CHECK(back.adjacentRings == 3);
+  CHECK_FALSE(back.adjacentPick);
   CHECK(back.adjacentFormed == 1.0f);
   {
     std::ofstream out(path);

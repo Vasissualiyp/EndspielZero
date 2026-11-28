@@ -2102,6 +2102,11 @@ render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight = -1)
       wantSurface && session != nullptr && render::hasPlaySurface(session->variant());
   // M22: the tiled view's one rule, which the interface's flat tokens read too.
   o.showAdjacent = view::adjacentDrawn(s.showAdjacent, o.surface);
+  // M22.5: the copy under the pointer answers it faintly.
+  if (o.showAdjacent && session != nullptr) {
+    o.hoverCopyU = session->hoverCopyU();
+    o.hoverCopyV = session->hoverCopyV();
+  }
   // The slab skin (M24.5b) lives on the lab game path only.
   o.slabSkin = gSkinOn && o.surface && labGame(shell, true);
   // A stacked shape view in the lab is projected light (M24.6).
@@ -3993,26 +3998,26 @@ int main(int argc, char** argv) {
   bool hoverOver = false;  // the pointer is over the board (not the interface / window)
   float hoverX = 0.0f, hoverY = 0.0f;
   // The cell under a pixel of the window, on the flat/3-D board or the shape.
-  const auto hoverPick = [&](float x, float y) -> CellId {
+  const auto hoverPick = [&](float x, float y) -> app::Session::Pick {
     const app::Session* session = shell->session();
     if (session == nullptr || x < boardRect.x || y < boardRect.y ||
         x >= boardRect.x + boardRect.width || y >= boardRect.y + boardRect.height) {
-      return kInvalidCell;
+      return {};
     }
 #ifdef CB_HAVE_IMGUI
     if (optionsFor(*shell).surface) {
-      if (session->boardLocked()) return kInvalidCell;
+      if (session->boardLocked()) return {};
       const render::PlaySurface surf = render::PlaySurface::build(
           session->variant(), poseFrom(shell->settings(), session->variant()));
-      return surf.pick(
+      return {surf.pick(
           session->cameraOver(surfacePlacements(surf), surf.bounds(), view::ViewConfig{}),
           boardRect.width, boardRect.height, x - boardRect.x, y - boardRect.y,
           shell->settings().geometryGhost, &session->snapshot(),
-          shell->settings().pieceHeightScale, shell->settings().shapePieceCylinders);
+          shell->settings().pieceHeightScale, shell->settings().shapePieceCylinders)};
     }
 #endif
-    return session->pickPixel(x - boardRect.x, y - boardRect.y, boardRect.width,
-                              boardRect.height);
+    return session->pick(x - boardRect.x, y - boardRect.y, boardRect.width,
+                         boardRect.height);
   };
 
   while (running && !shell->quitRequested()) {
@@ -4020,6 +4025,14 @@ int main(int argc, char** argv) {
     if (shell->session() != nullptr && !gVrTrack.flat.active(gRigNow, gVrIntensity))
       gVrTrack.beforeFlat = shell->session()->playerCamera();
 #endif
+    // M22.5: picking sees the tiled view the renderer is drawing - the same predicate
+    // and the same reveal - so a click lands on what is under the pointer.
+    if (shell->session() != nullptr) {
+      const app::Settings& st = shell->settings();
+      shell->session()->setAdjacent(
+          {view::adjacentDrawn(st.showAdjacent, optionsFor(*shell).surface),
+           st.adjacentRings, st.adjacentFormed, st.adjacentPick});
+    }
     SDL_Event e;
     // A board game has nothing to animate most of the time, so the loop waits for
     // input rather than spinning. While a piece is actually moving it wants frames, so
@@ -4423,12 +4436,13 @@ int main(int argc, char** argv) {
       hoverDirty = false;
       const bool inGameNow = shell->screen() == app::Screen::Game;
       const bool dragging = orbiting || panning || sliding;
-      CellId cell = kInvalidCell;
+      app::Session::Pick pick;
       if (inGameNow && hoverOver && !dragging && !shell->attracting() &&
           !vrInputLocked(*shell)) {
-        cell = hoverPick(hoverX, hoverY);
+        pick = hoverPick(hoverX, hoverY);
       }
-      shell->session()->setHover(cell, (SDL_GetModState() & SDL_KMOD_CTRL) != 0);
+      shell->session()->setHover(pick.cell, (SDL_GetModState() & SDL_KMOD_CTRL) != 0,
+                                 pick.stepU, pick.stepV);
     }
 
     const auto now = std::chrono::steady_clock::now();

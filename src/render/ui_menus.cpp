@@ -1335,6 +1335,9 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
   ImGui::BeginDisabled(!s.showAdjacent);
   ImGui::SliderInt("Adjacent board rings", &s.adjacentRings, 1, 3);
   ImGui::EndDisabled();
+  // M22.5: only offered while the tiled view is on, so Settings with it off is as it was.
+  if (s.showAdjacent)
+    ImGui::Checkbox("Click and hover through the adjacent boards", &s.adjacentPick);
   ImGui::SliderFloat("Trailer: shape morph speed", &s.trailerMorphSpeed, 0.25f, 4.0f,
                      "%.2fx");
   ImGui::SliderFloat("Trailer: near clip", &s.trailerNearClip, view::kMinNearClip, 8.0f,
@@ -1552,6 +1555,7 @@ UiRequest Ui::buildSettings(app::Shell& shell) {
       before.showSeams != s.showSeams || before.showSeamLegend != s.showSeamLegend ||
       before.showCoordinates != s.showCoordinates ||
       before.showAdjacent != s.showAdjacent || before.adjacentRings != s.adjacentRings ||
+      before.adjacentPick != s.adjacentPick ||
       before.swapLayerColors != s.swapLayerColors ||
       before.trailerMovePreview != s.trailerMovePreview ||
       before.trailerMorphSpeed != s.trailerMorphSpeed ||

@@ -59,6 +59,9 @@ struct Action {
   bool gridVertical{false};
   /// For Hover: whether Ctrl is held.
   bool ctrl{false};
+  /// For Hover: the tiled view's copy under the pointer, as steps from the board (M22.5).
+  std::int8_t copyU{0};
+  std::int8_t copyV{0};
 };
 
 /// Which hover aids are on (M20).
@@ -396,11 +399,36 @@ class Session {
   bool cancelSelection();
   void setHintOptions(const HintOptions& o);
   /// The pointer is over `cell` (kInvalidCell: off the board). Cheap when unchanged.
-  void setHover(CellId cell, bool ctrl);
+  /// `copyU`/`copyV` name the tiled view's copy it is over (0, 0: the board itself); `cell`
+  /// is always the central board's cell (M22.5).
+  void setHover(CellId cell, bool ctrl, std::int8_t copyU = 0, std::int8_t copyV = 0);
   [[nodiscard]] CellId hoverCell() const noexcept { return hoverCell_; }
-  /// The cell under a pixel of the board rectangle, or kInvalidCell. Pure: no selection
-  /// change, no snapshot rebuild. Refuses (kInvalidCell) when boardLocked().
-  [[nodiscard]] CellId pickPixel(float px, float py, float width, float height) const;
+  [[nodiscard]] std::int8_t hoverCopyU() const noexcept { return hoverCopyU_; }
+  [[nodiscard]] std::int8_t hoverCopyV() const noexcept { return hoverCopyV_; }
+  /// M22.5 the tiled view as picking sees it: set each frame by the front end from the
+  /// same predicate the renderer reads. Copies are pickable once they have arrived
+  /// (`amount` 1), and unless the player asked to ignore them (`pick` false).
+  struct AdjacentView {
+    bool on{false};
+    int rings{2};
+    float amount{1.0f};
+    bool pick{true};
+  };
+  void setAdjacent(const AdjacentView& a) noexcept { adjacent_ = a; }
+  /// What is under a pixel: the central cell it shows and the copy it is on.
+  struct Pick {
+    CellId cell{kInvalidCell};
+    std::int8_t stepU{0};
+    std::int8_t stepV{0};
+  };
+  /// Pure: no selection change, no snapshot rebuild. Refuses when boardLocked().
+  [[nodiscard]] Pick pick(float px, float py, float width, float height) const;
+  /// The cell under a pixel of the board rectangle, or kInvalidCell; on a copy, the
+  /// central cell it shows. Pure: no selection change, no snapshot rebuild. Refuses
+  /// (kInvalidCell) when boardLocked().
+  [[nodiscard]] CellId pickPixel(float px, float py, float width, float height) const {
+    return pick(px, py, width, height).cell;
+  }
   [[nodiscard]] bool confirmMoves() const noexcept { return confirmMoves_; }
 
   /// Replace the current position from FEN-N, discarding history. Used for setting up a
@@ -550,6 +578,8 @@ class Session {
   bool confirmMoves_{false};
   HintOptions hints_{};
   CellId hoverCell_{kInvalidCell};
+  std::int8_t hoverCopyU_{0}, hoverCopyV_{0};
+  AdjacentView adjacent_;
   bool hoverCtrl_{false};
   /// A square a piece just arrived on under the pointer: not hover-marked until the
   /// pointer has left it.

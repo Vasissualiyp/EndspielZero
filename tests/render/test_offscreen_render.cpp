@@ -1440,6 +1440,35 @@ TEST_CASE("the tiled view draws a board's neighbours, and nothing with the switc
     CHECK(centre.at(lastTo).r != centre.at(t.v.dims.toCell(Coord::of({2, 2}))).r);
   }
 
+  SECTION("hovering a copy brightens that one copy's cell, faintly (M22.5)") {
+    const CellId hovered = t.v.dims.toCell(Coord::of({3, 3}));
+    renderer.setOptions(on);
+    const InstanceSet plain = renderer.buildInstances(snap, t.cfg, &t.seams);
+    view::PositionView hot = snap;
+    hot.setHover(hovered);
+    // The pointer is on the board itself: no copy answers.
+    const InstanceSet centreOnly = renderer.buildInstances(hot, t.cfg, &t.seams);
+    CHECK(sameInstances(centreOnly.adjacent, plain.adjacent));
+    BoardOptions over = on;
+    over.hoverCopyU = 1;
+    over.hoverCopyV = -1;
+    renderer.setOptions(over);
+    const InstanceSet set = renderer.buildInstances(hot, t.cfg, &t.seams);
+    REQUIRE(set.adjacent.size() == plain.adjacent.size());
+    int lit = 0;
+    for (std::size_t i = 0; i < set.adjacent.size(); ++i) {
+      if (std::memcmp(&set.adjacent[i], &plain.adjacent[i], sizeof(Instance)) == 0) continue;
+      ++lit;
+      CHECK(set.adjacentCells[i].source == hovered);
+      CHECK(set.adjacent[i].color[0] > plain.adjacent[i].color[0]);
+      // Faint: no brighter than the centre's own hover brightening, and alpha is kept.
+      CHECK(set.adjacent[i].color[3] == plain.adjacent[i].color[3]);
+    }
+    CHECK(lit == 1);
+    // The centre is marked exactly as it always was.
+    CHECK(sameInstances(set.instances, centreOnly.instances));
+  }
+
   SECTION("alpha falls with the order and is one only on the centre, rings 1 to 3") {
     for (int rings = 1; rings <= 3; ++rings) {
       CAPTURE(rings);

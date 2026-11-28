@@ -12,6 +12,7 @@
 #include "io/fen.hpp"
 #include "io/game_file.hpp"
 #include "io/notation.hpp"
+#include "view/adjacent.hpp"
 #include "view/board_boot.hpp"
 #include "view/cell_distances.hpp"
 
@@ -176,9 +177,23 @@ Result<Action> parseAction(const VariantSpec& v, std::string_view line) {
     auto cell = parseCell(v.dims, where);
     if (!cell.has_value()) return fail(cell.error().code, cell.error().message);
     a.cell = *cell;
+    // `hover <cell> [ctrl] [copy <u> <v>]`: the optional copy is the tiled view's board
+    // under the pointer, as its step from the central one (M22.5).
     std::string mod;
-    in >> mod;
-    a.ctrl = mod == "ctrl";
+    while (in >> mod) {
+      if (mod == "ctrl") {
+        a.ctrl = true;
+      } else if (mod == "copy") {
+        int u = 0, w = 0;
+        if (!(in >> u >> w) || u < -3 || u > 3 || w < -3 || w > 3) {
+          return fail(ErrorCode::ParseError, "hover: copy needs two steps, -3 to 3");
+        }
+        a.copyU = static_cast<std::int8_t>(u);
+        a.copyV = static_cast<std::int8_t>(w);
+      } else {
+        return fail(ErrorCode::ParseError, "hover: unexpected '" + mod + "'");
+      }
+    }
     return a;
   }
   if (verb == "undo") {
@@ -848,10 +863,16 @@ void Session::setHintOptions(const HintOptions& o) {
   refreshHints();
 }
 
-void Session::setHover(CellId cell, bool ctrl) {
-  if (cell == hoverCell_ && ctrl == hoverCtrl_) return;
+void Session::setHover(CellId cell, bool ctrl, std::int8_t copyU, std::int8_t copyV) {
+  if (cell == kInvalidCell) copyU = copyV = 0;
+  if (cell == hoverCell_ && ctrl == hoverCtrl_ && copyU == hoverCopyU_ &&
+      copyV == hoverCopyV_) {
+    return;
+  }
   hoverCell_ = cell;
   hoverCtrl_ = ctrl;
+  hoverCopyU_ = copyU;
+  hoverCopyV_ = copyV;
   if (cell != suppressedHover_) suppressedHover_ = kInvalidCell;
   refreshHints();
 }
@@ -1007,7 +1028,7 @@ Result<void> Session::apply(const Action& a) {
     }
 
     case ActionKind::Hover:
-      setHover(a.cell, a.ctrl);
+      setHover(a.cell, a.ctrl, a.copyU, a.copyV);
       return {};
 
     case ActionKind::ClickCell: {
@@ -1411,11 +1432,35 @@ Result<void> Session::watchSeek(std::size_t index) {
   return {};
 }
 
-CellId Session::pickPixel(float px, float py, float width, float height) const {
-  if (boardLocked()) return kInvalidCell;
+Session::Pick Session::pick(float px, float py, float width, float height) const {
+  if (boardLocked()) return {};
+  // The effective camera, as `clickPixel` has always used.
   const auto ray = camera().pickRay(px, py, width, height);
+  // M22.5 the tiled view: the nearest hit over the board and every copy it draws wins, and
+  // a hit on a copy names the central cell it shows. With the switch off, mid-reveal or
+  // with copies ignored this is exactly the single-board test.
+  if (adjacent_.on && adjacent_.pick && adjacent_.amount >= 1.0f) {
+    const auto copies = view::fitAdjacent(
+        view::adjacentCopies(*variant_, viewCfg_, adjacent_.rings), 2 * placements_.size());
+    if (!copies.empty()) {
+      std::vector<view::Placement> boxes = placements_;
+      std::vector<std::pair<std::int8_t, std::int8_t>> steps(boxes.size(), {0, 0});
+      for (const view::AdjacentCopy& copy : copies) {
+        if (copy.order == 0) continue;
+        for (const view::Placement& pl : placements_) {
+          boxes.push_back(view::copyPlacement(copy, pl, *variant_, viewCfg_));
+          steps.emplace_back(copy.stepU, copy.stepV);
+        }
+      }
+      const int hit = view::pickBox(ray, boxes, kPickHalfExtent);
+      if (hit < 0) return {};
+      const auto i = static_cast<std::size_t>(hit);
+      return {boxes[i].cell, steps[i].first, steps[i].second};
+    }
+  }
   const int hit = view::pickBox(ray, placements_, kPickHalfExtent);
-  return hit < 0 ? kInvalidCell : placements_[static_cast<std::size_t>(hit)].cell;
+  if (hit < 0) return {};
+  return {placements_[static_cast<std::size_t>(hit)].cell, 0, 0};
 }
 
 CellId Session::clickPixel(float px, float py, float width, float height) {
@@ -1425,14 +1470,13 @@ CellId Session::clickPixel(float px, float py, float width, float height) {
   if (boardLocked()) return kInvalidCell;
   // The effective camera, not the raw member: the pause pull-back moves the board, and
   // the ray has to move with it or a click lands beside the cell under the cursor.
-  const auto ray = camera().pickRay(px, py, width, height);
-  const int hit = view::pickBox(ray, placements_, kPickHalfExtent);
-  if (hit < 0) {
+  // On a copy of the tiled view the click acts on the central cell it shows (M22.5).
+  const CellId cell = pick(px, py, width, height).cell;
+  if (cell == kInvalidCell) {
     selected_ = kInvalidCell;
     refreshSnapshot();
     return kInvalidCell;
   }
-  const CellId cell = placements_[static_cast<std::size_t>(hit)].cell;
   Action a;
   a.kind = ActionKind::ClickCell;
   a.cell = cell;

@@ -220,6 +220,10 @@ struct BoardOptions {
   float adjacentAmount{1.0f};
   /// How many rings of copies, 1 to 3.
   int adjacentRings{2};
+  /// M22.5 the copy under the pointer, as its step from the board (0, 0: the board
+  /// itself). Its cell showing the hovered source cell gets a faint lift.
+  std::int8_t hoverCopyU{0};
+  std::int8_t hoverCopyV{0};
 };
 
 /// Instances grouped by the shape that draws them - one draw call per shape.

@@ -2458,6 +2458,13 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       view::Rgba fill = (parity % 2 == 0) ? theme_.boardDark : theme_.boardLight;
       if (options_.showLastMove && (src == lastFrom_ || src == lastTo_))
         fill = mix(fill, theme_.ember, kLastMoveTint);
+      // M22.5 the one copy under the pointer answers it with the centre's own hover lift
+      // (the copy is dimmed and translucent, so it stays faint): the cell the pointer is
+      // on, not every copy of it.
+      if (src == p.hover() && copy.stepU == options_.hoverCopyU &&
+          copy.stepV == options_.hoverCopyV) {
+        fill = mix(fill, view::Rgba{1.0f, 1.0f, 1.0f, fill.a}, kHoverBrighten);
+      }
 
       Instance cell{};
       cell.fxCell = fxIndex(src, false);

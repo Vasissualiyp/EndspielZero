@@ -619,6 +619,8 @@ std::string DebugConsole::help() {
          "royal)\n"
          "seamhover <axis>|off     pin the seam-legend highlight on one axis\n"
          "adjacent [on|off|1|2|3]  the tiled view: neighbours through glued edges\n"
+         "script hover <cell> copy <u> <v>  mark a cell and the tiled copy under the "
+         "pointer; set adjacent_pick false ignores copies\n"
          "result                     show the decided game result now\n"
          "review [<ply>|off]       browse the game's history (no ply: the end); off "
          "leaves\n"

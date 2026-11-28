@@ -399,3 +399,45 @@ Deviations / decisions:
 - Sheets: `out/m22.3/sheet1.png` (torus off / on / flat / shape, console), `sheet2.png`
   (standard, klein lab, settings, torus neural VR), `sheet3.png` (ADJ lit vs off in lab
   and VR).
+
+### 2026-11-28 - M22.5 built (picking and hover on the copies)
+
+What was built:
+- `Session::pick` (new; `pickPixel` is now its `.cell`) tests the board and every copy the
+  front end is drawing: the nearest box wins and a hit on a copy returns the central cell it
+  shows (`sourceCell`, via `copyPlacement`) plus the copy's `(stepU, stepV)`. `clickPixel` uses
+  it, so a click on a copy selects and moves the source piece (reach across the seam). The
+  copy list is the renderer's (`adjacentCopies` + `fitAdjacent` at `2 * cells`), so picture
+  and pick cannot disagree on a large board's dropped rings. With the switch off, mid-reveal,
+  with copies ignored, or on a variant with no copies, the code path is the old single-board
+  test untouched.
+- `Session::AdjacentView` / `setAdjacent`: the front end feeds it every frame from
+  `view::adjacentDrawn(showAdjacent, surface)`, `adjacentRings`, `adjacentFormed` and
+  `adjacentPick` (top of the frame loop in `main.cpp`), so lab, neural VR and lab-off all
+  pick the same way. The hover loop passes the copy to `Session::setHover(cell, ctrl,
+  copyU, copyV)`; hover hints (attack/peek) come from the source cell as before.
+- Hover mark: the source cell on the centre is marked as always; the one copy cell under the
+  pointer gets the centre's hover lift (`BoardOptions::hoverCopyU/V`, set in `optionsFor`).
+  The hover script verb takes `hover <cell> [ctrl] [copy <u> <v>]` for captures and tests.
+- `Settings::adjacentPick` (default true, `adjacent_pick`, saved) - the spec's "option, off
+  by default: ignore copies" read as: ignoring is off by default, so copies are pickable
+  unless the player turns this off. The Settings -> BOARD checkbox is shown only while the
+  tiled view is on, so Settings with the switch off is byte-identical to before.
+
+Tests: `tests/unit/app/test_adjacent_pick.cpp` (+7: cylinder copy pixels equal the source's
+pixel, mobius reflected sources, off / ignored / mid-reveal give `kInvalidCell`, `standard`
+unchanged, hover names the copy, click and move through copies, the hover verb);
+`test_shell.cpp` (`adjacent_pick` round trip); `test_offscreen_render.cpp` (one copy cell lit,
+centre unchanged); `check_adjacent.cmake` (hover on a copy differs from hover on the board
+in solid, flat, lab and neural VR, and reproduces). `[render],[app],[view]` pass; see the
+commit message for counts.
+
+Deviations / decisions:
+- Copies are pickable only once fully arrived (`adjacentFormed` 1): M22.4 will move them
+  during the reveal, and a click on a moving ghost is not an action. Revisit with M22.4.
+- Not header-only deviation: none. Lab and VR need nothing extra: `carryBoard` and the VR
+  glide are render-only, picking reads the session's own placements and camera as before.
+- Copy hover lift equals the centre's (`kHoverBrighten`); the copy is dimmed and translucent
+  so it reads faint. A higher-order ring's hover is correspondingly fainter.
+- Sheet: `out/m22.5/sheet.png` (torus solid hover on the board vs a copy, flat, mobius, lab,
+  neural VR).
