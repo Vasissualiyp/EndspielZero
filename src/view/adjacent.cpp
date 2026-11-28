@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdlib>
 
+#include "view/morph.hpp"
+
 namespace cb::view {
 
 namespace {
@@ -98,6 +100,20 @@ Placement copyPlacement(const AdjacentCopy& copy, const Placement& central,
   return p;
 }
 
+Placement copyPlacement(const AdjacentCopy& copy, const Placement& central,
+                        const VariantSpec& v, const ViewConfig& cfg, float amount) {
+  Placement p = copyPlacement(copy, central, v, cfg);
+  if (copy.order == 0) return p;
+  const float push = adjacentOffset(amount, copy.order);
+  if (push <= 0.0f) return p;
+  // Out along the step, normalised by the ring: an edge copy comes straight in, a corner
+  // copy along its diagonal, and the whole ring arrives as one square.
+  const float r = static_cast<float>(copy.order);
+  p.x += push * static_cast<float>(copy.stepU * v.dims.extent(cfg.screenAxes[0])) / r;
+  p.y += push * static_cast<float>(copy.stepV * v.dims.extent(cfg.screenAxes[1])) / r;
+  return p;
+}
+
 CellId sourceCell(const AdjacentCopy& copy, CellId copyLocalCell, const VariantSpec& v) {
   return v.dims.toCell(copy.viaSeams.applyToCoord(v.dims.toCoord(copyLocalCell)));
 }
@@ -105,6 +121,65 @@ CellId sourceCell(const AdjacentCopy& copy, CellId copyLocalCell, const VariantS
 float adjacentAlpha(int order) noexcept {
   if (order <= 0) return 1.0f;
   return kAdjacentAlpha * std::pow(kAdjacentFalloff, static_cast<float>(order - 1));
+}
+
+float adjacentReveal(float amount, int order) noexcept {
+  if (order <= 0) return 1.0f;
+  const float delay = kAdjacentStagger * static_cast<float>(order - 1);
+  const float t = std::clamp((amount - delay) / (1.0f - delay), 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
+float adjacentOffset(float amount, int order) noexcept {
+  if (order <= 0) return 0.0f;
+  const float rest = 1.0f - adjacentReveal(amount, order);
+  return kAdjacentFar * rest * rest;
+}
+
+float adjacentRevealAlpha(float amount, int order) noexcept {
+  return adjacentReveal(amount, order) * adjacentAlpha(order);
+}
+
+float adjacentDimAt(float amount, int order) noexcept {
+  const float e = adjacentReveal(amount, order);
+  const float m = std::clamp((e - (1.0f - kAdjacentMerge)) / kAdjacentMerge, 0.0f, 1.0f);
+  return kAdjacentDim * (m * m * (3.0f - 2.0f * m));
+}
+
+AdjacentReveal advanceAdjacentReveal(AdjacentReveal r, bool on, float dt,
+                                     float formSpeed) noexcept {
+  // From fully off (nothing drawn, whatever the stale reveal says) the copies start at
+  // infinity; a switch turned back on while they leave turns them round where they are.
+  if (on && !r.wasOn && !r.leaving) r.formed = 0.0f;
+  if (on)
+    r.leaving = false;
+  else if (r.wasOn && r.formed > 0.0f)
+    r.leaving = true;
+  // Fully off is settled at infinity, so the next switch-on starts there.
+  if (!on && !r.leaving)
+    r.formed = 0.0f;
+  else
+    r.formed = advanceFormMorph(r.formed, on ? 1.0f : 0.0f, dt, formSpeed);
+  if (r.leaving && r.formed <= 0.0f) r.leaving = false;
+  r.wasOn = on;
+  return r;
+}
+
+float adjacentFarZ(const OrbitCamera& cam, const std::vector<Placement>& central,
+                   const VariantSpec& v, const ViewConfig& cfg, int rings) {
+  // A cell is a unit apart from its neighbour and a piece stands about two tall, so two
+  // units of slack cover the cell's own extent and its piece.
+  constexpr float kSlack = 2.0f;
+  const Vec3 eye = cam.eye();
+  float reach = 0.0f;
+  for (const AdjacentCopy& copy : adjacentCopies(v, cfg, rings)) {
+    if (copy.order == 0) continue;
+    for (const Placement& pl : central) {
+      const Placement at = copyPlacement(copy, pl, v, cfg, 0.0f);
+      reach = std::max(reach, std::hypot(at.x - eye.x, at.y - eye.y, at.z - eye.z));
+    }
+  }
+  return reach > 0.0f ? std::max(cam.farZ, reach + kSlack) : cam.farZ;
 }
 
 std::vector<AdjacentCopy> fitAdjacent(std::vector<AdjacentCopy> copies,
@@ -139,6 +214,30 @@ std::vector<AdjacentToken> adjacentTokens(const PositionView& snapshot,
       const Piece piece = snapshot.at(at.cell);
       if (piece.empty()) continue;
       out.push_back({piece, at, copy.order, alpha});
+    }
+  }
+  return out;
+}
+
+std::vector<AdjacentToken> arrivingTokens(const PositionView& snapshot,
+                                          const std::vector<AdjacentCopy>& copies,
+                                          const std::vector<Placement>& central,
+                                          const ViewConfig& cfg, float amount,
+                                          CellId skip) {
+  std::vector<AdjacentToken> out;
+  if (adjacentReveal(amount, 1) <= 0.0f) return out;
+  const VariantSpec& v = snapshot.variant();
+  for (const AdjacentCopy& copy : copies) {
+    if (copy.order == 0) continue;
+    const float alpha = adjacentRevealAlpha(amount, copy.order);
+    if (alpha <= 0.0f) continue;
+    const float dim = adjacentDimAt(amount, copy.order);
+    for (const Placement& pl : central) {
+      const Placement at = copyPlacement(copy, pl, v, cfg, amount);
+      if (at.cell == skip) continue;
+      const Piece piece = snapshot.at(at.cell);
+      if (piece.empty()) continue;
+      out.push_back({piece, at, copy.order, alpha, dim});
     }
   }
   return out;

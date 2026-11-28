@@ -3202,7 +3202,11 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
       const bool cold = !(adjacentBtn.lit && t.implantFrameless);
       if (dockButton("ADJ", t, px(52), adjacentBtn.lit, cold, adjacentBtn.enabled,
                      actionFont())) {
-        shell.settings().showAdjacent = !shell.settings().showAdjacent;
+        app::Settings& st = shell.settings();
+        st.showAdjacent = !st.showAdjacent;
+        // M22.4: switched off, the copies leave rather than vanish - from this frame's
+        // tokens on; switched on, they arrive from infinity (the front end eases it).
+        if (!st.showAdjacent && st.adjacentFormed > 0.0f) st.adjacentLeaving = true;
         request.settingsChanged = true;
       }
     }
@@ -3787,20 +3791,23 @@ UiRequest Ui::buildGameHud(app::Shell& shell, float fps) {
     // (`view::adjacentTokens`), so the two cannot disagree. No cue tints; the figure and
     // the disc are mixed toward the background and fade with their board.
     const app::Settings& st = shell.settings();
-    if (view::adjacentDrawn(st.showAdjacent, surfaceView) && focus > 0.01f) {
+    if (view::adjacentDrawn(st.showAdjacent, st.adjacentLeaving, surfaceView) &&
+        focus > 0.01f) {
       const auto& central = session.placements();
       const auto copies = view::fitAdjacent(
           view::adjacentCopies(v, session.viewConfig(), st.adjacentRings),
           2 * central.size());
-      const auto dim = [&](view::Rgba c) {
-        c.r += (t.ink.r - c.r) * view::kAdjacentDim;
-        c.g += (t.ink.g - c.g) * view::kAdjacentDim;
-        c.b += (t.ink.b - c.b) * view::kAdjacentDim;
-        return c;
-      };
+      // M22.4: on the way in or out, each token follows its copy, fading and dimming
+      // with its own ring (`view::arrivingTokens`, the renderer's same numbers).
       for (const view::AdjacentToken& tok :
-           view::adjacentTokens(session.snapshot(), copies, central, session.viewConfig(),
-                                shapeEase(st.adjacentFormed), movingTo)) {
+           view::arrivingTokens(session.snapshot(), copies, central, session.viewConfig(),
+                                std::clamp(st.adjacentFormed, 0.0f, 1.0f), movingTo)) {
+        const auto dim = [&](view::Rgba c) {
+          c.r += (t.ink.r - c.r) * tok.dim;
+          c.g += (t.ink.g - c.g) * tok.dim;
+          c.b += (t.ink.b - c.b) * tok.dim;
+          return c;
+        };
         const view::OrbitCamera::ScreenPoint sp =
             cam.project(view::Vec3{tok.at.x, tok.at.y, tok.at.z}, w / h, w, h);
         if (!sp.visible) continue;

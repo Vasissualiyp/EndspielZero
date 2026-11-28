@@ -2101,7 +2101,7 @@ render::BoardOptions optionsFor(const app::Shell& shell, int seamHighlight = -1)
   o.surface =
       wantSurface && session != nullptr && render::hasPlaySurface(session->variant());
   // M22: the tiled view's one rule, which the interface's flat tokens read too.
-  o.showAdjacent = view::adjacentDrawn(s.showAdjacent, o.surface);
+  o.showAdjacent = view::adjacentDrawn(s.showAdjacent, s.adjacentLeaving, o.surface);
   // M22.5: the copy under the pointer answers it faintly.
   if (o.showAdjacent && session != nullptr) {
     o.hoverCopyU = session->hoverCopyU();
@@ -2206,7 +2206,14 @@ view::OrbitCamera boardCamera(const app::Shell& shell,
   if (session == nullptr) return {};
   // The trailer's resting sway rides on whatever the base camera is (identity outside
   // it).
-  return shell.trailerView(boardCameraBase(shell, seq));
+  view::OrbitCamera cam = shell.trailerView(boardCameraBase(shell, seq));
+  // M22.6: the tiled view's copies arrive from `kAdjacentFar` boards out, past the board's
+  // framed far plane; the plane reaches them, so they never cross it with a hard edge.
+  // At amount 0 none is drawn, and the plain board's projection stays exactly as it was.
+  if (optionsFor(shell).showAdjacent && shell.settings().adjacentFormed > 0.0f)
+    cam.farZ = view::adjacentFarZ(cam, session->placements(), session->variant(),
+                                  session->viewConfig(), shell.settings().adjacentRings);
+  return cam;
 }
 
 view::OrbitCamera boardCameraBase(const app::Shell& shell,
@@ -4020,6 +4027,9 @@ int main(int argc, char** argv) {
                          boardRect.height);
   };
 
+  // M22.4: the tiled view's switch as last seen. A switch saved on is already arrived at
+  // launch (the reveal starts at 1), so nothing replays.
+  bool adjacentWasOn = shell->settings().showAdjacent;
   while (running && !shell->quitRequested()) {
 #ifdef CB_HAVE_IMGUI
     if (shell->session() != nullptr && !gVrTrack.flat.active(gRigNow, gVrIntensity))
@@ -4043,7 +4053,10 @@ int main(int argc, char** argv) {
         resolveTheme(shell->settings()).liveControls ||
         resolveTheme(shell->settings()).materials.pieces == view::Material::Hologram ||
         (shell->hasGame() &&
-         (shell->session()->animation().active() || shell->attracting()));
+         (shell->session()->animation().active() || shell->attracting())) ||
+        // M22.4: the copies arriving or leaving want frames, not the idle wait.
+        shell->settings().adjacentLeaving ||
+        (shell->settings().showAdjacent && shell->settings().adjacentFormed < 1.0f);
     if (!SDL_WaitEventTimeout(&e, animating ? 8 : 100)) e.type = SDL_EVENT_POLL_SENTINEL;
     do {
       if (e.type == SDL_EVENT_POLL_SENTINEL) continue;
@@ -4520,6 +4533,15 @@ int main(int argc, char** argv) {
       const bool nowMorphing = st.geometryFormed != formTarget;
       morphInFlight = wasMorphing || nowMorphing;
       morphSettling = wasMorphing && !nowMorphing;
+      // M22.4 the tiled view's arrival, eased the same way at the same pace: on, the
+      // copies come in from infinity; off, they leave and are drawn until they are gone.
+      // The camera does not move; the arrival is the motion.
+      const view::AdjacentReveal adj = view::advanceAdjacentReveal(
+          {st.adjacentFormed, st.adjacentLeaving, adjacentWasOn}, st.showAdjacent, dt,
+          st.geometryFormSpeed);
+      st.adjacentFormed = adj.formed;
+      st.adjacentLeaving = adj.leaving;
+      adjacentWasOn = adj.wasOn;
     }
 
     // The shape-follow choreography (M17.19): align, approach, travel, return. It drives
@@ -4640,6 +4662,18 @@ int main(int argc, char** argv) {
     (*ui)->newFrame();
     const render::UiRequest request = (*ui)->build(*shell, fps);
     (*ui)->endFrame();
+    // M22.4: a tiled-view switch flipped by the interface or the console takes effect in
+    // this frame's picture (a zero step: on starts at infinity, off starts leaving), so the
+    // board never draws one frame of the stale reveal.
+    {
+      app::Settings& st = shell->settings();
+      const view::AdjacentReveal adj = view::advanceAdjacentReveal(
+          {st.adjacentFormed, st.adjacentLeaving, adjacentWasOn}, st.showAdjacent, 0.0f,
+          st.geometryFormSpeed);
+      st.adjacentFormed = adj.formed;
+      st.adjacentLeaving = adj.leaving;
+      adjacentWasOn = adj.wasOn;
+    }
     // The board boots once the deploy's last slab has locked (M24.5).
     if (const auto m = (*ui)->rigMove();
         m && !m->done && m->move == app::ScreenMove::Deploy)

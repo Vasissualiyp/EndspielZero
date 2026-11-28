@@ -563,3 +563,25 @@ TEST_CASE("adjacent switches the tiled view and its rings without a game",
   CHECK(console.run(*shell, "adjacent on off") == "usage: adjacent [on|off|1|2|3]");
   CHECK(has(DebugConsole::help(), "adjacent [on|off|1|2|3]"));
 }
+
+TEST_CASE("adjacent off sends arrived copies away, and nothing that was never on (M22.4)",
+          "[unit][app]") {
+  auto shell = makeShell();
+  DebugConsole console;
+  auto& s = shell->settings();
+  s.showAdjacent = false;
+  s.adjacentFormed = 1.0f;
+  s.adjacentLeaving = false;
+  CHECK(console.run(*shell, "adjacent off") == "adjacent off, rings 2");
+  CHECK_FALSE(s.adjacentLeaving);
+  CHECK(console.run(*shell, "adjacent on") == "adjacent on, rings 2");
+  CHECK_FALSE(s.adjacentLeaving);
+  CHECK(console.run(*shell, "adjacent off") == "adjacent off, rings 2");
+  CHECK(s.adjacentLeaving);
+  // Fully gone already: nothing left to leave.
+  s.adjacentLeaving = false;
+  s.showAdjacent = true;
+  s.adjacentFormed = 0.0f;
+  CHECK(console.run(*shell, "adjacent") == "adjacent off, rings 2");
+  CHECK_FALSE(s.adjacentLeaving);
+}

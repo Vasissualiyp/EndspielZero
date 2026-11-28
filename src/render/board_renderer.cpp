@@ -2438,17 +2438,22 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
   // and no shadows: the copies stand on the page as more of the same world.
   std::vector<std::vector<Instance>> byShapeAdjacent(kShapeSlots);
   std::vector<std::vector<InstanceSet::AdjacentMeta>> byShapeAdjacentMeta(kShapeSlots);
+  // M22.4 the arrival: each ring comes in from `kAdjacentFar` boards out on its own
+  // staggered reveal, fading in and settling into its dimming as it lands. At amount 1
+  // every number below is exactly the steady state's.
+  const float adjacentAmount = std::clamp(options_.adjacentAmount, 0.0f, 1.0f);
   for (const view::AdjacentCopy& copy : copies) {
     if (copy.order == 0) continue;
-    const float alpha = adjacentReveal * view::adjacentAlpha(copy.order);
+    const float alpha = view::adjacentRevealAlpha(adjacentAmount, copy.order);
     if (alpha <= 0.0f) continue;
+    const float dimBy = view::adjacentDimAt(adjacentAmount, copy.order);
     const auto dimmed = [&](view::Rgba c, Instance& inst, float opacity) {
-      c = mix(c, theme_.ink, view::kAdjacentDim);
+      c = mix(c, theme_.ink, dimBy);
       c.a = opacity;
       toFloat4(c, inst.color);
     };
     for (const view::Placement& central : placements) {
-      const view::Placement pl = view::copyPlacement(copy, central, v, cfg);
+      const view::Placement pl = view::copyPlacement(copy, central, v, cfg, adjacentAmount);
       const CellId src = pl.cell;
       const Coord c = v.dims.toCoord(src);
       std::uint8_t drawn[3] = {};

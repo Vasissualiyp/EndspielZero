@@ -1502,6 +1502,49 @@ TEST_CASE("the tiled view draws a board's neighbours, and nothing with the switc
     }
   }
 
+  SECTION("mid-arrival the copies are farther out and fainter, the outer ring behind (M22.4)") {
+    on.adjacentRings = 2;
+    renderer.setOptions(on);
+    const InstanceSet home = renderer.buildInstances(snap, t.cfg, &t.seams);
+    BoardOptions mid = on;
+    mid.adjacentAmount = 0.5f;
+    renderer.setOptions(mid);
+    const InstanceSet set = renderer.buildInstances(snap, t.cfg, &t.seams);
+    // The centre does not move: the arrival is the motion.
+    CHECK(sameInstances(set.shadows, home.shadows));
+    const auto& hb = home.adjacentBatches[static_cast<std::size_t>(Archetype::Cell)];
+    const auto& mb = set.adjacentBatches[static_cast<std::size_t>(Archetype::Cell)];
+    REQUIRE(mb.count == hb.count);
+    float cx = 0.0f;
+    float cy = 0.0f;
+    const auto central = view::layout(t.v.dims, t.cfg);
+    for (const view::Placement& pl : central) {
+      cx += pl.x / static_cast<float>(central.size());
+      cy += pl.y / static_cast<float>(central.size());
+    }
+    int ring1 = 0;
+    for (std::uint32_t i = 0; i < mb.count; ++i) {
+      const auto& meta = set.adjacentCells[mb.first + i];
+      if (meta.order == 0) continue;
+      const Instance& now = set.adjacent[mb.first + i];
+      const Instance& was = home.adjacent[hb.first + i];
+      REQUIRE(home.adjacentCells[hb.first + i].source == meta.source);
+      CHECK(now.color[3] == view::adjacentRevealAlpha(0.5f, meta.order));
+      const float dNow = std::hypot(now.center[0] - cx, now.center[1] - cy);
+      const float dWas = std::hypot(was.center[0] - cx, was.center[1] - cy);
+      if (meta.order == 1) {
+        ++ring1;
+        CHECK(now.color[3] > 0.0f);
+        CHECK(now.color[3] < was.color[3]);
+        CHECK(dNow > dWas);
+        CHECK(now.center[2] == was.center[2]);
+      }
+    }
+    CHECK(ring1 == static_cast<int>(8 * cells));
+    // Ring 2 starts later: at this amount it has less of its own reveal than ring 1.
+    CHECK(view::adjacentReveal(0.5f, 2) < view::adjacentReveal(0.5f, 1));
+  }
+
   SECTION("every glued 2-D board copies whole boards: cells and pieces") {
     for (const char* name : {"cylinder", "mobius", "klein"}) {
       CAPTURE(name);

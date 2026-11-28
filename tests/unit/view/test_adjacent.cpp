@@ -274,3 +274,218 @@ TEST_CASE("flat tokens show the source cell's piece at the copy's place", "[unit
   REQUIRE_FALSE(snap.at(moving).empty());
   CHECK(adjacentTokens(snap, copies, central, cfg, 1.0f, moving).size() == 4 * (occupied - 1));
 }
+
+// M22.4 the arrival: the copies come in from "infinity" as one eased number grows.
+
+TEST_CASE("an arriving copy comes from far boards out and lands exactly home",
+          "[unit][view]") {
+  for (int order = 1; order <= 3; ++order) {
+    CAPTURE(order);
+    CHECK(adjacentOffset(1.0f, order) == 0.0f);
+    CHECK(adjacentOffset(0.0f, order) == kAdjacentFar);
+    float last = adjacentOffset(0.0f, order);
+    for (int i = 1; i <= 100; ++i) {
+      const float now = adjacentOffset(static_cast<float>(i) / 100.0f, order);
+      CHECK(now <= last);
+      last = now;
+    }
+  }
+  CHECK(kAdjacentFar == 12.0f);
+  // The centre never moves.
+  CHECK(adjacentOffset(0.0f, 0) == 0.0f);
+}
+
+TEST_CASE("an arriving copy fades in to its ring's alpha and dims as it merges",
+          "[unit][view]") {
+  for (int order = 1; order <= 3; ++order) {
+    CAPTURE(order);
+    CHECK(adjacentRevealAlpha(0.0f, order) == 0.0f);
+    CHECK(adjacentRevealAlpha(1.0f, order) == adjacentAlpha(order));
+    // The dimming settles over the last tenth of the copy's own reveal, never before.
+    CHECK(adjacentDimAt(1.0f, order) == kAdjacentDim);
+    CHECK(adjacentDimAt(0.0f, order) == 0.0f);
+    float lastDim = 0.0f;
+    for (int i = 0; i <= 100; ++i) {
+      const float a = static_cast<float>(i) / 100.0f;
+      const float dim = adjacentDimAt(a, order);
+      CHECK(dim >= lastDim);
+      if (adjacentReveal(a, order) < 1.0f - kAdjacentMerge) CHECK(dim == 0.0f);
+      lastDim = dim;
+    }
+  }
+  // Strictly fainter with the order; one only on the centre.
+  CHECK(adjacentAlpha(0) == 1.0f);
+  CHECK(1.0f > adjacentAlpha(1));
+  CHECK(adjacentAlpha(1) > adjacentAlpha(2));
+  CHECK(adjacentAlpha(2) > adjacentAlpha(3));
+  CHECK(std::abs(adjacentAlpha(2) - 0.49f) < 0.005f);
+  CHECK(std::abs(adjacentAlpha(3) - 0.29f) < 0.005f);
+}
+
+TEST_CASE("an outer ring never starts arriving before the ring inside it", "[unit][view]") {
+  for (int order = 1; order < 3; ++order) {
+    CAPTURE(order);
+    float startInner = -1.0f;
+    float startOuter = -1.0f;
+    for (int i = 0; i <= 1000; ++i) {
+      const float a = static_cast<float>(i) / 1000.0f;
+      const float inner = adjacentReveal(a, order);
+      const float outer = adjacentReveal(a, order + 1);
+      CHECK(outer <= inner);
+      if (startInner < 0.0f && inner > 0.0f) startInner = a;
+      if (startOuter < 0.0f && outer > 0.0f) startOuter = a;
+    }
+    CHECK(startOuter > startInner);
+  }
+  CHECK(adjacentReveal(0.5f, 0) == 1.0f);
+  CHECK(adjacentReveal(1.0f, 3) == 1.0f);
+}
+
+TEST_CASE("an arriving copy is pushed out along its step, corners along the diagonal",
+          "[unit][view]") {
+  const VariantSpec v = test::loadVariant("torus");
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  const auto central = layout(v.dims, cfg);
+  const auto copies = adjacentCopies(v, cfg, 2);
+  const float w = static_cast<float>(v.dims.extent(cfg.screenAxes[0]));
+  const float h = static_cast<float>(v.dims.extent(cfg.screenAxes[1]));
+  for (const AdjacentCopy& c : copies) {
+    CAPTURE(c.stepU, c.stepV);
+    const Placement home = copyPlacement(c, central.front(), v, cfg);
+    const Placement arrived = copyPlacement(c, central.front(), v, cfg, 1.0f);
+    CHECK(arrived.x == home.x);
+    CHECK(arrived.y == home.y);
+    CHECK(arrived.cell == home.cell);
+    const Placement far = copyPlacement(c, central.front(), v, cfg, 0.0f);
+    CHECK(far.cell == home.cell);
+    const float r = c.order == 0 ? 1.0f : static_cast<float>(c.order);
+    CHECK(std::abs(far.x - home.x - kAdjacentFar * w * c.stepU / r) < 1e-3f);
+    CHECK(std::abs(far.y - home.y - kAdjacentFar * h * c.stepV / r) < 1e-3f);
+    CHECK(far.z == home.z);
+  }
+}
+
+TEST_CASE("arriving flat tokens follow their copy in and fade with it", "[unit][view]") {
+  const VariantSpec v = test::loadVariant("torus");
+  const Position pos = Position::startPosition(v);
+  const PositionView snap = PositionView::capture(pos);
+  const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+  const auto central = layout(v.dims, cfg);
+  const auto copies = adjacentCopies(v, cfg, 2);
+  // Arrived, they are exactly the steady tokens.
+  const auto steady = adjacentTokens(snap, copies, central, cfg, 1.0f);
+  const auto home = arrivingTokens(snap, copies, central, cfg, 1.0f);
+  REQUIRE(home.size() == steady.size());
+  for (std::size_t i = 0; i < home.size(); ++i) {
+    CHECK(home[i].at.x == steady[i].at.x);
+    CHECK(home[i].at.y == steady[i].at.y);
+    CHECK(home[i].alpha == steady[i].alpha);
+    CHECK(home[i].dim == kAdjacentDim);
+  }
+  CHECK(arrivingTokens(snap, copies, central, cfg, 0.0f).empty());
+  // Mid-way, ring 1 is on its way in and ring 2 behind it, fainter and farther.
+  const auto mid = arrivingTokens(snap, copies, central, cfg, 0.5f);
+  REQUIRE_FALSE(mid.empty());
+  for (const AdjacentToken& t : mid) {
+    CHECK(t.alpha == adjacentRevealAlpha(0.5f, t.order));
+    CHECK(t.alpha < adjacentAlpha(t.order));
+  }
+  for (std::size_t i = 1; i < mid.size(); ++i) CHECK(mid[i - 1].order >= mid[i].order);
+}
+
+TEST_CASE("the reveal eases in on switch-on and out again on switch-off", "[unit][view]") {
+  constexpr float kDt = 1.0f / 60.0f;
+  // Launched with the switch already on: arrived, no replay.
+  AdjacentReveal r{1.0f, false, true};
+  r = advanceAdjacentReveal(r, true, kDt, 1.0f);
+  CHECK(r.formed == 1.0f);
+  CHECK_FALSE(r.leaving);
+
+  // Off and settled (the default reveal of 1 is not drawn while off), then on: the
+  // copies start at infinity and arrive.
+  r = AdjacentReveal{1.0f, false, false};
+  r = advanceAdjacentReveal(r, false, kDt, 1.0f);
+  CHECK_FALSE(r.leaving);
+  CHECK(r.formed == 0.0f);
+  // A zero step only takes the flip in: on from fully off is at infinity, not drawn yet.
+  const AdjacentReveal flipped = advanceAdjacentReveal(r, true, 0.0f, 1.0f);
+  CHECK(flipped.formed == 0.0f);
+  CHECK(flipped.wasOn);
+  r = advanceAdjacentReveal(r, true, kDt, 1.0f);
+  CHECK(r.formed > 0.0f);
+  CHECK(r.formed < 0.1f);
+  int frames = 0;
+  while (r.formed < 1.0f && frames < 600) {
+    r = advanceAdjacentReveal(r, true, kDt, 1.0f);
+    ++frames;
+  }
+  CHECK(r.formed == 1.0f);
+  // Half a second at speed 1, as the shape morph.
+  CHECK(frames < 40);
+
+  // Off: they leave, still drawn until the reveal reaches zero. A zero step already
+  // marks them leaving, so the flip's own frame still draws them.
+  CHECK(advanceAdjacentReveal(r, false, 0.0f, 1.0f).leaving);
+  CHECK(advanceAdjacentReveal(r, false, 0.0f, 1.0f).formed == 1.0f);
+  r = advanceAdjacentReveal(r, false, kDt, 1.0f);
+  CHECK(r.leaving);
+  CHECK(r.formed < 1.0f);
+  const float leavingAt = r.formed;
+  // Reversed mid-way: on again continues from where it is, not from infinity.
+  r = advanceAdjacentReveal(r, true, kDt, 1.0f);
+  CHECK(r.formed > leavingAt);
+  CHECK_FALSE(r.leaving);
+  r = advanceAdjacentReveal(r, false, kDt, 1.0f);
+  frames = 0;
+  while (r.leaving && frames < 600) {
+    r = advanceAdjacentReveal(r, false, kDt, 1.0f);
+    ++frames;
+  }
+  CHECK(r.formed == 0.0f);
+  CHECK_FALSE(r.leaving);
+  // Faster with the shared speed setting.
+  const AdjacentReveal slow = advanceAdjacentReveal({0.0f, false, true}, true, kDt, 1.0f);
+  const AdjacentReveal fast = advanceAdjacentReveal({0.0f, false, true}, true, kDt, 2.0f);
+  CHECK(fast.formed > slow.formed);
+}
+
+TEST_CASE("leaving copies are still drawn, and never on the shape", "[unit][view]") {
+  CHECK(adjacentDrawn(true, false, false));
+  CHECK(adjacentDrawn(false, true, false));
+  CHECK_FALSE(adjacentDrawn(false, false, false));
+  CHECK_FALSE(adjacentDrawn(true, true, true));
+}
+
+TEST_CASE("the far plane reaches every copy all the way out at infinity (M22.6)",
+          "[unit][view]") {
+  for (const char* name : {"torus", "cylinder", "klein"}) {
+    CAPTURE(name);
+    const VariantSpec v = test::loadVariant(name);
+    const ViewConfig cfg = ViewConfig::forBoard(v.dims);
+    const auto central = layout(v.dims, cfg);
+    OrbitCamera cam;
+    cam.target = {3.5f, 3.5f, 0.0f};
+    cam.distance = 20.0f;
+    cam.pitch = 0.3f;
+    cam.farZ = 60.0f;
+    for (int rings = 1; rings <= 3; ++rings) {
+      CAPTURE(rings);
+      const float far = adjacentFarZ(cam, central, v, cfg, rings);
+      CHECK(far >= cam.farZ);
+      const Vec3 eye = cam.eye();
+      for (const AdjacentCopy& c : adjacentCopies(v, cfg, rings)) {
+        for (const Placement& pl : central) {
+          const Placement at = copyPlacement(c, pl, v, cfg, 0.0f);
+          const float d = std::hypot(at.x - eye.x, at.y - eye.y, at.z + 1.0f - eye.z);
+          CHECK(d < far);
+        }
+      }
+    }
+  }
+  // No copies, no change: the plain board keeps its framed far plane.
+  const VariantSpec standard = test::loadVariant("standard");
+  const ViewConfig cfg = ViewConfig::forBoard(standard.dims);
+  OrbitCamera cam;
+  cam.farZ = 60.0f;
+  CHECK(adjacentFarZ(cam, layout(standard.dims, cfg), standard, cfg, 2) == 60.0f);
+}

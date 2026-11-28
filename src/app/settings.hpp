@@ -166,6 +166,10 @@ struct Settings {
   /// a click there acts on it. Off ignores them for picking (`adjacent_pick`, saved).
   bool adjacentPick{true};
   float adjacentFormed{1.0f};
+  /// The copies are on their way out after the switch went off (M22.4): still drawn until
+  /// `adjacentFormed` reaches 0. Set by the front end's `view::advanceAdjacentReveal`;
+  /// transient.
+  bool adjacentLeaving{false};
   /// Draw the shape view's pieces as icon-faced pucks instead of the sculptural meshes
   /// (M17.25). The tangent-field walk must put one unavoidable flip on a non-orientable
   /// shape, and a sculptural piece across that line faces the wrong way; a flat icon

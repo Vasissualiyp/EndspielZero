@@ -266,7 +266,7 @@ it.
 
 ## Status
 
-Planned (2026-10-30); nothing built. Drawn axes: both in-plane directions are in the first
+Planned (2026-10-30); **built 2026-11-28** (M22.1-M22.6, entries below). Drawn axes: both in-plane directions are in the first
 version; the third axis (up/down) is sketched in M22.8, with an open decision on it.
 
 ### 2026-11-28 - M22.1 built (the pure copies module)
@@ -441,3 +441,91 @@ Deviations / decisions:
   so it reads faint. A higher-order ring's hover is correspondingly fainter.
 - Sheet: `out/m22.5/sheet.png` (torus solid hover on the board vs a copy, flat, mobius, lab,
   neural VR).
+
+### 2026-11-28 - M22.4 built (the arrival animation) and M22.6 verified; M22 built
+
+**M22 is built** (M22.1-M22.6). M22.8 (up/down) stays a sketch, with its decision open;
+3+-axis boards and the shape view remain out of scope as planned.
+
+What was built:
+- `view/adjacent.*`, pure functions of the raw reveal `amount` (0..1): `adjacentReveal`
+  (a ring's own eased reveal, smoothstep of `(amount - delay) / (1 - delay)`, `delay =
+  kAdjacentStagger * (r - 1)`, `kAdjacentStagger` 0.15), `adjacentOffset` (`kAdjacentFar *
+  (1 - e)^2` boards, `kAdjacentFar` 12), `adjacentRevealAlpha` (`e * adjacentAlpha(r)`),
+  `adjacentDimAt` (0 until the last `kAdjacentMerge` = 10% of `e`, then smoothly up to
+  `kAdjacentDim`), `copyPlacement(..., amount)` (pushed out along the step divided by the
+  ring, so a corner copy comes in along its diagonal and a whole ring lands as one square)
+  and `arrivingTokens` (the flat tokens on the way in, with each token's own `dim`).
+- `AdjacentReveal` / `advanceAdjacentReveal`: one frame of the arrival, eased by
+  `advanceFormMorph` at `geometryFormSpeed`, exactly as SHAPE eases `geometryFormed`.
+  Switching on from fully off starts at infinity (0); switching off sets the transient
+  `Settings::adjacentLeaving`, which keeps the copies drawn (`adjacentDrawn(on, leaving,
+  surface)`, read by `optionsFor` and the flat tokens) until the reveal reaches 0; a reversal
+  mid-way turns them round where they are. `main.cpp` steps it with the shape morph and
+  once more with a zero step after the interface, so a switch flipped by the ADJ button or
+  the console shows in that same frame. A switch saved on is arrived at launch (no replay).
+  Arriving or leaving copies keep the frame loop out of its idle wait.
+- `BoardRenderer::buildInstances` places, fades and dims each copy's cells and pieces by
+  its own ring's numbers; at amount 1 every number is the steady state's (the M22.2
+  instance tests still hold), with the switch off nothing changes.
+- The console `adjacent off` and the ADJ button mark arrived copies as leaving (only when
+  the switch was on).
+- M22.6 item 4: `adjacentFarZ` - while the copies are drawn, `boardCamera` raises the far
+  plane to the farthest copy cell at `kAdjacentFar` boards out (plus two units for its
+  piece). Before this the framed far plane (~90 units on an 8x8 board) cut copies arriving
+  from 12 boards out with a hard edge in a low, grazing view. Switch off, or amount 0 (no
+  copy drawn): untouched, so `--adjacent --adjacent-amount 0` still equals the plain board.
+
+Tests: `tests/unit/view/test_adjacent.cpp` (+8: offset 0 at 1, `far` at 0, monotonic;
+reveal alpha 0 at 0 and `adjacentAlpha(r)` at 1, alpha strictly falling 1 > 0.85 > 0.49 >
+0.29; the dimming settles only in the last tenth; an outer ring never starts before the
+ring inside it; corner copies along the diagonal; arriving tokens equal the steady ones at
+1; the ease in/out/reversal/speed of `advanceAdjacentReveal`; leaving copies drawn, never
+on the shape; the far plane reaches every copy at infinity);
+`tests/render/test_offscreen_render.cpp` (mid-arrival: ring 1 farther out and fainter, the
+centre unmoved, alpha = `adjacentRevealAlpha`); `tests/unit/app/test_debug_console.cpp`
+(+1, `adjacent off` sends only arrived copies away); `tests/check_adjacent.cmake` (amount 0.4
+differs from 1 and reproduces, in solid, flat, the lab and neural VR).
+`[render],[app],[view]`: 812 test cases pass; `ctest -L gui` passes; `tools/precommit.sh`
+OK.
+
+Verification (M22.6):
+1. The M22.1 property test is green on every shipped glued variant (precommit's suite).
+2. Screenshots, `out/m22.4/sheet-b-rings-seams.png`: mobius and klein mid-way and arrived
+   (the rank reversal across the seam as in M22.2's sheets), cylinder flat, torus rings 1
+   and 3, the VR picture.
+3. The reveal filmstrip `out/m22.4/sheet-a-reveal.png` (0.05, 0.1, 0.3, 0.6, 0.9, 1 in the
+   solid board, flat with its tokens, the lab and neural VR) and a 51-step sweep
+   (`sheet-d-sweep.png`, `pop-rmse.txt`): consecutive-frame RMSE rises and falls as one
+   smooth bell (peak 0.067 at amount ~0.8), no spike at either end. The only step is at
+   0 -> 0.02: ~50 pixels on the glued rails, which move to the blended pass as soon as a
+   copy exists (M22.2's rail fade) - sub-pixel edge differences, not a visible pop.
+4. Near and far: `out/m22.4/sheet-c-far.png` (low and grazing orbits at 0.02, 0.1, 0.25,
+   rings 2 and 3): the far copies read as faint specks at the horizon, nothing cut, no
+   near-plane artefact (copies travel at board height, below the eye).
+Switch-off byte identity against a HEAD build: 15 captures identical (torus solid, flat and
+shape, klein manifold, mobius flat manifold, a move, cylinder hover, lab, lab flat, lab
+deploy, lab skin, lab menu, VR space, VR picture, settings), `out/m22.4/ident/`.
+
+Deviations / decisions:
+- Spec written before M23-M25. The lab and neural VR needed nothing extra: the copies ride
+  `carryBoard` and the VR glide as M22.2 set up, and their arrival is in the instances
+  themselves. The far plane is widened in `boardCamera`, which the lab and VR paths share.
+- `e` is the smoothstep that `render::shapeEase` is, written inline in `view` (which cannot
+  include `render`).
+- The animation is eased by its own state struct (`AdjacentReveal`) rather than a bare
+  `advanceFormMorph` call, because off must keep drawing leaving copies, and on from fully
+  off must restart at infinity rather than at the stale 1 the default carries.
+  `Settings::adjacentLeaving` is new and transient.
+- The `--clip` of the toggle was done as a 51-step `--adjacent-amount` sweep: the pose is
+  a pure function of the amount and the clip path has no live switch to flip, so the sweep
+  is the same frames without a timing dependency.
+- With the spec's `(1 - e)^2` push and 12 boards out, a ring is beyond the frame of the
+  default camera for roughly the first half of its reveal, so on screen the arrival is
+  mostly the second half of the 0.5 s morph. Left as specified.
+- Copies stay pickable only once fully arrived (M22.5's decision, kept): a click on a
+  ghost in flight is not an action. `kAdjacentFrame` (camera easing to include the copies)
+  was not built; the spec makes it optional, default off.
+- Not header-only deviation: none (`view` has .cpp files).
+- Sheets: `out/m22.4/sheet-a-reveal.png`, `sheet-b-rings-seams.png`, `sheet-c-far.png`,
+  `sheet-d-sweep.png`.

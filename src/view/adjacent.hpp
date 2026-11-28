@@ -6,6 +6,7 @@
 
 #include "geometry/transform.hpp"
 #include "variant/variant.hpp"
+#include "view/camera.hpp"
 #include "view/layout.hpp"
 #include "view/snapshot.hpp"
 
@@ -39,6 +40,13 @@ struct AdjacentCopy {
 [[nodiscard]] Placement copyPlacement(const AdjacentCopy& copy, const Placement& central,
                                       const VariantSpec& v, const ViewConfig& cfg);
 
+/// The same, `amount` (0..1, the raw arrival number) of the way in (M22.4): pushed out
+/// along the copy's step by `adjacentOffset(amount, order)` boards - a corner copy along
+/// the diagonal. At 1 it is exactly the placement above.
+[[nodiscard]] Placement copyPlacement(const AdjacentCopy& copy, const Placement& central,
+                                      const VariantSpec& v, const ViewConfig& cfg,
+                                      float amount);
+
 /// The central-board cell that copy-local cell `c` shows.
 [[nodiscard]] CellId sourceCell(const AdjacentCopy& copy, CellId copyLocalCell,
                                 const VariantSpec& v);
@@ -68,6 +76,60 @@ inline constexpr std::size_t kAdjacentMaxInstances = 6400;
   return showAdjacent && !surface;
 }
 
+/// The same rule once the arrival animates (M22.4): copies still leaving after the switch
+/// went off are drawn too, until their reveal reaches zero.
+[[nodiscard]] constexpr bool adjacentDrawn(bool showAdjacent, bool leaving,
+                                           bool surface) noexcept {
+  return (showAdjacent || leaving) && !surface;
+}
+
+// M22.4 the arrival. Every pose is a pure function of one number, the raw reveal
+// `amount` (0..1) the front end eases toward the switch, so a capture at a fixed amount
+// reproduces.
+
+/// How many boards out a copy starts: "infinity" in perspective, off the frame flat.
+inline constexpr float kAdjacentFar = 12.0f;
+/// How much later each further ring starts, in `amount`: ring r waits 0.15 * (r - 1).
+inline constexpr float kAdjacentStagger = 0.15f;
+/// The last share of a copy's own reveal over which its dimming settles in.
+inline constexpr float kAdjacentMerge = 0.1f;
+
+/// A copy's own eased reveal at `amount`: smoothstep of (amount - delay) / (1 - delay),
+/// delay `kAdjacentStagger * (order - 1)`. 1 for the centre. An outer ring is never ahead
+/// of the ring inside it.
+[[nodiscard]] float adjacentReveal(float amount, int order) noexcept;
+/// How many boards out from home a copy is drawn: `kAdjacentFar * (1 - e)^2`; 0 at 1,
+/// `kAdjacentFar` at 0, never increasing. 0 for the centre.
+[[nodiscard]] float adjacentOffset(float amount, int order = 1) noexcept;
+/// A copy's opacity on the way in: `adjacentReveal * adjacentAlpha(order)`.
+[[nodiscard]] float adjacentRevealAlpha(float amount, int order) noexcept;
+/// How far a copy's colours are mixed toward the background on the way in: none until
+/// the last `kAdjacentMerge` of its reveal, then smoothly up to `kAdjacentDim`, so it
+/// settles into its steady dimming as it lands rather than dimming after it.
+[[nodiscard]] float adjacentDimAt(float amount, int order) noexcept;
+
+/// The front end's arrival state: the live reveal, whether the copies are on their way
+/// out after the switch went off, and the switch as last seen.
+struct AdjacentReveal {
+  float formed{1.0f};
+  bool leaving{false};
+  bool wasOn{false};
+};
+/// One frame of the arrival, as the shape morph eases `geometryFormed`
+/// (`advanceFormMorph`, the same `formSpeed`). Switching on from fully off starts the
+/// copies at infinity (0); switching off sets `leaving` until the reveal reaches 0; a
+/// reversal mid-way continues from where the reveal is; fully off holds the reveal at 0.
+/// A `dt` of 0 only takes in a switch flipped since the last call.
+[[nodiscard]] AdjacentReveal advanceAdjacentReveal(AdjacentReveal r, bool on, float dt,
+                                                   float formSpeed) noexcept;
+
+/// The far plane `cam` needs so that every copy within `rings` stays inside it all the way
+/// out at `kAdjacentFar` boards (M22.4/M22.6): the camera's own `farZ`, or more - the
+/// farthest copy cell from the eye, with room for a piece standing on it. Unchanged where
+/// the variant has no copies.
+[[nodiscard]] float adjacentFarZ(const OrbitCamera& cam, const std::vector<Placement>& central,
+                                 const VariantSpec& v, const ViewConfig& cfg, int rings);
+
 /// `copies` with whole outer rings dropped until every copy but the centre fits
 /// `perBoard` instances each within `maxInstances`. Order is kept.
 [[nodiscard]] std::vector<AdjacentCopy> fitAdjacent(
@@ -80,6 +142,7 @@ struct AdjacentToken {
   Placement at;           ///< where it is drawn; `at.cell` is the source cell
   std::uint8_t order{0};  ///< the copy's ring
   float alpha{0};         ///< `reveal * adjacentAlpha(order)`
+  float dim{kAdjacentDim};  ///< how far its colours mix toward the background (M22.4)
 };
 
 /// The flat view's tokens on every copy but the centre, farthest ring first. `central`
@@ -88,6 +151,14 @@ struct AdjacentToken {
 [[nodiscard]] std::vector<AdjacentToken> adjacentTokens(
     const PositionView& snapshot, const std::vector<AdjacentCopy>& copies,
     const std::vector<Placement>& central, const ViewConfig& cfg, float reveal,
+    CellId skip = kInvalidCell);
+
+/// The flat tokens on the way in (M22.4): as `adjacentTokens`, but at the raw arrival
+/// `amount`, each copy's tokens where `copyPlacement(..., amount)` puts them, with its own
+/// ring's `adjacentRevealAlpha` and `adjacentDimAt`. At 1 these are the steady tokens.
+[[nodiscard]] std::vector<AdjacentToken> arrivingTokens(
+    const PositionView& snapshot, const std::vector<AdjacentCopy>& copies,
+    const std::vector<Placement>& central, const ViewConfig& cfg, float amount,
     CellId skip = kInvalidCell);
 
 }  // namespace cb::view

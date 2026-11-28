@@ -134,6 +134,7 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
     // M22.2 the tiled view: on/off, or a ring count (which also switches it on).
     auto& s = shell.settings();
     if (w.size() > 2) return "usage: adjacent [on|off|1|2|3]";
+    const bool wasOn = s.showAdjacent;
     if (w.size() == 1) {
       s.showAdjacent = !s.showAdjacent;
     } else if (w[1] == "on" || w[1] == "off") {
@@ -144,6 +145,8 @@ std::string execute(Shell& shell, const std::string& line, const io::LabDoc* lab
     } else {
       return "usage: adjacent [on|off|1|2|3]";
     }
+    // M22.4: switched off, the copies leave rather than vanish (the front end eases them).
+    if (wasOn && !s.showAdjacent && s.adjacentFormed > 0.0f) s.adjacentLeaving = true;
     return std::string("adjacent ") + (s.showAdjacent ? "on" : "off") + ", rings " +
            std::to_string(s.adjacentRings);
   }
@@ -618,7 +621,8 @@ std::string DebugConsole::help() {
          "ripple [<cell>]          play the check ripple from a cell (default: the "
          "royal)\n"
          "seamhover <axis>|off     pin the seam-legend highlight on one axis\n"
-         "adjacent [on|off|1|2|3]  the tiled view: neighbours through glued edges\n"
+         "adjacent [on|off|1|2|3]  the tiled view: neighbours through glued edges, "
+         "arriving from far out\n"
          "script hover <cell> copy <u> <v>  mark a cell and the tiled copy under the "
          "pointer; set adjacent_pick false ignores copies\n"
          "result                     show the decided game result now\n"
