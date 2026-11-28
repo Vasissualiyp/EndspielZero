@@ -8,6 +8,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "render/overture_scene.hpp"
 #include "render/slab_skin.hpp"
 #include "view/neural_vr.hpp"
 
@@ -201,24 +202,46 @@ void carryVr(InstanceSet& set, const std::vector<view::Placement>& placements,
   }
 }
 
+bool vrCarriesLayout(const BoardOptions& options, const VariantSpec& v) {
+  return !(options.surface && !options.flat && hasPlaySurface(v));
+}
+
 std::size_t appendVrBridges(InstanceSet& set,
-                            const std::vector<view::LightBridge>& bridges, float power) {
+                            const std::vector<view::LightBridge>& bridges, float power,
+                            const view::Theme& theme,
+                            const std::optional<view::Vec3>& eye) {
   power = std::clamp(power, 0.0f, 1.0f);
   if (power <= 0.0f) return 0;
+  const view::Rgba tile = vrLightColor(theme.boardDark, theme);
+  const float cap = kVrBridgeShare * std::max({tile.r, tile.g, tile.b});
   std::vector<Instance> streaks;
   streaks.reserve(bridges.size() * kBridgeSegments);
-  for (const auto& b : bridges)
+  std::vector<float> depth;
+  for (const auto& b : bridges) {
+    const float peak = std::max({b.color.r, b.color.g, b.color.b, 1e-6f});
     for (int i = 0; i < kBridgeSegments; ++i) {
       const auto p = view::bridgePoint(b, static_cast<float>(i) / kBridgeSegments);
       const auto q = view::bridgePoint(b, static_cast<float>(i + 1) / kBridgeSegments);
-      auto streak = cylinderBetween(p, q, kBridgeCoreMetres * kCellsPerMetre);
-      streak.color[0] = std::min(1.0f, b.color.r * 1.4f) * power;
-      streak.color[1] = std::min(1.0f, b.color.g * 1.4f) * power;
-      streak.color[2] = std::min(1.0f, b.color.b * 1.4f) * power;
+      auto streak =
+          cylinderBetween(p, q, kVrBridgeWidth * kBridgeCoreMetres * kCellsPerMetre);
+      streak.color[0] = b.color.r / peak * cap * power;
+      streak.color[1] = b.color.g / peak * cap * power;
+      streak.color[2] = b.color.b / peak * cap * power;
       streak.color[3] = 1;
       streak.material = shaderMaterial(view::Material::Glow, Cut::Plank, 0);
+      if (eye) depth.push_back(view::length((p + q) * 0.5f - *eye));
       streaks.push_back(streak);
     }
+  }
+  // Fading with depth, nearest streak to farthest.
+  if (!depth.empty()) {
+    const auto [lo, hi] = std::minmax_element(depth.begin(), depth.end());
+    const float span = std::max(*hi - *lo, 1e-6f);
+    for (std::size_t k = 0; k < streaks.size(); ++k) {
+      const float f = 1.0f - (1.0f - kVrBridgeFar) * (depth[k] - *lo) / span;
+      for (int c = 0; c < 3; ++c) streaks[k].color[c] *= f;
+    }
+  }
   return insertLab(set, LabShape::Box, streaks);
 }
 

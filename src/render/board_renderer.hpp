@@ -111,6 +111,10 @@ inline constexpr float kSeamHoverDim = 0.55f;  ///< other glued axes
 /// opinions of its own about what is worth marking.
 enum class Cut : std::uint8_t { Plank, Turned };
 float shaderMaterial(view::Material material, Cut cut, float variation);
+/// M25.5/M25.6: a board colour as the implant's light. The LED fills are dark until they
+/// emit, and a hologram tile shows only its own colour, so the checker (and every cue
+/// mixed into it) is lifted, at `kVrLightOpacity`. Lattice tiles and shape patches alike.
+[[nodiscard]] view::Rgba vrLightColor(const view::Rgba& fill, const view::Theme& theme);
 
 struct BoardOptions {
   bool labMode{false};

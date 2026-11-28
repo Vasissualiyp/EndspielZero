@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 #include "io/lab_doc.hpp"
@@ -41,7 +42,24 @@ void carryVr(InstanceSet& set, const std::vector<view::Placement>& placements,
 
 /// The same bridge curves as the physical rig, sampled into thin emissive streaks.
 /// One box per segment avoids tessellating tubes for subpixel light in large layouts.
+/// M25.6: in the implant's space the streaks are faint guides, not the subject - half
+/// the physical glow core across, their seam colour normalised to `kVrBridgeShare` of the
+/// dimmest light tile (`vrLightColor(theme.boardDark)`), and, given the eye, fading to
+/// `kVrBridgeFar` of that from the nearest streak to the farthest. Every bridge and
+/// segment is still drawn.
+inline constexpr float kVrBridgeWidth = 0.5f;
+inline constexpr float kVrBridgeShare = 0.4f;
+inline constexpr float kVrBridgeFar = 0.3f;
 std::size_t appendVrBridges(InstanceSet& set,
-                            const std::vector<view::LightBridge>& bridges, float power);
+                            const std::vector<view::LightBridge>& bridges, float power,
+                            const view::Theme& theme,
+                            const std::optional<view::Vec3>& eye = std::nullopt);
+
+/// Whether this frame's boards follow the lattice layout, so a VR relayout glides them
+/// and its bridges join them (M25.6). A drawn shape is placed by its own sampling, never
+/// by the layout: carrying its mesh by lattice offsets tears it apart mid-glide, and the
+/// lattice's bridges would join cells that are not where the shape draws them (the
+/// physical rig parks its slabs and draws no bridges there either).
+[[nodiscard]] bool vrCarriesLayout(const BoardOptions& options, const VariantSpec& v);
 
 }  // namespace cb::render

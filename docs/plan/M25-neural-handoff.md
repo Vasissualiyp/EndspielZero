@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # M25 — The neural handoff: one interface, weight, flexible skin, and VR where the room runs out
 
-Status: **M25.1–M25.4 built 2026-11-21; M25.5 built and verified 2026-11-25** from play-testing after M24. Implementers: Codex
+Status: **M25.1–M25.4 built 2026-11-21; M25.5 built and verified 2026-11-25; M25.6 (readable VR) built 2026-11-28** from play-testing after M24. Implementers: Codex
 **gpt-6.1-sol** (M25.1, M25.2) and **gpt-6-astra** (M25.3, M25.4, M25.5). All on `main`,
 one slice after another, in the order below. Each slice adds its own dated Status entry
 at the end of this file.
@@ -350,7 +350,115 @@ with the existing route clearances, record the failing path and change the
 design explicitly before implementing distance-dependent clocks or changing
 the route. Do not weaken the physical limits or silently truncate a movement.
 
+## M25.6 - readable VR (2026-11-28)
+
+A follow-up to M25.5 from its own acceptance sheet (`out/m25.5/accepted-scenes.png`),
+which shows three VR scenes that do not read. Lab-off frames stay byte-identical,
+physical (non-VR) rendering is unchanged, and T6 in VR stays within M25.5's budget
+(<= 1.5x the standard lab game, M24.8 method).
+
+1. **T6: the bridges bury the board.** `appendVrBridges` gives each streak
+   `min(1, seam * 1.4)` of Glow (material 5), opaque, as wide as the physical glow core
+   (`kBridgeCoreMetres`). 256 bridges x 16 segments at full emission cover the cells,
+   seams and pieces and bloom over them. The M25.5 test checked only the material and
+   the count, never the emission against the cells. In VR the streaks become faint
+   guides; every bridge and segment is still drawn, and cells and seams are untouched:
+   - half the physical core across (`kVrBridgeWidth = 0.5`);
+   - the seam colour normalised to its peak, then scaled to `kVrBridgeShare = 0.4` of the
+     dimmest light tile's peak, `vrLightColor(theme.boardDark, theme)`;
+   - given the eye (`drawVrSpace` passes `session.camera().eye()`), a linear fade from
+     1 at the nearest streak to `kVrBridgeFar = 0.3` at the farthest. Without an eye no
+     fade; the cap still holds.
+   `render::vrLightColor(fill, theme)` is the existing lift of the lattice VR tile
+   (`fill * 2 + ember * 0.10`, alpha `kVrLightOpacity`), moved out of
+   `buildInstances` unchanged so the cap and item 2 share it.
+2. **Hyper4 SHAPE: a faint, stretched, see-through wedge.** Two causes, neither the
+   M25.4 flexible skin (VR draws through `labGameAny && !labGame`, so `slabSkin` is off
+   and the plain bent patches are used):
+   - the surface light pass sets only the fill's alpha. VR lattice tiles are lifted
+     (item 1's `vrLightColor`); the shape's patches keep the raw LED fill, which is dark
+     until it emits, so the light reads at about half the flat layout's luminance. In
+     `emitPatch`/`emitFlex`, when `lightPass && options_.vrLight`, use
+     `vrLightColor(fill)`. Rails, rims, ghost alpha and every non-VR path unchanged;
+   - the "stretch" in a settled frame is the tesseract immersion's own default pose:
+     lab off and physical draw the same wedge (`out/m25.6/diag.png`). In VR it is made
+     worse by the VR carry: `drawVrSpace` glides every instance and surface vertex by
+     the *lattice* layout's offsets after AXES, but a shape is sampled by
+     `PlaySurface::build(v, pose)`, independent of the layout, so mid-glide its patches
+     scatter across the view (`out/m25.6/diag-glide.png`). M25.5's carry test used one
+     uniform offset, under which any mesh moves rigidly. Add
+     `render::vrCarriesLayout(options, v)`, false when a surface is drawn
+     (`surface && !flat && hasPlaySurface(v)`); `drawVrSpace` then skips the carry and
+     the lattice bridges, as the physical rig draws no bridges while parked for a
+     shape view.
+3. **Forced-VR torus: pieces off the ring?** Pieces carry by their own cell
+   (`Instance::fxCell`), the mesh by the cell in its vertex tag, so a per-cell carry
+   moves both identically; a settled frame has no carry, and picking samples the same
+   `PlaySurface`. The floating look is item 2's dark light tiles: the tube vanishes and
+   only the pieces read. Prove it with a non-uniform per-cell carry test and captures
+   of the fixed ring from the default, a low side and a rotated side angle.
+
+Tests first, in `tests/render/test_neural_vr.cpp` (`[render][vr][quiet]`): T6 streaks
+keep their count, have a cross-section <= a quarter of the physical core's, peak <= half
+the dimmest VR tile, and the farthest streak's gain is < half the nearest's; torus and
+hyper4 shape faces have the flat layout's median luminance (0.9-1.1x) at
+>= `kVrLightOpacity`; `vrCarriesLayout` per variant and mode; the torus piece/mesh
+carry agreement. Sheets in `out/m25.6/`: before/after for each scene, the T6 orbit
+(underside, oblique, hover) and lab-off. Re-measure T6 against standard.
+Commit: `render: readable neural VR - quiet bridges, shape and torus in VR (M25.6)`.
+
 ## Status
+
+### M25.6 - built and verified (2026-11-28)
+
+Reproduced all three scenes from the M25.5 sheet with the HEAD build
+(`out/m25.6/before.png`, `diag.png`, `diag-glide.png`), wrote the section above, then
+the four `[quiet]` cases. Red (`red.log`, `red-detail.log`, `red-detail2.log`): streak
+peak 1.0 against a 0.238 cap and a cross-section 4x too large; shape faces at median
+luma 0.160 against the flat tiles' 0.356; `vrCarriesLayout` true on a drawn shape. The
+piece-carry case passed on arrival: it is the item 3 proof, not a regression.
+
+Built: quiet streaks (`kVrBridgeWidth`/`kVrBridgeShare`/`kVrBridgeFar`, eye-distance
+fade), `vrLightColor` shared by lattice tiles, shape patches and the bridge cap, and
+`vrCarriesLayout` gating the VR glide and lattice bridges in `drawVrSpace`. All 27 VR
+cases pass (`green.log`). AGENTS.md's neural-VR row names the new functions.
+
+Visual acceptance, all viewed: `t6-before-after.png` (default, seam hover x1 and a 3x /
+2x-capture crop of the piece corner), `t6-orbit.png` (underside, oblique, an underside
+3x crop and underside with hover), `hyper4-shape-before-after.png` (default, orbit,
+an AXES glide at 0.35 s, flat VR unchanged), `torus-forced-before-after.png` (default,
+low side and rotated side, top, physical), `lab-off.png`, plus `after.png`. T6's cells,
+4x4 boards, seams, hover and CHECK frame read; the bridges remain as faint arcs (visible
+in the underside crop). The pieces are no longer covered, but at the default framing of
+256 boards a piece is only a few pixels (true before M25.6 as well); no framing change
+was made. Hyper4 SHAPE is a lit tile surface with its pieces and scaffold and stays whole
+through an AXES glide. The torus ring is visible and every piece stands on it from all
+three angles: the pieces were never misplaced.
+
+Constraints: ten lab-off pairs byte-identical against HEAD captures; physical standard,
+cube5 and formed torus lab games byte-identical; hyper4 flat VR (no shape, no bridges)
+byte-identical, confirming the `vrLightColor` move is exact (`laboff.log`).
+Performance (M24.8 method, lavapipe, dev, 1280x720, manifold, lab/post/UI-auto,
+intensity 1, one warm-up then three 30-frame runs each, interleaved; `perf.log`):
+
+| Case | Samples, ms/frame | Median |
+|---|---|---:|
+| Standard physical lab | 88.276, 96.085, 87.907 | 88.276 |
+| T6 VR | 113.927, 113.613, 117.105 | 113.927 |
+| Hyper4 VR | 53.326, 53.282, 51.549 | 53.282 |
+
+T6 is **1.291x** standard (limit 1.5x); hyper4 stays below M24.8's 102.5 ms.
+
+Gates (through `g.sh`, seven build jobs, tests and captures serial, after the last
+source edit): `clang-format --dry-run --Werror` clean on every changed C++ file
+(`format.log`); `tools/precommit.sh` printed **`precommit: OK`** (`precommit.log`);
+`[render],[app],[view]` **781 cases / 19,110,510 assertions** passed
+(`render-app-view.log`); `ctest -L gui` **59/59 passed** in 542.57 s (`gui.log`).
+No staging or commit was performed.
+
+Deviations: none in code placement (no header-only module touched). The `zoom` script
+is reframed away by captures, so the close piece views are crops of a 2560x1440 capture.
+The T6 piece size is recorded above rather than changed.
 
 ### M25.3b — built and verified (2026-11-27)
 

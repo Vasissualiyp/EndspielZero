@@ -111,6 +111,13 @@ const MeshRange& opaqueBoardRange(const MeshLibrary& meshes, std::size_t shape,
   return meshes.ranges[shape];
 }
 
+view::Rgba vrLightColor(const view::Rgba& fill, const view::Theme& theme) {
+  const view::Rgba led = theme.ember;
+  return {std::min(1.0f, fill.r * 2.0f + led.r * 0.10f),
+          std::min(1.0f, fill.g * 2.0f + led.g * 0.10f),
+          std::min(1.0f, fill.b * 2.0f + led.b * 0.10f), kVrLightOpacity};
+}
+
 float shaderMaterial(view::Material m, Cut cut, float variation) {
   if (m == view::Material::Wood)
     return (cut == Cut::Plank ? 2.0f : 6.0f) + std::clamp(variation, 0.0f, 0.99f);
@@ -1414,7 +1421,9 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       fxCellPlus = patch.cell + 1;
       view::Rgba fill = fillFor(patch.cell);
       // Light completes what the skin cannot: the cell's own colour as a hologram cell.
+      // The implant lifts it as it does the flat layout's tiles (M25.6).
       if (lightPass) fill.a = allLight ? lightOpacity : 0.7f;
+      if (lightPass && options_.vrLight) fill = vrLightColor(fill, theme_);
       // An LED capture: the captured cell's own emitters switch to the capture colour and
       // settle back through the per-emitter transition (no slab drawn over the board).
       view::Rgba shown = fill;
@@ -1653,6 +1662,7 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       fxCellPlus = tile.cell + 1;
       view::Rgba fill = fillFor(tile.cell);
       if (lightPass) fill.a = allLight ? lightOpacity : 0.7f;
+      if (lightPass && options_.vrLight) fill = vrLightColor(fill, theme_);
       view::Rgba shown = fill;
       prevNow = {0.0f, 0.0f, 0.0f, -1.0f};
       bool pulseCell = false;
@@ -2335,13 +2345,8 @@ InstanceSet BoardRenderer::buildInstances(const view::PositionView& p,
       cell.material = shaderMaterial(view::Material::Hologram, Cut::Plank, 0.0f);
       cell.panelSignal[0] = cell.panelSignal[1] = cell.panelSignal[3] = 0.0f;
       cell.panelSignal[2] = -1.0f;
-      // The checker (and every cue mixed into it) lifted into light: the LED colours are
-      // dark until they emit, and a hologram tile only shows its own colour.
-      const view::Rgba led = theme_.ember;
-      cell.color[0] = std::min(1.0f, fill.r * 2.0f + led.r * 0.10f);
-      cell.color[1] = std::min(1.0f, fill.g * 2.0f + led.g * 0.10f);
-      cell.color[2] = std::min(1.0f, fill.b * 2.0f + led.b * 0.10f);
-      cell.color[3] = kVrLightOpacity;
+      // The checker (and every cue mixed into it) lifted into light.
+      toFloat4(vrLightColor(fill, theme_), cell.color);
     } else if (theme_.materials.cells == view::Material::Led) {
       cell.panelSignal[0] = panelSeed(pl.cell);
       cell.panelSignal[2] = isCue(pl.cell) ? -1.0f : 1.0f;

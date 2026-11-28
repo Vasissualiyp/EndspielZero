@@ -2,6 +2,8 @@
 //
 // M25.5 the neural VR, render side: the rack's bays as authored, the boards as light, the
 // stand-in slab and its neural code, and the boards' glide through a VR relayout.
+// M25.6: the bridges are quiet guides, a shape is lit like the flat layout, and a shape
+// never rides the lattice layout's glide.
 #include <catch2/catch_test_macros.hpp>
 #ifdef CB_HAVE_VULKAN
 #include <algorithm>
@@ -11,12 +13,15 @@
 #include <filesystem>
 #include <numeric>
 #include <set>
+#include <string_view>
 
 #include "app/session.hpp"
 #include "render/board_renderer.hpp"
 #include "render/lab_rig.hpp"
 #include "render/neural_vr.hpp"
+#include "render/overture_scene.hpp"
 #include "render/play_surface.hpp"
+#include "render/slab_skin.hpp"
 #include "support/variants.hpp"
 #include "view/neural_vr.hpp"
 
@@ -252,12 +257,187 @@ TEST_CASE("neural vr: bridges are light streaks without cylindrical hardware",
                                           view::Theme::manifold());
   REQUIRE_FALSE(bridges.empty());
   InstanceSet set;
-  CHECK(appendVrBridges(set, bridges, 1) == bridges.size() * kBridgeSegments);
+  const auto theme = view::Theme::manifold();
+  CHECK(appendVrBridges(set, bridges, 1, theme) == bridges.size() * kBridgeSegments);
   CHECK(set.labBatches[static_cast<std::size_t>(LabShape::Cylinder)].count == 0);
   CHECK(set.labFileBatches.empty());
   for (const auto& i : set.lab) CHECK(static_cast<int>(i.material) == 5);
   InstanceSet dark;
-  CHECK(appendVrBridges(dark, bridges, 0) == 0);
+  CHECK(appendVrBridges(dark, bridges, 0, theme) == 0);
+}
+
+namespace {
+float peak(const float* rgb) {
+  return std::max({rgb[0], rgb[1], rgb[2]});
+}
+float luma(const float* rgb) {
+  return .2126f * rgb[0] + .7152f * rgb[1] + .0722f * rgb[2];
+}
+/// The two thin axes of a streak's box: its cross-section.
+float crossSection(const Instance& i) {
+  float s[3]{i.scale[0], i.scale[1], i.scale[2]};
+  std::sort(s, s + 3);
+  return s[0] * s[1];
+}
+}  // namespace
+
+TEST_CASE("neural vr M25.6: bridges are faint guides under the cells, all still drawn",
+          "[render][vr][quiet]") {
+  auto session = app::Session::create(test::loadVariant("t6"));
+  REQUIRE(session);
+  auto& s = **session;
+  const auto theme = view::Theme::manifold();
+  const auto bridges =
+      view::lightBridges(s.variant(), s.viewConfig(), s.placements(), theme);
+  REQUIRE_FALSE(bridges.empty());
+  // The dimmest light tile the implant draws for this game.
+  BoardRenderer renderer;
+  renderer.setTheme(theme);
+  BoardOptions o;
+  o.vrLight = true;
+  renderer.setOptions(o);
+  const auto board = renderer.buildInstances(s.snapshot(), s.viewConfig(), &s.seams());
+  float dimmest = 1e9f;
+  for (const auto& i : board.instances)
+    if (static_cast<int>(i.material) == 4 && i.fxCell > 0 &&
+        static_cast<int>(i.fxCell) % 2 == 0)
+      dimmest = std::min(dimmest, peak(i.color));
+  REQUIRE(dimmest < 1e9f);
+  CHECK(peak(vrLightColor(theme.boardDark, theme).array().data()) == dimmest);
+
+  const view::Vec3 eye = s.camera().eye();
+  InstanceSet set;
+  REQUIRE(appendVrBridges(set, bridges, 1, theme, eye) ==
+          bridges.size() * kBridgeSegments);
+  // Thinner than the physical rig's glow core.
+  const auto core =
+      cylinderBetween({0, 0, 0}, {1, 0, 0}, kBridgeCoreMetres * kCellsPerMetre);
+  float nearest = 1e9f, farthest = 0;
+  float nearGain = 0, farGain = 0;
+  for (std::size_t k = 0; k < set.lab.size(); ++k) {
+    const auto& streak = set.lab[k];
+    CHECK(crossSection(streak) <= .25f * crossSection(core) + 1e-9f);
+    // Capped well below the cell emission: never more than half the dimmest tile.
+    CHECK(peak(streak.color) <= .5f * dimmest);
+    // ...and fading with depth: the farthest streak is the faintest relative to its
+    // own seam colour.
+    const auto& c = bridges[k / kBridgeSegments].color;
+    const float base = std::max({c.r, c.g, c.b});
+    const float gain = peak(streak.color) / base;
+    const view::Vec3 at{streak.center[0], streak.center[1], streak.center[2]};
+    const float d = view::length(at - eye);
+    if (d < nearest) nearest = d, nearGain = gain;
+    if (d > farthest) farthest = d, farGain = gain;
+  }
+  CHECK(farGain < .5f * nearGain);
+  // Without an eye there is no depth to fade by; the cap still holds.
+  InstanceSet flat;
+  REQUIRE(appendVrBridges(flat, bridges, 1, theme) == bridges.size() * kBridgeSegments);
+  for (const auto& streak : flat.lab) CHECK(peak(streak.color) <= .5f * dimmest);
+}
+
+TEST_CASE("neural vr M25.6: a shape in VR is lit like the flat layout's light tiles",
+          "[render][vr][quiet]") {
+  const auto theme = view::Theme::manifold();
+  for (const char* name : {"torus", "hyper4"}) {
+    CAPTURE(name);
+    auto session = app::Session::create(test::loadVariant(name));
+    REQUIRE(session);
+    auto& s = **session;
+    BoardRenderer renderer;
+    renderer.setTheme(theme);
+    BoardOptions o;
+    o.vrLight = true;
+    renderer.setOptions(o);
+    const auto lattice =
+        renderer.buildInstances(s.snapshot(), s.viewConfig(), &s.seams());
+    std::vector<float> tiles;
+    for (const auto& i : lattice.instances)
+      if (static_cast<int>(i.material) == 4 && i.fxCell > 0 &&
+          static_cast<int>(i.fxCell) % 2 == 0)
+        tiles.push_back(luma(i.color));
+    REQUIRE_FALSE(tiles.empty());
+    o.surface = true;
+    if (std::string_view(name) == "hyper4") o.stackedLight = kStackedLightOpacity;
+    renderer.setOptions(o);
+    const auto shape = renderer.buildInstances(s.snapshot(), s.viewConfig(), &s.seams());
+    // The faces (positive tag) of every light patch.
+    std::vector<float> faces;
+    for (const auto& v : shape.surfaceVertices)
+      if (v.panelCoord[2] > 0.0f) {
+        faces.push_back(luma(v.color));
+        // Light at the tiles' opacity; a seam rail mixes toward its opaque colour.
+        CHECK(v.color[3] >= kVrLightOpacity);
+      }
+    REQUIRE_FALSE(faces.empty());
+    const auto median = [](std::vector<float> x) {
+      std::nth_element(x.begin(), x.begin() + static_cast<long>(x.size() / 2), x.end());
+      return x[x.size() / 2];
+    };
+    // The same light as the flat layout's tiles, not the LED fill they emit through.
+    CHECK(median(faces) >= .9f * median(tiles));
+    CHECK(median(faces) <= 1.1f * median(tiles));
+  }
+}
+
+TEST_CASE("neural vr M25.6: a drawn shape does not ride the lattice layout's glide",
+          "[render][vr][quiet]") {
+  BoardOptions o;
+  o.vrLight = true;
+  for (const char* name : {"standard", "torus", "hyper4", "t6"}) {
+    CAPTURE(name);
+    const auto v = test::loadVariant(name);
+    o.surface = false;
+    o.flat = false;
+    CHECK(vrCarriesLayout(o, v));
+    o.surface = true;
+    // A shape is placed by its own sampling, never by the layout: nothing to carry.
+    CHECK(vrCarriesLayout(o, v) == !hasPlaySurface(v));
+    o.flat = true;  // the 2-D picture wins over SHAPE, as in the renderer
+    CHECK(vrCarriesLayout(o, v));
+  }
+}
+
+TEST_CASE("neural vr M25.6: pieces on a shape ride their own cell's carry",
+          "[render][vr][quiet]") {
+  // M25.6 item 3: pieces carry by their cell exactly as the mesh does, so the forced-VR
+  // torus's pieces cannot leave their squares (a non-uniform offset, unlike M25.5's).
+  auto session = app::Session::create(test::loadVariant("torus"));
+  REQUIRE(session);
+  auto& s = **session;
+  BoardRenderer renderer;
+  renderer.setTheme(view::Theme::manifold());
+  BoardOptions o;
+  o.vrLight = true;
+  o.surface = true;
+  renderer.setOptions(o);
+  const auto still = renderer.buildInstances(s.snapshot(), s.viewConfig(), &s.seams());
+  std::vector<view::Vec3> offset(s.snapshot().cellCount());
+  for (std::size_t c = 0; c < offset.size(); ++c)
+    offset[c] = {static_cast<float>(c % 7), static_cast<float>(c % 3) * .5f, 0.25f};
+  auto moved = still;
+  carryVr(moved, s.placements(), offset);
+  std::vector<int> seen(offset.size(), 0);
+  for (std::size_t k = 0; k < still.surfaceVertices.size(); ++k) {
+    const float tag = std::abs(still.surfaceVertices[k].panelCoord[2]);
+    if (tag < 3.0f) continue;
+    const auto cell = static_cast<std::size_t>((tag - 1.0f) * .5f) - 1;
+    CHECK(std::abs(moved.surfaceVertices[k].pos[0] - still.surfaceVertices[k].pos[0] -
+                   offset[cell].x) < 1e-4f);
+    seen[cell] = 1;
+  }
+  int pieces = 0;
+  for (std::size_t k = 0; k < still.instances.size(); ++k) {
+    const auto& a = still.instances[k];
+    if (a.fxCell <= 0 || static_cast<int>(a.fxCell) % 2 == 0) continue;
+    const auto cell = static_cast<std::size_t>(a.fxCell) / 2 - 1;
+    REQUIRE(seen[cell] == 1);
+    CHECK(moved.instances[k].center[0] == a.center[0] + offset[cell].x);
+    CHECK(moved.instances[k].center[1] == a.center[1] + offset[cell].y);
+    CHECK(moved.instances[k].center[2] == a.center[2] + offset[cell].z);
+    ++pieces;
+  }
+  CHECK(pieces == 32);
 }
 TEST_CASE("neural vr: opaque lattice tiles draw only their original top face",
           "[render][vr][vrlightmesh]") {

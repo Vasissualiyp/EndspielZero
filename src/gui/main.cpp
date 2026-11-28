@@ -1573,7 +1573,9 @@ void drawVrSpace(const VrFrame& vr, const app::Shell& shell, const render::Ui& u
   const float age = !gCapturing          ? static_cast<float>(gRigNow - t.moveAt)
                     : gRelayoutT >= 0.0f ? gRelayoutT
                                          : view::kVrRelayoutSeconds;
-  if (!t.moveFrom.empty() && age >= 0.0f && age < view::kVrRelayoutSeconds) {
+  // A drawn shape is placed by its own sampling, not the layout (M25.6): no glide.
+  const bool follows = render::vrCarriesLayout(renderer.options(), session.variant());
+  if (follows && !t.moveFrom.empty() && age >= 0.0f && age < view::kVrRelayoutSeconds) {
     const std::size_t cells = session.snapshot().cellCount();
     std::vector<view::Vec3> offset(cells);
     const auto drawn = view::vrRelayoutPlacements(t.moveFrom, now, age, intensity);
@@ -1590,7 +1592,7 @@ void drawVrSpace(const VrFrame& vr, const app::Shell& shell, const render::Ui& u
   const view::Bounds b = view::boundsOf(now);
   o.lucidFloorZ = b.minZ - 6.0f;
   renderer.setOptions(o);
-  if (picture || !ui.bridges()) return;
+  if (picture || !ui.bridges() || !follows) return;
   float power = 1;
   if (!instances.cellFx.empty()) {
     power = 0;
@@ -1598,14 +1600,17 @@ void drawVrSpace(const VrFrame& vr, const app::Shell& shell, const render::Ui& u
       power += instances.cellFx[c].power * instances.cellFx[c].flicker;
     power /= static_cast<float>(instances.cellFx.size() - 1);
   }
+  // Quiet guides that fade with depth from the camera the boards are drawn with.
+  const view::Vec3 eye = session.camera().eye();
   // Rebuild from the drawn placements so endpoints ride their moving boards.
   if (!t.moveFrom.empty() && age >= 0 && age < view::kVrRelayoutSeconds) {
     const auto drawn = view::vrRelayoutPlacements(t.moveFrom, now, age, intensity);
     const auto bridges = view::lightBridges(session.variant(), session.viewConfig(),
                                             drawn, renderer.theme());
-    (void)render::appendVrBridges(instances, bridges, power);
+    (void)render::appendVrBridges(instances, bridges, power, renderer.theme(), eye);
   } else {
-    (void)render::appendVrBridges(instances, session.lightBridges(), power);
+    (void)render::appendVrBridges(instances, session.lightBridges(), power,
+                                  renderer.theme(), eye);
   }
 }
 
